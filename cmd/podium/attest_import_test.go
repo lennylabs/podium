@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"math"
 	"os"
 	"path/filepath"
 	"strings"
@@ -271,20 +272,27 @@ func TestAttestImport_Refusals(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(dir, "skills", ".podium")); !os.IsNotExist(err) {
 		t.Errorf("a refused import created the attestation directory: %v", err)
 	}
-	// A file where the directory belongs fails the write.
+	// A file where the directory belongs is no attestation directory.
 	writeAttestLayer(t, dir, map[string]string{"skills/.podium": "file"})
-	if code, _, stderr := runImportT(t, good, "--dir", dir, "--root", "skills"); code != 1 || !strings.Contains(stderr, "create") {
+	if code, _, stderr := runImportT(t, good, "--dir", dir, "--root", "skills"); code != 1 || !strings.Contains(stderr, "is a symbolic link or no directory") {
 		t.Errorf("blocked directory = %d, stderr %q", code, stderr)
 	}
-	// --no-prune reads no layer, so a missing layer root writes the bundle.
+	// --no-prune reads no layer, so a layer root with no package takes the
+	// bundle, and a missing layer root, whose .podium cannot be created,
+	// exits 1.
 	d := t.TempDir()
-	if code, _, stderr := runImportT(t, good, "--dir", d, "--root", "x", "--no-prune"); code != 0 {
-		t.Errorf("--no-prune without a layer = %d, stderr %s", code, stderr)
+	if code, _, stderr := runImportT(t, good, "--dir", d, "--no-prune"); code != 0 {
+		t.Errorf("--no-prune without packages = %d, stderr %s", code, stderr)
+	}
+	if code, _, stderr := runImportT(t, good, "--dir", d, "--root", "x", "--no-prune"); code != 1 || !strings.Contains(stderr, "create") {
+		t.Errorf("--no-prune without a layer root = %d, stderr %s", code, stderr)
 	}
 }
 
-// Spec: §13.12 — the limits take their defaults when unset and refuse a
-// value that is not a decimal integer of at least 1.
+// Spec: §13.12 — the limits take their defaults when unset, admit plain
+// digits up to 1 GiB and 4096, and refuse a sign, a leading zero, another
+// notation, and a value above the bound, such as the largest int64, which
+// overflowed the read limit.
 func TestReadAttestLimits(t *testing.T) {
 	l, err := readAttestLimits(func(string) string { return "" })
 	if err != nil || l.maxBytes != attest.DefaultMaxBundleBytes || l.maxBundles != attest.DefaultMaxBundles {
@@ -294,7 +302,14 @@ func TestReadAttestLimits(t *testing.T) {
 	if l, err := readAttestLimits(func(k string) string { return env[k] }); err != nil || l.maxBytes != 2048 || l.maxBundles != 3 {
 		t.Fatalf("set = %+v, %v", l, err)
 	}
-	for _, v := range []string{"0", "-1", "1k", "99999999999999999999"} {
+	at := map[string]string{attestMaxBytesEnv: "1073741824", attestMaxBundlesEnv: "4096"}
+	if l, err := readAttestLimits(func(k string) string { return at[k] }); err != nil || l.maxBytes != 1<<30 || l.maxBundles != 4096 {
+		t.Fatalf("the largest values = %+v, %v", l, err)
+	}
+	if readLimit(math.MaxInt64) != math.MaxInt64 || readLimit(5) != 6 {
+		t.Fatal("readLimit overflows or does not add one")
+	}
+	for _, v := range []string{"0", "-1", "+5", "05", "1k", "1e3", "0x10", "9223372036854775807", "99999999999999999999", "1073741825"} {
 		for _, k := range []string{attestMaxBytesEnv, attestMaxBundlesEnv} {
 			if _, err := readAttestLimits(func(n string) string {
 				if n == k {
@@ -305,5 +320,36 @@ func TestReadAttestLimits(t *testing.T) {
 				t.Errorf("%s=%s accepted", k, v)
 			}
 		}
+	}
+}
+
+// Spec: §7.3.5 — an imported bundle whose DSSE signature does not verify
+// under its own leaf's key is refused before any write, so it removes no
+// valid bundle of the signer its certificate names; a bundle with no
+// certificate is refused too. A written bundle that lists no current
+// subject draws a warning.
+func TestAttestImport_SelfSignatureAndUnmatchedWarning(t *testing.T) {
+	dir := importLayer(t)
+	h := sh.New(t)
+	subs := layerSubjectsOf(t, dir, "skills")
+	placeBundles(t, dir, "skills", ghBundleOf(t, h, importSLSA, subs))
+	attDir := filepath.Join(dir, "skills", ".podium", "attestations")
+	before := bundleFiles(t, attDir)
+	for name, raw := range map[string][]byte{
+		"bad signature":  ghBundleOf(t, h, importSLSA, subs, sh.WithBadSignature()),
+		"no certificate": ghBundleOf(t, h, importSLSA, subs, sh.WithoutCertificate()),
+	} {
+		code, stdout, stderr := runImportT(t, writeInput(t, raw), "--dir", dir, "--root", "skills")
+		if code != 1 || stdout != "" || !strings.Contains(stderr, "attestation bundle refused") {
+			t.Errorf("%s: exit %d, stdout %q, stderr %q", name, code, stdout, stderr)
+		}
+	}
+	if got := bundleFiles(t, attDir); strings.Join(got, ",") != strings.Join(before, ",") {
+		t.Fatalf("a refused import changed the directory: %v", got)
+	}
+	stale := []sh.Subject{{Name: "team/gone@1.0.0", SHA256: strings.Repeat("1", 64)}}
+	code, _, stderr := runImportT(t, writeInput(t, ghBundleOf(t, h, importScan, stale)), "--dir", dir, "--root", "skills")
+	if code != 0 || !strings.Contains(stderr, "lists no subject of the layer") {
+		t.Errorf("unmatched import: exit %d, stderr %q", code, stderr)
 	}
 }

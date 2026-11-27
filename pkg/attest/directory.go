@@ -31,6 +31,12 @@ const (
 	DefaultMaxBundleBytes = 1 << 20
 	// DefaultMaxBundles is the default of PODIUM_ATTESTATION_MAX_BUNDLES.
 	DefaultMaxBundles = 64
+	// MaxBundleBytesLimit is the largest PODIUM_ATTESTATION_MAX_BYTES, 1
+	// GiB. A bundle file is read into memory whole, and the bound also keeps
+	// the read limit, one byte above the setting, from overflowing.
+	MaxBundleBytesLimit = 1 << 30
+	// MaxBundlesLimit is the largest PODIUM_ATTESTATION_MAX_BUNDLES.
+	MaxBundlesLimit = 4096
 )
 
 // ErrNoBundle reports a bundle file that holds no JSON value.

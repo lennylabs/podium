@@ -40,3 +40,26 @@ func TestInspectAttestationBundle(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §7.3.5 — an imported bundle's signature is checked under its own
+// leaf's key with no trusted root: a valid bundle of a root that nothing
+// trusts passes, and a bad signature, a bundle with no certificate, and a
+// bundle outside the format are refused.
+func TestCheckAttestationSelfSignature(t *testing.T) {
+	h := sh.New(t)
+	if err := sign.CheckAttestationSelfSignature(ghBundle(t, h)); err != nil {
+		t.Fatalf("valid bundle: %v", err)
+	}
+	for name, c := range map[string]struct {
+		raw    []byte
+		reason sign.AttestationReason
+	}{
+		"bad signature":  {ghBundle(t, h, sh.WithBadSignature()), sign.ReasonSignature},
+		"no certificate": {ghBundle(t, h, sh.WithoutCertificate()), sign.ReasonChain},
+		"not a bundle":   {[]byte("x"), sign.ReasonParse},
+	} {
+		t.Run(name, func(t *testing.T) {
+			wantReason(t, sign.CheckAttestationSelfSignature(c.raw), c.reason)
+		})
+	}
+}

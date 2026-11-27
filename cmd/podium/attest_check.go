@@ -155,9 +155,15 @@ func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequir
 			return err
 		}
 	}
-	bundles, err := readBundleDir(attestationDir(opts.layer.dir, opts.layer.root), opts.limits)
+	attDir, exists, err := attestationDir(opts.layer.dir, opts.layer.root, false)
 	if err != nil {
 		return err
+	}
+	var bundles []dirBundle
+	if exists {
+		if bundles, err = readBundleDir(attDir, opts.limits); err != nil {
+			return err
+		}
 	}
 	counted, err := countBundles(ctx, bundles, reqs, insts, opts.limits, r, stderr)
 	if err != nil {

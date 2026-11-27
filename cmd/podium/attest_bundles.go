@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,32 +32,36 @@ type attestLimits struct {
 
 // readAttestLimits reads PODIUM_ATTESTATION_MAX_BYTES and
 // PODIUM_ATTESTATION_MAX_BUNDLES. An unset or blank value takes the default,
-// and a value that is not a decimal integer of at least 1 is an error the
-// commands report as a usage error.
+// and a value that is not plain decimal digits in the setting's range is an
+// error the commands report as a usage error.
 //
 // Spec: §13.12
 func readAttestLimits(getenv func(string) string) (attestLimits, error) {
-	maxBytes, err := positiveSetting(getenv, attestMaxBytesEnv, attest.DefaultMaxBundleBytes)
+	maxBytes, err := boundedSetting(getenv, attestMaxBytesEnv, attest.DefaultMaxBundleBytes, attest.MaxBundleBytesLimit)
 	if err != nil {
 		return attestLimits{}, err
 	}
-	maxBundles, err := positiveSetting(getenv, attestMaxBundlesEnv, attest.DefaultMaxBundles)
+	maxBundles, err := boundedSetting(getenv, attestMaxBundlesEnv, attest.DefaultMaxBundles, attest.MaxBundlesLimit)
 	if err != nil {
 		return attestLimits{}, err
 	}
 	return attestLimits{maxBytes: maxBytes, maxBundles: int(maxBundles)}, nil
 }
 
-// positiveSetting parses the setting name as a decimal integer of at least
-// 1 that fits an int, or returns def when it is unset or blank.
-func positiveSetting(getenv func(string) string, name string, def int64) (int64, error) {
+// plainDecimal is a decimal integer of at least 1 written in digits alone,
+// with no sign and no leading zero.
+var plainDecimal = regexp.MustCompile(`\A[1-9][0-9]*\z`)
+
+// boundedSetting parses the setting name as a decimal integer from 1 to
+// most, or returns def when it is unset or blank.
+func boundedSetting(getenv func(string) string, name string, def, most int64) (int64, error) {
 	raw := strings.TrimSpace(getenv(name))
 	if raw == "" {
 		return def, nil
 	}
-	n, err := strconv.ParseInt(raw, 10, strconv.IntSize)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%s must be a decimal integer of at least 1, got %q", name, raw)
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if !plainDecimal.MatchString(raw) || err != nil || n > most {
+		return 0, fmt.Errorf("%s must be a decimal integer from 1 to %d, written in digits with no sign or leading zero, got %q", name, most, raw)
 	}
 	return n, nil
 }
@@ -150,7 +156,7 @@ func readDirBundle(p string, limits attestLimits) (dirBundle, error) {
 	if err != nil || !os.SameFile(before, after) {
 		return b, fmt.Errorf("read %s: the file changed while it was read", p)
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, limits.maxBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(f, readLimit(limits.maxBytes)))
 	if err != nil {
 		return b, fmt.Errorf("read %s: %w", p, err)
 	}
@@ -163,8 +169,50 @@ func readDirBundle(p string, limits attestLimits) (dirBundle, error) {
 	return b, nil
 }
 
+// readLimit is one byte above maxBytes, so a read tells a file at the
+// limit from a larger one, without overflowing at the largest int64.
+func readLimit(maxBytes int64) int64 {
+	if maxBytes == math.MaxInt64 {
+		return math.MaxInt64
+	}
+	return maxBytes + 1
+}
+
+// errAttestationDirEntry reports a symbolic link or an entry other than a
+// directory at .podium or .podium/attestations.
+var errAttestationDirEntry = errors.New("is a symbolic link or no directory; the attestation directory must lie inside the layer root")
+
 // attestationDir returns the attestation directory of the layer root that
-// dir and root give.
-func attestationDir(dir, root string) string {
-	return filepath.Join(dir, filepath.FromSlash(root), filepath.FromSlash(attest.AttestationDir))
+// dir and root give. It refuses a symbolic link or an entry other than a
+// directory at .podium or .podium/attestations, so a command never reads,
+// writes, or removes a file outside the layer root through one (§4.7.11).
+// With create, it creates each absent component with Mkdir, which follows no
+// link at the new name, and checks the component again afterwards, so a
+// link placed there in between is refused too. Without create, exists is
+// false when a component is absent. The check and the later file operations
+// are separate calls, so a party who can replace the directory between them
+// is outside what the check closes.
+//
+// Spec: §4.7.11, §7.3.5
+func attestationDir(dir, root string, create bool) (path string, exists bool, err error) {
+	path = filepath.Join(dir, filepath.FromSlash(root))
+	for _, seg := range strings.Split(attest.AttestationDir, "/") {
+		path = filepath.Join(path, seg)
+		info, err := os.Lstat(path)
+		if errors.Is(err, fs.ErrNotExist) && create {
+			if err := os.Mkdir(path, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+				return "", false, fmt.Errorf("create %s: %w", path, err)
+			}
+			info, err = os.Lstat(path)
+		}
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return filepath.Join(dir, filepath.FromSlash(root), filepath.FromSlash(attest.AttestationDir)), false, nil
+		case err != nil:
+			return "", false, fmt.Errorf("read %s: %w", path, err)
+		case !info.IsDir():
+			return "", false, fmt.Errorf("%s %w", path, errAttestationDirEntry)
+		}
+	}
+	return path, true, nil
 }
