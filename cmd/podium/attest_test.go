@@ -337,3 +337,45 @@ func TestOneLine(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §7.3.5 — a layer file the command cannot read, an --out it cannot
+// list, a stale file it cannot remove, and a file it cannot write each exit 1.
+func TestAttest_ReadAndWriteFailures(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("file permissions do not bind root")
+	}
+	dir := t.TempDir()
+	writeAttestLayer(t, dir, map[string]string{"team/a/ARTIFACT.md": attestRuleMD, "team/DOMAIN.md": "---\ndescription: Team.\n---\n"})
+	domain := filepath.Join(dir, "team", "DOMAIN.md")
+	if err := os.Chmod(domain, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := runAttestT(t, dir, "--out", t.TempDir())
+	_ = os.Chmod(domain, 0o644)
+	if code != 1 || !strings.Contains(stderr, "DOMAIN.md") {
+		t.Errorf("unreadable DOMAIN.md = %d, stderr %q, want 1 naming it", code, stderr)
+	}
+
+	for _, c := range []struct {
+		name  string
+		mode  os.FileMode
+		stale bool
+	}{
+		{"unlistable out", 0o300, false},
+		{"stale file not removable", 0o500, true},
+		{"file not writable", 0o500, false},
+	} {
+		out := t.TempDir()
+		if c.stale {
+			writeAttestLayer(t, out, map[string]string{"podium-subjects-3.sha256": "old\n"})
+		}
+		if err := os.Chmod(out, c.mode); err != nil {
+			t.Fatal(err)
+		}
+		code, stdout, _ := runAttestT(t, dir, "--out", out)
+		_ = os.Chmod(out, 0o755)
+		if code != 1 || stdout != "" {
+			t.Errorf("%s = %d, stdout %q, want 1 and no path", c.name, code, stdout)
+		}
+	}
+}
