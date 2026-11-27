@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/sigstore/sigstore-go/pkg/root"
 	"github.com/sigstore/sigstore-go/pkg/tlog"
@@ -94,4 +95,37 @@ func bodyKindVersion(body []byte) (kind, apiVersion string, err error) {
 		return "", "", fmt.Errorf("%w: the body names no kind or apiVersion", errLogEntryForm)
 	}
 	return kind, apiVersion, nil
+}
+
+// errLogKeyWindow is wrapped by a refusal of checkLogKeyWindow for a
+// verified time outside the log key's window.
+var errLogKeyWindow = errors.New("log key validity window")
+
+// checkLogKeyWindow refuses an entry whose log's key validity window
+// excludes one of times, wrapping errLogKeyWindow, and an entry whose log
+// the root does not list, wrapping errLogEntryForm. times are the verified
+// times the bundle relies on. The window is the validFor of the log's
+// entry in the trusted root; for a log ID the root lists more than once,
+// sigstore-go's map keeps the last listing, and that is the window
+// checked. A zero bound leaves its side
+// open. sigstore-go checks the window only in tlog.VerifySET, against the
+// integrated time, and neither inclusion-proof path checks it, so an entry
+// with no signed entry timestamp beside an RFC 3161 timestamp needs this
+// check.
+//
+// Spec: §4.7.11.
+func checkLogKeyWindow(entry *tlog.Entry, logs map[string]*root.TransparencyLog, times []time.Time) error {
+	log, ok := logs[hex.EncodeToString(entry.TransparencyLogEntry().GetLogId().GetKeyId())]
+	if !ok {
+		return fmt.Errorf("%w: the entry names no log of the trusted root", errLogEntryForm)
+	}
+	for _, t := range times {
+		if !log.ValidityPeriodStart.IsZero() && t.Before(log.ValidityPeriodStart) {
+			return fmt.Errorf("%w: a verified time precedes the log key's window", errLogKeyWindow)
+		}
+		if !log.ValidityPeriodEnd.IsZero() && t.After(log.ValidityPeriodEnd) {
+			return fmt.Errorf("%w: a verified time follows the log key's window", errLogKeyWindow)
+		}
+	}
+	return nil
 }
