@@ -821,6 +821,8 @@ Several layer commands refer to these authorization terms:
 | Unauthenticated registry | A registry started with no identity provider configured, or one started in public mode. It authenticates no caller. Each command below states what such a registry admits. A registry in public mode admits those requests only when they carry the operator token. |
 | Operator token | The value of `PODIUM_OPERATOR_TOKEN` on a registry in public mode. Every `podium layer` subcommand sends the variable's value in the `X-Podium-Operator-Token` header when it is set in its environment. A registry in public mode refuses a layer write without the matching value with `auth.forbidden`, and refuses every layer write while the variable is unset on the registry. [Operator token in public mode](http-api#operator-token-in-public-mode) states the rule. |
 
+An unauthenticated registry applies no layer visibility, so every caller sees every layer. When `podium layer register`, `podium layer update`, or `podium layer restore` stores a layer with no `public` grant on such a registry, the command succeeds and writes the response's [unapplied-visibility warning](http-api#unapplied-visibility-warning) to standard error on a line that starts with `warning: `. Standard output keeps the response body.
+
 ### `podium layer register`
 
 Registers a new layer from a Git repository or a local path.

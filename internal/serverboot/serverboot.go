@@ -1677,6 +1677,12 @@ func run(ctx context.Context, stop func()) error {
 	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
 		return err
 	}
+	// §13.10 Startup warning for unapplied visibility. It runs here, after
+	// the declared-layer and --layer-path seed above and once the verifier is
+	// known, so it reports the stored layers under the current configuration.
+	if appliesNoVisibility(cfg.publicMode, verifierInstalled) {
+		logUnappliedVisibility(ctx, st, tenantID, cfg.publicMode, log.Printf)
+	}
 
 	// §13.10 Identity provider removed between starts: a start whose
 	// verifier is installed records verified identity, and an acknowledged
@@ -1720,6 +1726,11 @@ func run(ctx context.Context, stop func()) error {
 		// §7.3.1 Operator token in public mode: the endpoint refuses a write
 		// without the token before reading its body and keeps the list whole.
 		layers = layers.WithPublicMode(cfg.operatorToken)
+	}
+	if appliesNoVisibility(cfg.publicMode, verifierInstalled) {
+		// §7.3.1 Unapplied-visibility warning: a write response reports a
+		// layer whose declared visibility this registry does not apply.
+		layers = layers.WithUnappliedVisibility()
 	}
 	layers = layers.
 		// §7.5.4: an admin layer change wakes a `podium sync --watch`
