@@ -31,6 +31,15 @@ A registry server started with no identity provider resolves every caller as ano
 
 Public mode (`--public-mode` or `PODIUM_PUBLIC_MODE`) also admits every caller to every layer. It records `system:public` as the audit caller, rejects the ingest of `medium` and `high` sensitivity artifacts, and binds to the loopback address unless `--allow-public-bind` is set. It admits a layer write or an erasure request only when the request carries the value of `PODIUM_OPERATOR_TOKEN`. Setting it together with an identity provider fails startup with `config.public_mode_with_idp`. [Public mode](../modes/single-node#public-mode) describes it.
 
+### Removing an identity provider
+
+Each start under `oidc-jwt`, `trusted-headers`, or `injected-session-token` records in the metadata store that the registry runs with verified identity. The SQLite and Postgres stores keep the record across restarts, and the store holds one record for the whole deployment. A later start without one of those providers finds the record and exits with `config.identity_provider_removed`. The refusal covers a start with no identity provider, a start whose `PODIUM_IDENTITY_PROVIDER` resolves to no provider, and a start in public mode. Each of them would show every layer to every caller, whatever its `visibility:`, and a start with no identity provider would also admit every caller as an admin. A provider setting dropped from the environment, from `registry.yaml`, or from the Helm values leads to this refusal.
+
+- When the removal was not intended, restore the identity-provider settings and restart.
+- When the removal is intended, start once with `--allow-identity-provider-removal` or `PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL=true`. That start serves, logs a warning that begins `warning: identity provider removed`, and deletes the record. Remove the setting afterwards, because the starts after it need no acknowledgement.
+
+A registry that has never started with a verified provider never holds the record, so a standalone registry or a `--layer-path` bootstrap that has always run without a provider, and the Docker Compose evaluation stack, start as before. A start that cannot read the record from the store also exits, and so does a start under a verified provider that cannot write it.
+
 ## Consumer side and registry side
 
 Identity is configured in the client process and in the registry process, and each reads its own `PODIUM_IDENTITY_PROVIDER`.
@@ -82,6 +91,7 @@ The registry fails closed on an identity misconfiguration, so it does not serve 
 | `config.public_mode_with_idp` | Public mode together with an identity provider. |
 | `config.public_bind_refused` | Public mode, or no identity provider, on a non-loopback bind without `--allow-public-bind`. |
 | `config.identity_provider_unverified` | A provider that the registry does not verify at request time, such as `oauth-device-code`. |
+| `config.identity_provider_removed` | A start without a request-time verifier on a registry that earlier ran with one, without `--allow-identity-provider-removal`. [Removing an identity provider](#removing-an-identity-provider) describes it. |
 | `config.multitenant_no_verifier` | `PODIUM_MULTI_TENANT=true` with no verified identity provider. |
 | `config.invalid_issuer_scheme` | An `oidc-jwt` issuer that is not an `https` URL. |
 | `config.oidc_jwt_audience_unset` | `oidc-jwt` with no audience. |
