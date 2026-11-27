@@ -181,6 +181,17 @@ registry:
 
 A layer registered at runtime takes the policy from the [trust policy flags](../../reference/cli#trust-policy-flags) of `podium layer register` and `podium layer update`, or from the `trust_mode`, `trust_requirements`, and `trust_layer_root` members of the [layer endpoints](../../reference/http-api#layer-management).
 
+### Checking bundles against the policy
+
+`podium layer show <id> --requirements` writes a registered layer's requirements, with the binding members the registry derived, as a requirements file. `podium attest check --requirements` reads the file and verifies each bundle in the layer's attestation directory against those signers, so a signing workflow or a pull-request check finds a bundle the policy would refuse before the content reaches the registry:
+
+```
+podium layer show finance --requirements > requirements.json
+podium attest check --root skills --requirements requirements.json
+```
+
+[`podium attest import`](../../reference/cli#podium-attest-import) writes signed bundles into the attestation directory, and [`podium attest check`](../../reference/cli#podium-attest-check) describes the check.
+
 ### Derived source binding
 
 A workflow in the layer's own repository needs no explicit binding. When a signer of a `git` layer has a URI identity that begins with the layer's repository URL followed by `/.github/workflows/`, and names no source binding and no `any_source`, the registry sets `source_repository` to the repository URL. When the signer also names no ref binding, the registry sets `source_repository_ref` to the part of the identity after its last `@`. The stored policy holds the derived members, and `podium layer show` prints them.
