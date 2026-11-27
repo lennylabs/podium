@@ -35,6 +35,13 @@ type leafConfig struct {
 	sanNonCritical bool
 	issuerExts     []pkix.Extension
 	eku            []x509.ExtKeyUsage
+	// rawSAN, when set, is the subject alternative name extension value,
+	// written in place of email and uris.
+	rawSAN []byte
+	// extra holds further extensions, such as the Fulcio source fields.
+	extra []pkix.Extension
+	// duplicate is an extension issueLeafDER writes a second time.
+	duplicate *pkix.Extension
 }
 
 // defaultLeafConfig is the leaf Fulcio issues for alice@acme.com.
@@ -65,7 +72,11 @@ func (c leafConfig) spec(clock time.Time) (certSpec, error) {
 		notAfter:  clock.Add(15 * time.Minute),
 		keyUsage:  x509.KeyUsageDigitalSignature,
 		eku:       c.eku,
-		extra:     append([]pkix.Extension(nil), c.issuerExts...),
+		extra:     append(append([]pkix.Extension(nil), c.issuerExts...), c.extra...),
+	}
+	if c.rawSAN != nil {
+		spec.extra = append(spec.extra, pkix.Extension{Id: oidSubjectAltName, Value: c.rawSAN})
+		return spec, nil
 	}
 	if c.otherNameOnly {
 		san, err := otherNameSAN(DefaultSAN, !c.sanNonCritical)
