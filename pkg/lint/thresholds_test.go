@@ -214,7 +214,7 @@ func TestLinter_ZeroValueUsesDefaults(t *testing.T) {
 		}
 	}
 	var nilLinter *Linter
-	if got := len(nilLinter.AdvisoryRules()); got != 3 {
-		t.Errorf("nil linter: %d advisory rules, want 3", got)
+	if got := len(nilLinter.AdvisoryRules()); got != 4 {
+		t.Errorf("nil linter: %d advisory rules, want 4", got)
 	}
 }

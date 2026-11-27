@@ -36,19 +36,21 @@ func descriptionRules(th Thresholds) []Rule {
 	}
 }
 
-// AdvisoryRules returns the §7.3.1 catalog advisories: lint.thin_description,
-// lint.colliding_descriptions, and lint.near_duplicate_content, each built
-// from l.Thresholds with every unset field at its default. A nil l uses the
-// defaults. The advisories stay out of AllRules(); Lint appends them when
-// IncludeAdvisories is set.
+// AdvisoryRules returns the non-blocking warnings that registry ingest
+// reports among a cycle's advisories: the §7.3.1 catalog advisories
+// lint.thin_description, lint.colliding_descriptions, and
+// lint.near_duplicate_content, each built from l.Thresholds with every unset
+// field at its default, and the §4.2 lint.non_portable_name warning. A nil l
+// uses the defaults. The advisories stay out of AllRules(); Lint appends them
+// when IncludeAdvisories is set, which `podium lint` does.
 //
-// Spec: §7.3.1, §13.12
+// Spec: §4.2, §7.3.1, §13.12
 func (l *Linter) AdvisoryRules() []Rule {
 	th := DefaultThresholds()
 	if l != nil {
 		th = l.Thresholds.resolved()
 	}
-	return append(descriptionRules(th), ruleNearDuplicateContent{t: th.ContentSimilarity})
+	return append(descriptionRules(th), ruleNearDuplicateContent{t: th.ContentSimilarity}, ruleNonPortableName{})
 }
 
 // effectiveDescription returns the description that drives discovery for a
