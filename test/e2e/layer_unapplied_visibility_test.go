@@ -114,6 +114,29 @@ func TestUnappliedVisibility_PublicModeLogsTheList(t *testing.T) {
 	}
 }
 
+// Spec: §13.10 (Startup warning for unapplied visibility) — a registry with
+// PODIUM_IDENTITY_PROVIDER=external verifies no caller, so it logs the line
+// for a restricted declared layer, although it counts as configuring an
+// identity provider in every other respect.
+// Spec: §4.6 (No-identity bypass)
+func TestUnappliedVisibility_ExternalLogsTheList(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cfgPath := writeDeclaredLayers(t, home, "groups: [engineering]")
+	srv := startServerArgs(t, []string{
+		"HOME=" + home,
+		"PODIUM_CONFIG_FILE=" + cfgPath,
+		"PODIUM_INGEST_OFFLINE=true",
+		"PODIUM_IDENTITY_PROVIDER=external",
+	}, "serve", "--standalone")
+	line := unappliedVisibilityWarningLine(srv.log())
+	for _, want := range []string{"this registry verifies no caller", "once an identity provider is configured", ": eng-layer"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("external warning line = %q, want it to contain %q\nlog:\n%s", line, want, srv.log())
+		}
+	}
+}
+
 // Spec: §13.10 (Startup warning for unapplied visibility) — a registry that
 // wires a request-time verifier applies visibility and logs no such line,
 // although it stores a group-restricted layer.

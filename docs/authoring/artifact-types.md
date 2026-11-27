@@ -235,7 +235,7 @@ Materialization does not read an `mcpServers:` list in the registration's own fr
 
 ### Discovery through the MCP bridge
 
-The MCP bridge filters `mcp-server` artifacts out of its `resources/list` mirror. Claude Desktop, Claude Code, Cursor, and similar harnesses fix their MCP server list at startup, so a server discovered mid-session cannot be connected. The bridge's `search_artifacts` and `load_artifact` still return `mcp-server` artifacts. The SDK and `podium sync` also return them, and `podium sync` materializes them into the harness's on-disk config for the next launch.
+The MCP bridge keeps `mcp-server` artifacts out of its results. Claude Desktop, Claude Code, Cursor, and similar harnesses fix their MCP server list at startup, so a server discovered mid-session cannot be connected. The bridge's `search_artifacts`, the `load_domain` notable list, and the `resources/list` mirror leave them out, and `load_artifact` refuses one with `registry.not_found`. The SDK and `podium sync` return them, and `podium sync` materializes them into the harness's on-disk config for the next launch.
 
 ---
 

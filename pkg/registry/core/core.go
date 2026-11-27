@@ -627,6 +627,9 @@ func (r *Registry) LoadDomain(ctx context.Context, id layer.Identity, path strin
 	if err != nil {
 		return nil, err
 	}
+	// §5: the MCP bridge's domain map names no artifact whose latest
+	// version is an mcp-server.
+	visible = bridgeView(ctx, visible)
 	// §4.5.1 / §4.5.4 — load every visible DOMAIN.md and merge the
 	// candidates for each path across layers. The merged set drives
 	// description, keywords, unlisted, imports, and per-domain
@@ -1234,6 +1237,11 @@ func (r *Registry) SearchArtifacts(ctx context.Context, id layer.Identity, opts 
 	if err != nil {
 		return nil, err
 	}
+	// §5: the MCP bridge's search matches no artifact whose latest version
+	// is an mcp-server. The filter runs before ranking, so total_matched, the
+	// page, the §8.1 results context, and the §8.7 search hits describe only
+	// what the bridge receives.
+	visible = bridgeView(ctx, visible)
 
 	// spec: §4.7.6 — search ranks artifacts, so each canonical ID contributes
 	// one document at its latest version. Without this collapse a stored
@@ -1635,6 +1643,14 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 		return res
 	}
 	assemble := func(rec store.ManifestRecord) (*LoadArtifactResult, error) {
+		// §5: the MCP bridge loads no mcp-server record. The check runs on
+		// the resolved record, so a pin to an earlier version of another type
+		// still loads, and the refusal reads as a load of an ID that does not
+		// exist: the same registry.not_found message, a read event of result
+		// size 0, and no §8.7 load count.
+		if bridgeRefuses(ctx, rec) {
+			return nil, fmt.Errorf("%w: artifact %s", ErrNotFound, artifactID)
+		}
 		if scopes.Active() && !scopes.AllowsLoad(artifactID, rec.Version) {
 			if r.artifactExistsAnywhere(ctx, artifactID) {
 				r.emit(ctx, AuditEvent{
@@ -1753,10 +1769,13 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
-	if pin.Kind == version.PinLatest && opts.SessionID != "" {
+	rec := byVersion[resolved]
+	// §5: a load the bridge filter refuses resolves nothing, as a load of an
+	// ID that does not exist, so it leaves no session pin; a later ingest of
+	// another type is then the session's latest.
+	if pin.Kind == version.PinLatest && opts.SessionID != "" && !bridgeRefuses(ctx, rec) {
 		r.recordSessionPin(opts.SessionID, artifactID, resolved)
 	}
-	rec := byVersion[resolved]
 	return assemble(rec)
 }
 

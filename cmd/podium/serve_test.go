@@ -43,6 +43,71 @@ func freePort(t *testing.T) int {
 	return port
 }
 
+// serverBootTimeout bounds how long a serve test waits for the in-process
+// server to answer /healthz. Boot takes about a second on an idle machine,
+// including under -race, but has taken more than 4 s while the full parallel
+// suite runs, and a fixed 5 s wait failed a quarter of the runs under that
+// load. A healthy boot returns as soon as /healthz answers, so the generous
+// bound costs time only when the boot hangs.
+const serverBootTimeout = 60 * time.Second
+
+// healthzProbeTimeout bounds one /healthz request, so a listener that accepts
+// and never answers costs one probe rather than the whole boot wait.
+const healthzProbeTimeout = 2 * time.Second
+
+// bootServer starts serverboot.Run in a goroutine and blocks until the server
+// answers /healthz on port with 200. Run returning before that point fails the
+// test at once with Run's error: a boot that failed, such as a refused
+// configuration or a port another process took, never becomes ready, and
+// polling until the deadline would hide the cause behind a timeout.
+func bootServer(t *testing.T, port int) {
+	t.Helper()
+	exited := make(chan error, 1)
+	go func() { exited <- serverboot.Run() }()
+	waitForServer(t, port, exited)
+}
+
+// waitForServer polls /healthz on port until it answers 200, failing the test
+// when exited delivers Run's result first or serverBootTimeout passes.
+func waitForServer(t *testing.T, port int, exited <-chan error) {
+	t.Helper()
+	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
+	deadline := time.Now().Add(serverBootTimeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		lastErr = probeHealthz(url)
+		if lastErr == nil {
+			return
+		}
+		select {
+		case err := <-exited:
+			t.Fatalf("server exited before answering %s: %v", url, err)
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+	t.Fatalf("server did not answer %s within %s; last probe: %v", url, serverBootTimeout, lastErr)
+}
+
+// probeHealthz issues one bounded GET against url and returns nil when it
+// answers 200.
+func probeHealthz(url string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), healthzProbeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("status %d", resp.StatusCode)
+	}
+	return nil
+}
+
 // Spec: §13.10 — `podium serve` boots the standalone server in-
 // process. The smoke test starts Run via a goroutine, waits for
 // `/healthz` to answer 200, and asserts the response shape.
@@ -59,24 +124,17 @@ func TestServe_BootsAndAnswersHealthz(t *testing.T) {
 	t.Setenv("PODIUM_FILESYSTEM_ROOT", tmp)
 	t.Setenv("PODIUM_VECTOR_BACKEND", "")
 
-	go func() { _ = serverboot.Run() }()
+	bootServer(t, port)
 
-	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-	deadline := time.Now().Add(5 * time.Second)
-	var resp *http.Response
-	var err error
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		resp, err = http.DefaultClient.Do(req)
-		cancel()
-		if err == nil {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/healthz", port), nil)
 	if err != nil {
-		t.Fatalf("server never came up: %v", err)
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /healthz: %v", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {

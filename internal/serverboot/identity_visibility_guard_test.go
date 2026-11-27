@@ -32,10 +32,12 @@ func TestIdentityVisibilityGuard(t *testing.T) {
 		{"public mode with provider exempt", "oauth-device-code", true, true, false, false},
 		{"injected-session-token verified", "injected-session-token", true, false, true, false},
 		{"oauth-device-code unverified fails", "oauth-device-code", true, false, false, true},
-		// "oidc" is a free-form label, not a registered provider, so
-		// selectIdentityProvider returns nil (providerSelected = false); the
-		// deployment fronts the registry with external auth and is exempt.
-		{"oidc label exempt", "oidc", false, false, false, false},
+		// external is not a registered provider, so selectIdentityProvider
+		// returns nil (providerSelected = false); the deployment declares that
+		// authentication in front of the registry decides who reaches it and
+		// is exempt. Every other unregistered value is refused earlier by
+		// identityProviderLabelGuard.
+		{"external exempt", "external", false, false, false, false},
 		{"custom registered provider unverified fails", "acme-corp", true, false, false, true},
 	}
 	for _, c := range cases {
@@ -122,14 +124,14 @@ func TestMultiTenantVerifierGuard(t *testing.T) {
 	cases := []guardCase{
 		{"multi-tenant empty provider", true, false, "", true},
 		{"multi-tenant none", true, false, "none", true},
-		{"multi-tenant oidc label", true, false, "oidc", true},
+		{"multi-tenant external", true, false, "external", true},
 		{"multi-tenant oidc_jwt typo", true, false, "oidc_jwt", true},
 		{"multi-tenant public mode empty provider", true, true, "", true},
 		{"multi-tenant public mode none", true, true, "none", true},
 		{"multi-tenant oauth-device-code", true, false, "oauth-device-code", false},
 		{"multi-tenant custom registered provider", true, false, customID, false},
 		{"single-tenant empty provider", false, false, "", false},
-		{"single-tenant oidc label", false, false, "oidc", false},
+		{"single-tenant external", false, false, "external", false},
 		{"single-tenant public mode", false, true, "", false},
 	}
 	for _, p := range verifiedProviders {
@@ -161,9 +163,9 @@ func assertMultiTenantNoVerifierMessage(t *testing.T, msg string, publicMode boo
 	if publicMode {
 		want = append(want, "unset PODIUM_PUBLIC_MODE")
 	}
-	if identityProvider == "oidc" {
-		// The quoted label shows the operator exactly what the registry read.
-		want = append(want, `"oidc"`)
+	if identityProvider == "external" {
+		// The quoted value shows the operator exactly what the registry read.
+		want = append(want, `"external"`)
 	}
 	for _, w := range want {
 		if !strings.Contains(msg, w) {

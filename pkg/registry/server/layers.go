@@ -351,8 +351,8 @@ func (e *LayerEndpoint) WithGroupResolver(fn layer.GroupResolver) *LayerEndpoint
 // that installs no request-time verifier resolves layer.Identity{IsPublic:
 // true}, and VisibleWith short-circuits to visible for that identity, so
 // evaluating the predicate first would hand the whole tenant to a caller a
-// refusing admin callback just turned away. That is the deployment naming a
-// free-form PODIUM_IDENTITY_PROVIDER label. A credential that failed
+// refusing admin callback just turned away. That is the deployment setting
+// PODIUM_IDENTITY_PROVIDER=external. A credential that failed
 // verification never reaches here: the caller was refused before this helper
 // ran.
 //

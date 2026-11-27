@@ -271,7 +271,7 @@ func oidcStartSCIMServer(t testing.TB, scimToken string, extraEnv ...string) *se
 	return startServerArgs(t, env, "serve", "--standalone", "--layer-path", reg)
 }
 
-// ---- public_mode + identity_provider=oidc => startup fails -----
+// ---- public_mode + identity_provider=external => startup fails -----
 
 func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	t.Parallel()
@@ -283,7 +283,7 @@ func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	cmd.Env = mergeEnv(
 		"HOME="+t.TempDir(),
 		"PODIUM_PUBLIC_MODE=true",
-		"PODIUM_IDENTITY_PROVIDER=oidc",
+		"PODIUM_IDENTITY_PROVIDER=external",
 	)
 	cmd.Stdin = bytes.NewReader(nil)
 	var out bytes.Buffer
@@ -291,7 +291,7 @@ func TestAuth_PublicModeWithIdPFails(t *testing.T) {
 	cmd.Stderr = &out
 	err := cmd.Run()
 	if err == nil {
-		t.Fatalf("expected non-zero exit for public_mode + identity_provider=oidc, but process exited 0\noutput:\n%s", out.String())
+		t.Fatalf("expected non-zero exit for public_mode + identity_provider=external, but process exited 0\noutput:\n%s", out.String())
 	}
 	if !strings.Contains(out.String(), "config.public_mode_with_idp") {
 		t.Errorf("output missing 'config.public_mode_with_idp':\n%s", out.String())
@@ -1014,12 +1014,12 @@ func TestAuth_SlowDownIncreasesInterval(t *testing.T) {
 func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
-	// PODIUM_IDENTITY_PROVIDER=oidc is a free-form label that is not a
-	// registered provider, so no verifier is installed and startup is not
-	// blocked. The registry verifies callers only under injected-session-token.
+	// PODIUM_IDENTITY_PROVIDER=external declares authentication in front of
+	// the registry, so no verifier is installed and startup on the loopback
+	// bind is not blocked (§13.10).
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
-		"PODIUM_IDENTITY_PROVIDER=oidc",
+		"PODIUM_IDENTITY_PROVIDER=external",
 	}, "serve", "--standalone", "--layer-path", reg)
 
 	var healthz map[string]any
@@ -1031,7 +1031,7 @@ func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 	// podium status should report reachability OK.
 	st := runPodium(t, "", []string{
 		"PODIUM_REGISTRY=" + srv.BaseURL,
-		"PODIUM_IDENTITY_PROVIDER=oidc",
+		"PODIUM_IDENTITY_PROVIDER=external",
 	}, "status")
 	if st.Exit != 0 {
 		t.Fatalf("status exit=%d stderr=%s", st.Exit, st.Stderr)
@@ -1045,9 +1045,9 @@ func TestAuth_HealthzReachableWithOIDCMode(t *testing.T) {
 
 // Spec: §4.7 — configuring an identity provider makes the re-embed admin
 // gate live, whether or not the registry verifies callers itself.
-// PODIUM_IDENTITY_PROVIDER=oidc is a free-form label that installs no
-// request-time verifier, so the caller resolves to the anonymous-public
-// identity and no caller holds the per-tenant admin role. The boot path
+// PODIUM_IDENTITY_PROVIDER=external installs no request-time verifier, so
+// the caller resolves to the anonymous-public identity and no caller holds
+// the per-tenant admin role. The boot path
 // records the decision from its own configuration, so this pins the
 // predicate against a reading derived from the installed verifier, which
 // is nil on exactly this bind.
@@ -1056,7 +1056,7 @@ func TestAuth_ReembedGatedWhenIdentityProviderNamed(t *testing.T) {
 	reg := writeRegistry(t, map[string]string{"seed/ARTIFACT.md": agentArtifact("seed")})
 	srv := startServerArgs(t, []string{
 		"HOME=" + t.TempDir(),
-		"PODIUM_IDENTITY_PROVIDER=oidc",
+		"PODIUM_IDENTITY_PROVIDER=external",
 	}, "serve", "--standalone", "--layer-path", reg)
 
 	st, body := postJSON(t, srv.BaseURL+"/v1/admin/reembed", map[string]any{})

@@ -421,6 +421,25 @@ root set to the workspace, a skill lands at
 the working directory of the `podium-mcp` process, and the `materialized_at`
 paths the tool returns are absolute.
 
+Several artifacts can write into one shared file: a rule injects a block into
+`AGENTS.md` or `GEMINI.md`, and a hook merges an entry into the harness's
+settings file. Each `load_artifact` call replaces only the loaded artifact's
+block or entry in such a file. The blocks and entries that earlier loads of
+other artifacts wrote stay in place, and so does the operator's own content. On
+the `gemini` harness, loading the rule `acme/beta` after the rule `acme/alpha`
+leaves both blocks in `GEMINI.md`, and loading `acme/alpha` again at a new
+version replaces its block and leaves one copy of it. `podium sync` writes its
+whole selection at once and removes the blocks and entries of artifacts that
+left the selection.
+
+`load_artifact` never removes another artifact's block or entry. A block or
+entry stays in the file after its artifact is deleted, leaves the caller's
+view, or stops writing to that file. To remove it, run a `podium sync` into the
+same directory whose selection writes into that file: the sync rebuilds every
+Podium block and entry in the file from its selection. Otherwise, delete the
+entry, or the block between its `podium:begin` and `podium:end` markers, by
+hand.
+
 When neither the argument nor the variable is set, `load_artifact` returns the
 manifest body and writes no file. The recipes in the
 [harness reference](#harness-reference) omit the variable, so add it to the

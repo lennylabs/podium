@@ -35,7 +35,7 @@ func TestBootstrapDeclaredLayers_LocalIngestsAndSeeds(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
 	path := declaredLocalTree(t, "policy")
 	cfg := &Config{
-		identityProvider: "oidc",
+		identityProvider: "oidc-jwt",
 		declaredLayers: []yamlLayerEntry{{
 			ID:         "org-defaults",
 			Source:     yamlLayerSource{Local: &yamlLocalSource{Path: path}},
@@ -120,7 +120,7 @@ func TestBootstrapDeclaredLayers_EmptyVisibilityUsesDefault(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
 	path := declaredLocalTree(t, "policy")
 	cfg := &Config{
-		identityProvider:       "oidc",
+		identityProvider:       "oidc-jwt",
 		defaultLayerVisibility: "private",
 		declaredLayers: []yamlLayerEntry{{
 			ID:     "no-vis",

@@ -14,8 +14,8 @@ import (
 // whose declaration grants less than public, because the operator who stored
 // that declaration would otherwise read the success response as the layer
 // being hidden. serverboot keys the call on the absent verifier rather than
-// on the configured provider label, so a label that resolves to no verifier
-// is covered too.
+// on the configured provider value, so PODIUM_IDENTITY_PROVIDER=external,
+// which installs no verifier, is covered too.
 //
 // Spec: §4.6 (No-identity bypass), §7.3.1 (Unapplied-visibility warning)
 func (e *LayerEndpoint) WithUnappliedVisibility() *LayerEndpoint {

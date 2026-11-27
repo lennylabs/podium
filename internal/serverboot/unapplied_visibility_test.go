@@ -37,7 +37,7 @@ func seedTenantLayers(t *testing.T, st store.Store, tenant store.Tenant, layers 
 
 // Spec: §4.6 (No-identity bypass), §13.10 — the registry applies no layer
 // visibility in public mode and whenever no request-time verifier is wired,
-// whatever provider label the configuration names.
+// whatever provider value the configuration names, `external` included.
 func TestAppliesNoVisibility(t *testing.T) {
 	t.Parallel()
 	cases := []struct {

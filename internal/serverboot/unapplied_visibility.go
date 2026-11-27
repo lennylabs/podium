@@ -16,9 +16,9 @@ const unappliedVisibilityListCap = 20
 // appliesNoVisibility reports whether the registry applies no layer
 // visibility: public mode, or no request-time identity verifier, either of
 // which resolves every caller as anonymous-public. The condition is the
-// absent verifier rather than the configured provider label, so a label that
-// resolves to no configured provider is covered whatever the startup checks
-// on labels admit.
+// absent verifier rather than the configured provider value, so
+// PODIUM_IDENTITY_PROVIDER=external, which installs no verifier, is covered
+// without naming it here.
 //
 // Spec: §4.6 (No-identity bypass), §13.10
 func appliesNoVisibility(publicMode, verifierInstalled bool) bool {
