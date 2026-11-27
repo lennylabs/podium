@@ -150,8 +150,10 @@ func TestQuickstart_LintCleanSkill(t *testing.T) {
 	}
 }
 
-// a type:skill artifact missing SKILL.md fails lint with
-// an error diagnostic. Doc: quickstart § Troubleshooting.
+// a type:skill artifact missing SKILL.md fails lint: lint refuses it per
+// artifact under the §4.1 unparseable-manifest rule and exits 1.
+//
+// Spec: §4.1
 func TestQuickstart_LintMissingSkillBody(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -162,10 +164,11 @@ func TestQuickstart_LintMissingSkillBody(t *testing.T) {
 		t.Fatalf("lint exit=%d, want 1\nstdout=%s\nstderr=%s", res.Exit, res.Stdout, res.Stderr)
 	}
 	out := res.Stdout + res.Stderr
-	// The implementation emits "error: personal/hello/greet: type: skill
-	// missing SKILL.md" (the doc speaks of an "[error]" diagnostic).
-	if !strings.Contains(out, "error") || !strings.Contains(out, "personal/hello/greet") {
-		t.Errorf("diagnostic missing error/artifact id:\n%s", out)
+	// The refusal line reads "rejected: personal/hello/greet
+	// (ingest.invalid_artifact): personal/hello/greet/SKILL.md: manifest:
+	// type: skill missing SKILL.md".
+	if !strings.Contains(out, "ingest.invalid_artifact") || !strings.Contains(out, "personal/hello/greet") {
+		t.Errorf("refusal missing its code or artifact id:\n%s", out)
 	}
 	if !strings.Contains(strings.ToUpper(out), "SKILL.MD") {
 		t.Errorf("diagnostic does not reference SKILL.md:\n%s", out)

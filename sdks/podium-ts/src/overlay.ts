@@ -727,7 +727,7 @@ async function readOptional(fs: typeof import("node:fs/promises"), file: string)
 
 // collectResources returns every file under the package root dir, keyed by
 // its package-relative path, other than the root files named in skip and the
-// files of a nested package.
+// files of a nested package that discovery finds.
 async function collectResources(
   fs: typeof import("node:fs/promises"),
   path: typeof import("node:path"),
@@ -735,15 +735,19 @@ async function collectResources(
   skip: Set<string>,
 ): Promise<Record<string, string>> {
   const resources: Record<string, string> = {};
-  const collect = async (sub: string): Promise<void> => {
+  // hidden reports that a segment of sub's path below the package root
+  // begins with a dot.
+  const collect = async (sub: string, hidden: boolean): Promise<void> => {
     const entries = await fs.readdir(sub, { withFileTypes: true });
-    // spec §4.4 — the files of a nested package are not resources of the
-    // enclosing one, so the walk stops at a subdirectory that directly
-    // contains an ARTIFACT.md. The test is the manifest alone, mirroring the
-    // artifact result of filesystem.PackageManifests in
-    // pkg/registry/filesystem/discovery.go, so a subdirectory holding only a
-    // SKILL.md stays part of this package.
-    if (sub !== dir && (await holdsManifest(fs, path, sub, entries, "ARTIFACT.md"))) return;
+    // spec §4.2, §4.4 — the files of a nested package are not resources of
+    // the enclosing one, so the walk stops at a subdirectory that discovery
+    // finds as a package: it directly contains an ARTIFACT.md and no segment
+    // of its path begins with a dot. The test is the manifest alone,
+    // mirroring the artifact result of filesystem.PackageManifests and
+    // filesystem.Discoverable in pkg/registry/filesystem/discovery.go, so a
+    // subdirectory holding only a SKILL.md, and a directory below a
+    // dot-prefixed one, stay part of this package.
+    if (sub !== dir && !hidden && (await holdsManifest(fs, path, sub, entries, "ARTIFACT.md"))) return;
     for (const e of entries) {
       // spec §4.4 — a directory or file named exactly .git is
       // version-control data, left out of the set and never read, as
@@ -751,7 +755,7 @@ async function collectResources(
       if (e.name === VERSION_CONTROL_NAME) continue;
       const full = path.join(sub, e.name);
       if (e.isDirectory()) {
-        await collect(full);
+        await collect(full, hidden || e.name.startsWith("."));
         continue;
       }
       const rel = path.relative(dir, full).split(path.sep).join("/");
@@ -759,7 +763,7 @@ async function collectResources(
       resources[rel] = await readOptional(fs, full);
     }
   };
-  await collect(dir);
+  await collect(dir, false);
   return resources;
 }
 

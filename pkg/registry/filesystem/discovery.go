@@ -4,6 +4,7 @@ import (
 	"errors"
 	"io/fs"
 	"path"
+	"strings"
 )
 
 // PackageManifests reports whether dir directly holds a regular file named
@@ -44,6 +45,27 @@ func regularFile(fsys fs.FS, name string) (bool, error) {
 		return false, err
 	}
 	return info.Mode().IsRegular(), nil
+}
+
+// Discoverable reports whether discovery visits the directory dir, a
+// slash-separated path relative to the layer root: no segment of the path
+// begins with a dot. Discovery walks the root itself whatever its name, and
+// never descends into a dot-prefixed directory below it, so a directory with
+// such a segment is never a package. The resource walks use it to decide
+// whether a subdirectory that carries an ARTIFACT.md is a nested package that
+// owns its files or an ordinary directory of the enclosing package.
+//
+// Spec: §4.2, §4.4
+func Discoverable(dir string) bool {
+	if dir == "." || dir == "" {
+		return true
+	}
+	for _, seg := range strings.Split(dir, "/") {
+		if strings.HasPrefix(seg, ".") {
+			return false
+		}
+	}
+	return true
 }
 
 // WithinPackage reports whether a directory strictly between dir and the layer

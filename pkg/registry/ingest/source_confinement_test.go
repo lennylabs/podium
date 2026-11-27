@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
@@ -121,8 +122,8 @@ func TestSourceIngest_EscapingResourceFailsTheLayer(t *testing.T) {
 }
 
 // Spec: §7.3.1, §6.10 — a SKILL.md reached only through an escaping symbolic
-// link keeps the source-unreachable sentinel, and an absent SKILL.md keeps the
-// existing missing-file message.
+// link keeps the source-unreachable sentinel. Spec: §4.1 — an absent SKILL.md
+// is refused per artifact with a reason that names the missing file.
 func TestSourceIngest_EscapingSkillFileClassifies(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -154,19 +155,25 @@ func TestSourceIngest_EscapingSkillFileClassifies(t *testing.T) {
 	testharness.WriteTree(t, absentRoot,
 		testharness.WriteTreeOption{Path: "ops/runbook/ARTIFACT.md", Content: skillArtifact()},
 	)
-	_, err = ingest.Ingest(ctx, newStore(t), ingest.Request{
+	res, err := ingest.Ingest(ctx, newStore(t), ingest.Request{
 		TenantID: "tenant-1",
 		LayerID:  "team-shared",
 		Files:    source.ConfinedFS(absentRoot),
 	})
-	if err == nil {
-		t.Fatalf("Ingest accepted a skill with no SKILL.md")
+	// Spec: §4.1 — an absent SKILL.md is a per-artifact refusal under the
+	// unparseable-manifest rule, so the cycle succeeds and names it.
+	if err != nil {
+		t.Fatalf("Ingest with an absent SKILL.md = %v, want a per-artifact refusal", err)
 	}
-	if errors.Is(err, source.ErrSourceUnreachable) {
-		t.Errorf("an absent SKILL.md must not be classified unreachable: %v", err)
+	if res.Accepted != 0 || len(res.Rejected) != 1 {
+		t.Fatalf("accepted %d, rejected %+v, want one refusal", res.Accepted, res.Rejected)
 	}
-	if !strings.Contains(err.Error(), "type: skill missing SKILL.md") {
-		t.Errorf("absent SKILL.md message changed: %v", err)
+	rej := res.Rejected[0]
+	if rej.ArtifactID != "ops/runbook" || rej.Details["constraint"] != layer.ManifestUnparseableConstraint {
+		t.Errorf("refusal = %+v, want ops/runbook with manifest_unparseable", rej)
+	}
+	if !strings.Contains(rej.Reason, "ops/runbook/SKILL.md: manifest: type: skill missing SKILL.md") {
+		t.Errorf("refusal reason %q does not name the missing SKILL.md", rej.Reason)
 	}
 }
 
