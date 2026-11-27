@@ -2447,6 +2447,13 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if reset != nil {
+		// A registry with no ingest pipeline records the reingest as queued
+		// and would drop the reset, so it refuses the request instead.
+		if e.reingestRunner == nil {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"reset_attestation_mark needs the ingest pipeline, which this registry does not run")
+			return
+		}
 		r = r.WithContext(WithMarkReset(r.Context(), reset))
 	}
 	e.runIngestAndRespond(w, r, cfg, bg)

@@ -114,3 +114,29 @@ func TestReingest_MarkResetBody(t *testing.T) {
 		t.Fatalf("resets %+v", got)
 	}
 }
+
+// Spec: §7.3.1 — a registry that runs no ingest pipeline for the endpoint
+// refuses a reset request with registry.invalid_argument rather than record
+// it as queued and drop the reset; a plain reingest is still queued.
+func TestReingest_MarkResetWithoutPipeline(t *testing.T) {
+	t.Parallel()
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/tmp/x"}); err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(server.NewLayerEndpoint(st, "t", server.NewModeTracker()).Handler())
+	defer ts.Close()
+	for body, want := range map[string]int{`{"reset_attestation_mark":true}`: 400, `{}`: 200} {
+		resp, err := http.Post(ts.URL+"/v1/layers/reingest?id=L", "application/json", bytes.NewBufferString(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		if resp.StatusCode != want {
+			t.Errorf("%s: status %d, want %d", body, resp.StatusCode, want)
+		}
+	}
+}
