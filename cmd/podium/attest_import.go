@@ -145,8 +145,8 @@ func prepareBundle(v []byte, limits attestLimits) (importedBundle, error) {
 	if err != nil {
 		return importedBundle{}, err
 	}
-	if int64(len(out)) > limits.maxBytes {
-		return importedBundle{}, fmt.Errorf("the bundle holds %d bytes, above %s (%d)", len(out), attestMaxBytesEnv, limits.maxBytes)
+	if int64(len(out)) > limits.MaxBytes {
+		return importedBundle{}, fmt.Errorf("the bundle holds %d bytes, above %s (%d)", len(out), attestMaxBytesEnv, limits.MaxBytes)
 	}
 	// The removal changes only the signedTimestamp values, so the bundle
 	// parses as before; the summary is read from the bytes written.
@@ -285,7 +285,7 @@ func warnBundleCount(dir string, limits attestLimits, stderr io.Writer) {
 			n++
 		}
 	}
-	if n > limits.maxBundles {
-		_, _ = fmt.Fprintf(stderr, "warning: %s holds %d bundle files, above %s (%d)\n", oneLine(dir), n, attestMaxBundlesEnv, limits.maxBundles)
+	if n > limits.MaxBundles {
+		_, _ = fmt.Fprintf(stderr, "warning: %s holds %d bundle files, above %s (%d)\n", oneLine(dir), n, attestMaxBundlesEnv, limits.MaxBundles)
 	}
 }

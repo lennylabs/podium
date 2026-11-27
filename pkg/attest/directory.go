@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 )
 
@@ -32,6 +33,51 @@ const (
 	// DefaultMaxBundles is the default of PODIUM_ATTESTATION_MAX_BUNDLES.
 	DefaultMaxBundles = 64
 )
+
+// The §13.12 settings of the attestation directory limits.
+const (
+	MaxBytesSetting   = "PODIUM_ATTESTATION_MAX_BYTES"
+	MaxBundlesSetting = "PODIUM_ATTESTATION_MAX_BUNDLES"
+)
+
+// Limits are the bounds of one attestation directory: the size of one bundle
+// file and the number of bundle files.
+type Limits struct {
+	MaxBytes   int64
+	MaxBundles int
+}
+
+// ReadLimits reads PODIUM_ATTESTATION_MAX_BYTES and
+// PODIUM_ATTESTATION_MAX_BUNDLES through getenv. An unset or blank value
+// takes the default, and a value that is not a decimal integer of at least 1
+// is an error that names the setting.
+//
+// Spec: §13.12
+func ReadLimits(getenv func(string) string) (Limits, error) {
+	maxBytes, err := positiveSetting(getenv, MaxBytesSetting, DefaultMaxBundleBytes)
+	if err != nil {
+		return Limits{}, err
+	}
+	maxBundles, err := positiveSetting(getenv, MaxBundlesSetting, DefaultMaxBundles)
+	if err != nil {
+		return Limits{}, err
+	}
+	return Limits{MaxBytes: maxBytes, MaxBundles: int(maxBundles)}, nil
+}
+
+// positiveSetting parses the setting name as a decimal integer of at least
+// 1 that fits an int, or returns def when it is unset or blank.
+func positiveSetting(getenv func(string) string, name string, def int64) (int64, error) {
+	raw := strings.TrimSpace(getenv(name))
+	if raw == "" {
+		return def, nil
+	}
+	n, err := strconv.ParseInt(raw, 10, strconv.IntSize)
+	if err != nil || n < 1 {
+		return 0, fmt.Errorf("%s must be a decimal integer of at least 1, got %q", name, raw)
+	}
+	return n, nil
+}
 
 // ErrNoBundle reports a bundle file that holds no JSON value.
 var ErrNoBundle = errors.New("attest: the file holds no bundle")

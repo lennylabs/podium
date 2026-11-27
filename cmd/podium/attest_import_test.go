@@ -287,11 +287,11 @@ func TestAttestImport_Refusals(t *testing.T) {
 // value that is not a decimal integer of at least 1.
 func TestReadAttestLimits(t *testing.T) {
 	l, err := readAttestLimits(func(string) string { return "" })
-	if err != nil || l.maxBytes != attest.DefaultMaxBundleBytes || l.maxBundles != attest.DefaultMaxBundles {
+	if err != nil || l.MaxBytes != attest.DefaultMaxBundleBytes || l.MaxBundles != attest.DefaultMaxBundles {
 		t.Fatalf("defaults = %+v, %v", l, err)
 	}
 	env := map[string]string{attestMaxBytesEnv: " 2048 ", attestMaxBundlesEnv: "3"}
-	if l, err := readAttestLimits(func(k string) string { return env[k] }); err != nil || l.maxBytes != 2048 || l.maxBundles != 3 {
+	if l, err := readAttestLimits(func(k string) string { return env[k] }); err != nil || l.MaxBytes != 2048 || l.MaxBundles != 3 {
 		t.Fatalf("set = %+v, %v", l, err)
 	}
 	for _, v := range []string{"0", "-1", "1k", "99999999999999999999"} {

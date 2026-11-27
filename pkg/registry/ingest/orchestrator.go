@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -84,6 +85,19 @@ type SourceIngestOptions struct {
 	// CycleLocks serializes the cycles of one layer in this process. The
 	// registry passes one set for every trigger; nil serializes nothing.
 	CycleLocks *CycleLocks
+	// Attestation configures the §4.7.11 ingest verification of every cycle.
+	// Nil runs no attestation step, as a layer under the mode none does.
+	Attestation *AttestationConfig
+	// MarkReset, when non-nil, applies the §4.7.11 mark reset in the write
+	// that claims the layer for this cycle.
+	MarkReset *MarkReset
+}
+
+// MarkReset is the §4.7.11 mark reset of a manual reingest: it clears the
+// attestation mark and sets the recorded attested commit to ToCommit, empty
+// for none.
+type MarkReset struct {
+	ToCommit string
 }
 
 // SourceIngest snapshots the layer via the supplied provider, runs
@@ -137,7 +151,7 @@ func SourceIngestWithOptions(
 	if err := freezeRefusal(opts.FreezeWindows, opts.Clock.Now()); err != nil {
 		return nil, err
 	}
-	claim, previous, stored, err := ClaimLayer(ctx, st, cfg.TenantID, cfg.ID)
+	claim, previous, stored, err := claimForCycle(ctx, st, cfg, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -145,7 +159,9 @@ func SourceIngestWithOptions(
 	// first store write hands the claim back. One that wrote, such as one
 	// that removed artifacts and then failed lint, keeps it, because the
 	// cycle it displaced would otherwise resume and undo those writes.
-	wrote := false
+	// Spec: §4.7.11 (Mark reset) — the claim that applies a reset is a store
+	// write, so such a cycle keeps its claim whatever the failure.
+	wrote := opts.MarkReset != nil
 	res, err := runClaimedCycle(ctx, st, provider, stored, opts, claim, func() { wrote = true })
 	if err != nil && !wrote {
 		ReleaseClaim(ctx, st, stored.TenantID, stored.ID, claim, previous)
@@ -188,6 +204,15 @@ const claimReleaseTimeout = 10 * time.Second
 // claim read it: snapshot, history check, ingest, events, and the record.
 // onFirstWrite runs once, before the cycle's first store write.
 func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provider, cfg store.LayerConfig, opts SourceIngestOptions, claim string, onFirstWrite func()) (*Result, error) {
+	// Spec: §4.7.11 (Ingest verification) — a cycle of a layer whose policy
+	// is invalid is refused after its claim and before its snapshot.
+	att := opts.Attestation.Cycle(cfg, claim)
+	if att != nil {
+		att.bind(opts.Clock, opts.AuditEmit)
+		if superseded, err := att.CheckPolicy(ctx, st, onFirstWrite); superseded || err != nil {
+			return supersededResult(superseded, err)
+		}
+	}
 	srcCfg := source.LayerConfig{
 		ID: cfg.ID,
 		// Spec: §7.3.1 (Repository credentials). The ingest clones with the stored
@@ -200,7 +225,17 @@ func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provid
 	}
 	snap, err := provider.Snapshot(ctx, srcCfg)
 	if err != nil {
+		// Spec: §4.7.11 (Attestation record) — a Git snapshot that reached its
+		// fetch deadline is recorded, so the cycle keeps its claim.
+		if att != nil {
+			if _, rerr := att.RecordSourceFailure(ctx, st, err, onFirstWrite); rerr != nil {
+				return nil, rerr
+			}
+		}
 		return nil, err
+	}
+	if att != nil {
+		att.WithLineage(snap.Reference, lineageFor(provider, srcCfg, snap.Reference))
 	}
 
 	if snap.HistoryRewritten {
@@ -251,6 +286,7 @@ func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provid
 		IngestClaim:                claim,
 		OnFirstWrite:               onFirstWrite,
 		Clock:                      opts.Clock,
+		Attestation:                att,
 	})
 	if err != nil {
 		// Spec: §7.3.1 (Removed artifacts) — a cycle that read the whole
@@ -321,16 +357,64 @@ func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provid
 //
 // Spec: §7.3.1 (Removed artifacts)
 func ClaimLayer(ctx context.Context, st store.Store, tenantID, layerID string) (claim, previous string, cfg store.LayerConfig, err error) {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return "", "", store.LayerConfig{}, fmt.Errorf("ingest: generate an ingest claim: %w", err)
+	claim, err = newClaim()
+	if err != nil {
+		return "", "", store.LayerConfig{}, err
 	}
-	claim = hex.EncodeToString(b[:])
 	cfg, previous, err = st.ClaimLayerIngest(ctx, tenantID, layerID, claim)
 	if err != nil {
 		return "", "", store.LayerConfig{}, fmt.Errorf("ingest: claim layer %s: %w", layerID, err)
 	}
 	return claim, previous, cfg, nil
+}
+
+// claimForCycle claims the layer for a cycle, applying the mark reset of
+// opts in the same write when it carries one, and records
+// layer.attestation_mark_reset for an applied reset.
+//
+// Spec: §4.7.11 (Mark reset), §7.3.1 (Removed artifacts)
+func claimForCycle(ctx context.Context, st store.Store, cfg store.LayerConfig, opts SourceIngestOptions) (claim, previous string, stored store.LayerConfig, err error) {
+	if opts.MarkReset == nil {
+		return ClaimLayer(ctx, st, cfg.TenantID, cfg.ID)
+	}
+	claim, err = newClaim()
+	if err != nil {
+		return "", "", store.LayerConfig{}, err
+	}
+	stored, previous, prior, err := st.ClaimLayerIngestWithReset(ctx, cfg.TenantID, cfg.ID, claim, opts.MarkReset.ToCommit)
+	if err != nil {
+		return "", "", store.LayerConfig{}, fmt.Errorf("ingest: claim layer %s: %w", cfg.ID, err)
+	}
+	if opts.AuditEmit != nil {
+		mark := ""
+		if prior.Mark != nil {
+			mark = prior.Mark.UTC().Format(time.RFC3339Nano)
+		}
+		opts.AuditEmit(string(audit.EventLayerAttestationMarkReset), cfg.ID, map[string]string{
+			"previous_mark":   mark,
+			"previous_commit": prior.Commit,
+			"to_commit":       opts.MarkReset.ToCommit,
+			"caller":          opts.CallerID,
+		})
+	}
+	return claim, previous, stored, nil
+}
+
+// lineageFor returns the lineage query of a cycle of provider for the
+// snapshot at reference, or nil for a provider that answers none.
+//
+// Spec: §9.1 (Lineage query), §4.7.11 (Layer step)
+func lineageFor(provider source.Provider, cfg source.LayerConfig, reference string) LineageFunc {
+	lp, ok := provider.(source.LineageProvider)
+	if !ok || !lp.AnswersLineage() {
+		return nil
+	}
+	return func(ctx context.Context, base string, commits []string) ([]source.LineageAnswer, error) {
+		if err := source.ValidateLineageRequest(reference, base, commits); err != nil {
+			return nil, err
+		}
+		return lp.Lineage(ctx, cfg, reference, base, commits)
+	}
 }
 
 // silence unused-import linters when build paths don't reach fs.
@@ -342,4 +426,13 @@ var _ fs.FS = (fs.FS)(nil)
 // Spec: §7.6
 func layerScope(cfg store.LayerConfig) core.EventScope {
 	return core.EventScope{TenantID: cfg.TenantID, Layers: []string{cfg.ID}}
+}
+
+// newClaim returns a fresh random ingest claim.
+func newClaim() (string, error) {
+	var b [16]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", fmt.Errorf("ingest: generate an ingest claim: %w", err)
+	}
+	return hex.EncodeToString(b[:]), nil
 }

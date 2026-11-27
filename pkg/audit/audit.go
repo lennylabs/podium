@@ -47,7 +47,11 @@ const (
 	EventLayerHistoryRewritten EventType = "layer.history_rewritten"
 	EventLayerConfigChanged    EventType = "layer.config_changed"
 	EventLayerUserRegistered   EventType = "layer.user_registered"
-	EventAdminGranted          EventType = "admin.granted"
+	// The §4.7.11 attestation events of an ingest cycle and of a mark reset.
+	EventLayerAttestationVerified  EventType = "layer.attestation_verified"
+	EventLayerAttestationFailed    EventType = "layer.attestation_failed"
+	EventLayerAttestationMarkReset EventType = "layer.attestation_mark_reset"
+	EventAdminGranted              EventType = "admin.granted"
 	// EventTenantManaged records a §7.3.3 tenant-management operation (create,
 	// update, or deactivate) by an operator. The §8.1 table is non-exhaustive;
 	// this makes runtime tenant provisioning auditable. Caller is the operator,
@@ -104,6 +108,9 @@ func AllEventTypes() []EventType {
 		EventLayerHistoryRewritten,
 		EventLayerConfigChanged,
 		EventLayerUserRegistered,
+		EventLayerAttestationVerified,
+		EventLayerAttestationFailed,
+		EventLayerAttestationMarkReset,
 		EventAdminGranted,
 		EventTenantManaged,
 		EventVisibilityDenied,
