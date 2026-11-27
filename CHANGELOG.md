@@ -12,6 +12,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ### Changed
 
+- **Building from source requires Go 1.27** (§4.7.11): the module now depends on `sigstore-go` 1.4.0 for author attestation bundle verification, and that release requires Go 1.27. The container build uses a Go 1.27 builder image. Release binaries and the container image are unaffected.
 - **A workspace `.podium` that is a symbolic link fails `podium sync`** (§7.5.3): `podium sync`, `podium sync override`, `podium sync save-as`, `podium profile edit`, and `podium init` in a workspace now fail before writing anything when the target's `.podium` is a symbolic link or not a directory, with an error that names `.podium`. Earlier releases read and wrote the lock and `sync.yaml` through the link. Replace the link with a directory; see the [upgrade notes](docs/deployment/operations/upgrade-notes.md).
 
 ### Fixed

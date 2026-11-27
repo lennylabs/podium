@@ -119,21 +119,21 @@ func TestResources_ReadReconstitutesAPresignedBody(t *testing.T) {
 	doc := []byte("---\ntype: agent\nversion: 1.0.0\n---\nPresigned body text.\n")
 	reg := newMirrorRegistry(t, func(base string) (map[string]any, map[string][]byte) {
 		return map[string]any{
-				"id": "docs/big", "type": "agent",
-				"content_hash": "sha256:" + version.CanonicalContentHash(doc, nil, nil),
-				// The delivery hash frames the document and the body the fetch
-				// reconstitutes, not the cleared inline fields.
-				"delivery_hash": deliveryHashOf(loadArtifactResponse{
-					ID: "docs/big", Type: "agent", Frontmatter: string(doc),
-					ManifestBody: "Presigned body text.\n",
-					ContentHash:  "sha256:" + version.CanonicalContentHash(doc, nil, nil),
-				}),
-				"manifest_body_url": map[string]any{
-					"presigned_url": base + "/blob/body", "content_hash": sha256Hex(doc),
-				},
-			}, map[string][]byte{
-				"body": doc,
-			}
+			"id": "docs/big", "type": "agent",
+			"content_hash": "sha256:" + version.CanonicalContentHash(doc, nil, nil),
+			// The delivery hash frames the document and the body the fetch
+			// reconstitutes, not the cleared inline fields.
+			"delivery_hash": deliveryHashOf(loadArtifactResponse{
+				ID: "docs/big", Type: "agent", Frontmatter: string(doc),
+				ManifestBody: "Presigned body text.\n",
+				ContentHash:  "sha256:" + version.CanonicalContentHash(doc, nil, nil),
+			}),
+			"manifest_body_url": map[string]any{
+				"presigned_url": base + "/blob/body", "content_hash": sha256Hex(doc),
+			},
+		}, map[string][]byte{
+			"body": doc,
+		}
 	})
 	text, errMsg := readMirror(t, reg.ts.URL, sign.PolicyNever, "docs/big")
 	if errMsg != "" {
@@ -164,17 +164,17 @@ func TestResources_ReadVerifiesOverBundledResources(t *testing.T) {
 	build := func(served []byte) func(string) (map[string]any, map[string][]byte) {
 		return func(base string) (map[string]any, map[string][]byte) {
 			return map[string]any{
-					"id": "docs/res", "type": "agent", "frontmatter": string(fm), "manifest_body": "body\n",
-					"content_hash":     hash,
-					"delivery_hash":    delivery,
-					"resources":        map[string]string{"inline.txt": base64.StdEncoding.EncodeToString(inline)},
-					"resources_base64": true,
-					"large_resources": map[string]any{
-						"data/big.bin": map[string]any{"presigned_url": base + "/blob/big", "content_hash": sha256Hex(large)},
-					},
-				}, map[string][]byte{
-					"big": served,
-				}
+				"id": "docs/res", "type": "agent", "frontmatter": string(fm), "manifest_body": "body\n",
+				"content_hash":     hash,
+				"delivery_hash":    delivery,
+				"resources":        map[string]string{"inline.txt": base64.StdEncoding.EncodeToString(inline)},
+				"resources_base64": true,
+				"large_resources": map[string]any{
+					"data/big.bin": map[string]any{"presigned_url": base + "/blob/big", "content_hash": sha256Hex(large)},
+				},
+			}, map[string][]byte{
+				"big": served,
+			}
 		}
 	}
 
