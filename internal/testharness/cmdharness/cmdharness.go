@@ -59,7 +59,7 @@ func Run(t testing.TB, binary, cwd string, args ...string) Result {
 	cmd.Stderr = &stderr
 
 	err := cmd.Run()
-	res := Result{Stdout: stdout.String(), Stderr: stderr.String()}
+	res := Result{Stdout: stdout.String(), Stderr: StripCoverageNoise(stderr.String())}
 	if exitErr, ok := err.(*exec.ExitError); ok {
 		res.ExitCode = exitErr.ExitCode()
 	} else if err != nil {
