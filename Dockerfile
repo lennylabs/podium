@@ -18,7 +18,7 @@
 #                --build-arg DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ) \
 #                -t podium-server:0.1.0 .
 
-ARG GO_VERSION=1.27
+ARG GO_VERSION=1.27.4
 
 FROM golang:${GO_VERSION}-bookworm AS build
 

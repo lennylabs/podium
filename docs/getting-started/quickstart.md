@@ -52,7 +52,7 @@ podium version
 
 **Direct binary download:** download `podium-<os>-<arch>`, or the `.tar.gz` or `.zip` bundle that includes every binary, from the [latest release](https://github.com/lennylabs/podium/releases/latest).
 
-**From source** (Go 1.27+ required):
+**From source** (Go 1.27.4+ required):
 
 ```bash
 git clone https://github.com/lennylabs/podium.git
