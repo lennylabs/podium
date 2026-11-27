@@ -276,6 +276,10 @@ type migrationPlan struct {
 	manifestCount int
 	layerCount    int
 	adminCount    int
+	// identityVerified carries the source's §13.10 verified-identity record,
+	// so the target refuses a start that drops the identity provider the
+	// source ran with.
+	identityVerified bool
 }
 
 // planMigration opens the SQLite source and reads every tenant it holds,
@@ -299,6 +303,9 @@ func planMigration(ctx context.Context, sqlitePath string) (*migrationPlan, erro
 		return nil, fmt.Errorf("list tenants: %w", err)
 	}
 	plan := &migrationPlan{}
+	if plan.identityVerified, err = src.DataMigrationApplied(ctx, store.DeploymentMarkerVerifiedIdentity); err != nil {
+		return nil, fmt.Errorf("read verified-identity record: %w", err)
+	}
 	for _, t := range tenants {
 		manifests, err := src.ListManifests(ctx, t.ID)
 		if err != nil {
@@ -340,7 +347,7 @@ func openTargetStore(kind, postgresDSN, sqlitePath string) (store.Store, func(),
 
 // pumpStore writes the plan to the target one tenant at a time, in the
 // ascending ID order the plan holds, after clearing the target's record of the
-// content-hash rewrite. The order is deterministic, so an error names the
+// content-hash rewrite and copying the source's verified-identity record. The order is deterministic, so an error names the
 // tenant the run stopped in, and a re-run rewrites every record idempotently.
 //
 // Spec: §13.10
@@ -355,6 +362,14 @@ func pumpStore(ctx context.Context, plan *migrationPlan, target store.Store) err
 	if plan.manifestCount > 0 {
 		if err := target.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false); err != nil {
 			return fmt.Errorf("clear data-migration marker: %w", err)
+		}
+	}
+	// §13.10: the source's verified-identity record is written before the
+	// first row, so a pump that fails partway leaves a target that still
+	// refuses a start without the identity provider the source ran with.
+	if plan.identityVerified {
+		if err := target.SetDataMigrationApplied(ctx, store.DeploymentMarkerVerifiedIdentity, true); err != nil {
+			return fmt.Errorf("copy verified-identity record: %w", err)
 		}
 	}
 	for _, tp := range plan.tenants {

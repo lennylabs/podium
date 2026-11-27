@@ -1039,6 +1039,17 @@ func run(ctx context.Context, stop func()) error {
 		defer func() { _ = closer.Close() }()
 	}
 
+	// §13.10 Identity provider removed between starts: refuse a start without
+	// a request-time verifier over a store that recorded verified identity
+	// before the bootstrap below writes anything. A verified replica still
+	// serving this store reads the layer rows the bootstrap writes, so a start
+	// refused after writing them would already have widened that replica's
+	// visibility. The record itself is written once the verifier is installed.
+	identityCheck, err := refuseIdentityProviderRemoval(ctx, st, cfg)
+	if err != nil {
+		return err
+	}
+
 	// Standalone bootstrap: ensure the bootstrapped org exists so initial
 	// requests don't fail on missing-tenant lookups (§13.10 auto-bootstrap).
 	// spec: §4.7.1 — the org ID is a UUID while "default" stays the
@@ -1667,12 +1678,11 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
-	// §13.10 Identity provider removed between starts: a start with a
-	// verifier records verified identity, and a start without one over a
-	// store that recorded it is refused unless the operator acknowledges the
-	// removal. It reads verifierInstalled rather than the provider label, and
-	// runs before server.New so a refused start serves no request.
-	if err := identityProviderRemovalGuard(ctx, st, cfg, verifierInstalled); err != nil {
+	// §13.10 Identity provider removed between starts: a start whose
+	// verifier is installed records verified identity, and an acknowledged
+	// removal clears the record. It runs before server.New, and it checks
+	// verifierInstalled against the prediction the removal check used.
+	if err := recordVerifiedIdentity(ctx, st, cfg, verifierInstalled, identityCheck); err != nil {
 		return err
 	}
 
