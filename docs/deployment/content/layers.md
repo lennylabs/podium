@@ -143,7 +143,7 @@ Authoring rights stay with the source. Whoever can merge to a layer's tracked Gi
 
 ## Layer trust policy
 
-Each layer carries a trust policy that states which signers' author attestations its content needs. The registry stores and validates the policy in this release. No ingest step verifies attestations against it yet, so a policy refuses no content today.
+Each layer carries a trust policy that states which signers' author attestations its content needs. Under `warn` and `require`, every ingest cycle of the layer verifies the bundles in its attestation directory against the policy, as [Ingest verification](#ingest-verification) below describes.
 
 The policy has three members, which the layer object reports and `podium layer show <id>` prints:
 
@@ -191,6 +191,31 @@ podium attest check --root skills --requirements requirements.json
 ```
 
 [`podium attest import`](../../reference/cli#podium-attest-import) writes signed bundles into the attestation directory, and [`podium attest check`](../../reference/cli#podium-attest-check) describes the check.
+
+### Ingest verification
+
+A cycle of a layer whose mode resolves to `warn` or `require` reads the bundle files of `.podium/attestations/` in its snapshot and verifies each one against the signers of the requirement. It then checks that the accepted bundles list the layer subject with the layer digest of the snapshot, that the layer subject is not older than the layer's attestation mark, that its attested commit lies in the history of the tracked ref and descends from the commit recorded with the mark (a `git` layer whose signing certificate records the commit), and that every artifact of the snapshot has a subject with its package digest. These checks run before the cycle writes anything.
+
+- Under `require`, a failed check refuses the cycle: nothing is stored or removed, the versions the registry already holds keep serving, and `podium layer reingest` exits 1 with the code, such as `ingest.attestation_missing`, and its `details`. A start whose ingest of a declared `local` or `--layer-path` layer is refused keeps running, and the start log names the layer and the code.
+- Under `warn`, a failed check is recorded and the cycle stores the snapshot.
+- A layer whose policy has no requirement under a mode above `none`, or names an instance the registry no longer configures, is refused with `ingest.attestation_policy_invalid` on every cycle until the policy is updated.
+
+Each such cycle writes the layer's attestation record, which the layer object reports and `podium layer show` prints: `attestation_mark`, `attested_commit`, `attestation_status` (`ok` or the code of the failure), `attestation_details`, `attestation_dropped`, and `attestation_checked_at`. When the status is not `ok`, `podium layer show` writes the next step for the code on standard error:
+
+```
+podium layer show finance
+```
+
+The mark only moves forward, so a replay of an older signed state is refused as `ingest.attestation_stale`. A legitimate rollback is a new commit that the signing workflow attests. To accept an older signed state, or after a rewrite of the signed branch, reset the mark with the reingest that applies it:
+
+```
+podium layer reingest finance --reset-attestation-mark
+podium layer reingest finance --reset-attestation-mark --to-commit <sha>
+```
+
+`--to-commit` names the commit the next accepted layer subject must equal or descend from, and applies to a `git` layer. The reset needs the same authority as the reingest. The [error codes](../../reference/error-codes#attestation-codes) list each code and constraint.
+
+A layer that `--layer-path` bootstraps carries no signers of its own. Under a `PODIUM_LAYER_TRUST_DEFAULT` of `warn` or `require`, set [`PODIUM_LAYER_TRUST_REQUIREMENTS_FILE`](../../reference/configuration#layers) to a requirements file, such as the output of `podium layer show <id> --requirements`, whose `layer_roots` object maps a layer ID to its `trust_layer_root`.
 
 ### Derived source binding
 

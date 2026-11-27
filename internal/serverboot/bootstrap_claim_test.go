@@ -34,7 +34,7 @@ func TestBootstrapIngests_ClaimTheLayer(t *testing.T) {
 		}
 	}
 	before := time.Now().UTC()
-	if _, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil); err != nil {
+	if _, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{}); err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
 	cfg := &Config{declaredLayers: []yamlLayerEntry{{

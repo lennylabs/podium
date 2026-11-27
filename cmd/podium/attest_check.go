@@ -186,8 +186,8 @@ func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequir
 //
 // Spec: §7.3.5
 func countBundles(ctx context.Context, bundles []dirBundle, reqs []store.TrustRequirement, insts *checkInstances, limits attestLimits, r *checkReport, stderr io.Writer) ([]countedBundle, error) {
-	if len(bundles) > limits.maxBundles {
-		r.fail("limits: the attestation directory holds %d bundle files, above %s (%d)", len(bundles), attestMaxBundlesEnv, limits.maxBundles)
+	if len(bundles) > limits.MaxBundles {
+		r.fail("limits: the attestation directory holds %d bundle files, above %s (%d)", len(bundles), attestMaxBundlesEnv, limits.MaxBundles)
 	}
 	if len(reqs) == 0 {
 		_, _ = fmt.Fprintln(r.out, "note: no signature was verified; --requirements <file> verifies each bundle against a layer's requirement")

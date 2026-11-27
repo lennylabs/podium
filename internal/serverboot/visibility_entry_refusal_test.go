@@ -41,7 +41,7 @@ func TestBootstrap_RefusesVisibilityEntries(t *testing.T) {
 			testharness.WriteTreeOption{Path: "fin/b/ARTIFACT.md", Content: artifactBody},
 			testharness.WriteTreeOption{Path: "fin/.layer-config", Content: "visibility:\n  groups: [acme-finance, \"\"]\n"},
 		)
-		_, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+		_, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 		assertBootstrapEntryRefusal(t, st, "fin", err,
 			"config.invalid: layer fin: .layer-config visibility.groups[1] is empty")
 	})

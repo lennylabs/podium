@@ -8,9 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"syscall"
 
@@ -20,50 +18,18 @@ import (
 
 // The §13.12 attestation directory limits.
 const (
-	attestMaxBytesEnv   = "PODIUM_ATTESTATION_MAX_BYTES"
-	attestMaxBundlesEnv = "PODIUM_ATTESTATION_MAX_BUNDLES"
+	attestMaxBytesEnv   = attest.MaxBytesSetting
+	attestMaxBundlesEnv = attest.MaxBundlesSetting
 )
 
 // attestLimits are the bounds of one attestation directory.
-type attestLimits struct {
-	maxBytes   int64
-	maxBundles int
-}
+type attestLimits = attest.Limits
 
 // readAttestLimits reads PODIUM_ATTESTATION_MAX_BYTES and
-// PODIUM_ATTESTATION_MAX_BUNDLES. An unset or blank value takes the default,
-// and a value that is not plain decimal digits in the setting's range is an
-// error the commands report as a usage error.
-//
-// Spec: §13.12
+// PODIUM_ATTESTATION_MAX_BUNDLES, whose invalid values the commands report
+// as usage errors.
 func readAttestLimits(getenv func(string) string) (attestLimits, error) {
-	maxBytes, err := boundedSetting(getenv, attestMaxBytesEnv, attest.DefaultMaxBundleBytes, attest.MaxBundleBytesLimit)
-	if err != nil {
-		return attestLimits{}, err
-	}
-	maxBundles, err := boundedSetting(getenv, attestMaxBundlesEnv, attest.DefaultMaxBundles, attest.MaxBundlesLimit)
-	if err != nil {
-		return attestLimits{}, err
-	}
-	return attestLimits{maxBytes: maxBytes, maxBundles: int(maxBundles)}, nil
-}
-
-// plainDecimal is a decimal integer of at least 1 written in digits alone,
-// with no sign and no leading zero.
-var plainDecimal = regexp.MustCompile(`\A[1-9][0-9]*\z`)
-
-// boundedSetting parses the setting name as a decimal integer from 1 to
-// most, or returns def when it is unset or blank.
-func boundedSetting(getenv func(string) string, name string, def, most int64) (int64, error) {
-	raw := strings.TrimSpace(getenv(name))
-	if raw == "" {
-		return def, nil
-	}
-	n, err := strconv.ParseInt(raw, 10, 64)
-	if !plainDecimal.MatchString(raw) || err != nil || n > most {
-		return 0, fmt.Errorf("%s must be a decimal integer from 1 to %d, written in digits with no sign or leading zero, got %q", name, most, raw)
-	}
-	return n, nil
+	return attest.ReadLimits(getenv)
 }
 
 // dirBundle is one entry of an attestation directory whose name ends in
@@ -93,7 +59,7 @@ func (b dirBundle) problem(limits attestLimits) string {
 	case b.irregular:
 		return "is not a regular file"
 	case b.oversize:
-		return fmt.Sprintf("holds %d bytes, above %s (%d)", b.size, attestMaxBytesEnv, limits.maxBytes)
+		return fmt.Sprintf("holds %d bytes, above %s (%d)", b.size, attestMaxBytesEnv, limits.MaxBytes)
 	case b.parseErr != nil:
 		reason, _ := sign.AttestationReasonOf(b.parseErr)
 		return fmt.Sprintf("does not parse as a bundle (%s)", reason)
@@ -156,11 +122,11 @@ func readDirBundle(p string, limits attestLimits) (dirBundle, error) {
 	if err != nil || !os.SameFile(before, after) {
 		return b, fmt.Errorf("read %s: the file changed while it was read", p)
 	}
-	raw, err := io.ReadAll(io.LimitReader(f, readLimit(limits.maxBytes)))
+	raw, err := io.ReadAll(io.LimitReader(f, readLimit(limits.MaxBytes)))
 	if err != nil {
 		return b, fmt.Errorf("read %s: %w", p, err)
 	}
-	if int64(len(raw)) > limits.maxBytes {
+	if int64(len(raw)) > limits.MaxBytes {
 		b.oversize, b.size = true, after.Size()
 		return b, nil
 	}

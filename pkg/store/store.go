@@ -383,6 +383,10 @@ type LayerConfig struct {
 	// RestoreLayerConfig for the 30-day window, after which the purge job
 	// hard-deletes it. Nil for an active layer.
 	DeletedAt *time.Time `json:"deleted_at"`
+	// AttestationRecord holds the layer's §4.7.11 attestation record. A read
+	// returns it as stored, and the layer object reports its members as
+	// read-only. PutLayerConfig ignores it and keeps the stored record.
+	AttestationRecord
 }
 
 // stampDeprecation sets DeprecatedAt from IngestedAt (falling back to
@@ -557,6 +561,24 @@ type Store interface {
 	// LastIngestedAt to at when the layer holds claim, and changes no other
 	// field. It returns ErrIngestSuperseded, changing nothing, otherwise.
 	RecordLayerIngest(ctx context.Context, tenantID, layerID, claim, ref string, at *time.Time) error
+	// WriteLayerAttestation writes the §4.7.11 attestation record of an ingest
+	// cycle in one store write, while the live layer holds claim. A write that
+	// advances the mark applies only while the stored mark and commit equal
+	// the values the write read at its claim. It returns ErrIngestSuperseded,
+	// changing nothing, when either condition fails.
+	WriteLayerAttestation(ctx context.Context, tenantID, layerID, claim string, w AttestationWrite) error
+	// ClaimLayerIngestWithReset claims the live layer as ClaimLayerIngest
+	// does and, in the same write, applies the §4.7.11 mark reset: it clears
+	// the mark and sets the recorded commit to toCommit, empty for none. It
+	// returns the layer as stored after the reset, the claim it replaced, and
+	// the attestation record before the reset.
+	ClaimLayerIngestWithReset(ctx context.Context, tenantID, layerID, claim, toCommit string) (LayerConfig, string, AttestationRecord, error)
+	// MigrateLayerConfig writes cfg as PutLayerConfig does and applies the
+	// §13.4 copy rule to its attestation record in the same store write:
+	// a target that holds no row for the layer, live or soft-deleted, takes
+	// the mark and the commit of cfg.AttestationRecord, and a target record
+	// takes them only under the rule migrationReplaces states.
+	MigrateLayerConfig(ctx context.Context, cfg LayerConfig) (AttestationCopy, error)
 
 	// Data-migration markers (§13.4). The §13.4 additive schema guarantee
 	// does not cover the values stored under the schema, so a one-time

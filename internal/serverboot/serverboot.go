@@ -467,7 +467,7 @@ func seedOperatorAdmins(ctx context.Context, st store.Store, operators []string)
 // It applies to a layer that declares no visibility of its own. A layer
 // that declares a non-empty visibility in its .layer-config (§4.6)
 // overrides vis with the declared value.
-func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest, enforceSandbox bool, hostSandboxes []string) ([]layer.Layer, error) {
+func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest, enforceSandbox bool, hostSandboxes []string, trust bootstrapTrust) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
 	}
@@ -513,9 +513,11 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			Users:        effVis.Users,
 			CreatedAt:    now,
 		}
-		// Spec: §7.3.1 (Layer trust policy) — a re-seeded --layer-path layer
-		// keeps the trust policy it stores.
-		cfg, err := keepStoredTrust(ctx, st, cfg)
+		// Spec: §7.3.1 (Layer trust policy), §4.7.11 (Local layers and the
+		// standalone bootstrap) — a re-seeded --layer-path layer keeps the
+		// trust policy it stores, apart from the requirements and the root
+		// that PODIUM_LAYER_TRUST_REQUIREMENTS_FILE sets.
+		cfg, err := trust.apply(ctx, st, cfg)
 		if err != nil {
 			return nil, err
 		}
@@ -525,7 +527,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
 		// layer as every cycle does, so it and a cycle of the same layer on
 		// another replica supersede each other by claim order.
-		claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
+		claim, previous, claimed, err := ingest.ClaimLayer(ctx, st, tenantID, l.ID)
 		wrote := false
 		if err != nil {
 			return nil, err
@@ -534,6 +536,9 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			TenantID:    tenantID,
 			LayerID:     l.ID,
 			IngestClaim: claim,
+			// Spec: §4.7.11 (Startup ingest) — the startup ingest is a cycle
+			// like any other and runs against the kept attestation record.
+			Attestation: trust.att.Cycle(claimed, claim),
 			// Spec: §7.3.1 (Removed artifacts) — a failure after the first
 			// write keeps the claim, so a displaced cycle cannot undo it.
 			OnFirstWrite: func() { wrote = true },
@@ -569,11 +574,21 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			// overlap, so readiness never waits on it; the startup pass
 			// computes these artifacts once every bootstrap layer is in.
 		})
-		if err != nil {
-			if !wrote {
-				ingest.ReleaseClaim(ctx, st, tenantID, l.ID, claim, previous)
-			}
+		if err != nil && !wrote {
+			ingest.ReleaseClaim(ctx, st, tenantID, l.ID, claim, previous)
+		}
+		// Spec: §4.7.11 (Startup ingest) — an attestation refusal does not
+		// abort the start: the layer is listed and serves what it stores.
+		if err != nil && !startupRefusal(l.ID, err) {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
+		}
+		layers = append(layers, layer.Layer{
+			ID:         l.ID,
+			Precedence: order,
+			Visibility: effVis,
+		})
+		if err != nil {
+			continue
 		}
 		// §7.3.1: the bootstrap ingest just completed, so stamp
 		// last_ingested_at for staleness monitoring, unless a later cycle
@@ -582,11 +597,6 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if err := st.RecordLayerIngest(ctx, tenantID, l.ID, claim, "", &done); err != nil && !errors.Is(err, store.ErrIngestSuperseded) {
 			return nil, fmt.Errorf("record the ingest of layer %s: %w", l.ID, err)
 		}
-		layers = append(layers, layer.Layer{
-			ID:         l.ID,
-			Precedence: order,
-			Visibility: effVis,
-		})
 		log.Printf("ingested layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
 			l.ID, l.Path, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories), len(res.Removed))
 	}
@@ -703,7 +713,7 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 			// layer as every cycle does, so a cycle of the same layer on
 			// another replica and this ingest supersede each other by claim
 			// order rather than both removing.
-			claim, previous, _, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
+			claim, previous, claimed, err := ingest.ClaimLayer(ctx, st, tenantID, lc.ID)
 			wrote := false
 			if err != nil {
 				return nil, err
@@ -712,6 +722,9 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				TenantID:    tenantID,
 				LayerID:     lc.ID,
 				IngestClaim: claim,
+				// Spec: §4.7.11 (Startup ingest) — a cycle like any other, run
+				// against the kept attestation record.
+				Attestation: cfg.ingestAttest.Cycle(claimed, claim),
 				// Spec: §7.3.1 (Removed artifacts) — a failure after the first
 				// write keeps the claim, so a displaced cycle cannot undo it.
 				OnFirstWrite: func() { wrote = true },
@@ -737,14 +750,18 @@ func bootstrapDeclaredLayers(st store.Store, tenantID string, cfg *Config, resou
 				// §7.3.1: no SemanticOverlap. The startup ingest computes no
 				// overlap; the startup pass computes these artifacts.
 			})
-			if err != nil {
-				if !wrote {
-					ingest.ReleaseClaim(ctx, st, tenantID, lc.ID, claim, previous)
-				}
+			if err != nil && !wrote {
+				ingest.ReleaseClaim(ctx, st, tenantID, lc.ID, claim, previous)
+			}
+			// Spec: §4.7.11 (Startup ingest) — an attestation refusal does not
+			// abort the start; every other failure does.
+			if err != nil && !startupRefusal(lc.ID, err) {
 				return nil, fmt.Errorf("ingest declared layer %s from %s: %w", lc.ID, lc.LocalPath, err)
 			}
-			log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
-				lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories), len(res.Removed))
+			if err == nil {
+				log.Printf("ingested declared layer %s from %s (accepted=%d, idempotent=%d, rejected=%d, advisories=%d, removed=%d)",
+					lc.ID, lc.LocalPath, res.Accepted, res.Idempotent, len(res.Rejected), len(res.Advisories), len(res.Removed))
+			}
 		case "git":
 			// Spec: §7.3.1 (Declared repository credentials). A declared repo
 			// may carry a URL credential, the seed joins declared keys into
@@ -1043,11 +1060,15 @@ func run(ctx context.Context, stop func()) error {
 	}
 
 	// §4.7.11: build the Sigstore instances before any ingest, with no
-	// network call and no write. No ingest step verifies attestations yet,
-	// so nothing starts the public-good refresh (StartAttestationRefresh).
+	// network call and no write. Ingest verification starts the public-good
+	// refresh when a cycle first verifies on that instance, and the refresh
+	// stops when the run returns.
 	if err := cfg.loadAttestationRoots(); err != nil {
 		return err
 	}
+	var stopRefresh func()
+	cfg.ingestAttest, stopRefresh = cfg.ingestAttestation(ctx)
+	defer stopRefresh()
 
 	st, err := openStore(cfg)
 	if err != nil {
@@ -1323,7 +1344,8 @@ func run(ctx context.Context, stop func()) error {
 	// visibility declared in its .layer-config (§4.6) when present, and the
 	// deployment default (§4.6 / §13.10) otherwise. They append after the
 	// declared layers.
-	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes)
+	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes,
+		bootstrapTrust{file: cfg.bootstrapReqs, defaultMode: cfg.layerTrust.mode, att: cfg.ingestAttest})
 	if err != nil {
 		return err
 	}
@@ -1718,6 +1740,9 @@ func run(ctx context.Context, stop func()) error {
 	// §4.7.11 (Policy changes): name each stored layer that the trust default
 	// leaves with no requirement, after the declared and --layer-path seed.
 	logUnrequiredTrustLayers(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.layerTrust.mode, log.Printf)
+	// §4.7.11 (Trusted root refresh): a stored policy that verifies on the
+	// public-good instance starts the refresh at the start.
+	startRefreshForStoredPolicies(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.ingestAttest)
 
 	// §13.10 Identity provider removed between starts: a start whose
 	// verifier is installed records verified identity, and an acknowledged
@@ -2389,6 +2414,12 @@ type Config struct {
 	// sigstore.instances key, PODIUM_ATTESTATION_TRUSTED_ROOT_FILE, and the
 	// refresh settings of the public-good root, with the root files read.
 	attestation attestationConfig
+	// bootstrapReqs is the §13.12 PODIUM_LAYER_TRUST_REQUIREMENTS_FILE of
+	// the layers PODIUM_LAYER_PATH bootstraps.
+	bootstrapReqs bootstrapRequirements
+	// ingestAttest is the §4.7.11 ingest verification every cycle runs,
+	// built once the instances are loaded.
+	ingestAttest *ingest.AttestationConfig
 	// sigstoreMirror and sigstoreTUFRoot replace the Sigstore TUF
 	// repository of the public-good refresh and the TUF root.json it starts
 	// from. They have no setting: only an in-process test sets them, so a
@@ -2594,6 +2625,7 @@ func (c *Config) Settings() []Setting {
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{gitFetchTimeoutKey, c.gitFetch.display(), c.gitFetch.source},
 		{"layers.trust_default", c.layerTrust.display(), c.layerTrust.source},
+		{"layers.trust_requirements_file", c.bootstrapReqs.path, envOrSrc(layerTrustRequirementsFileEnv, "")},
 		{gitFetchDepthKey, c.gitFetchDepth.display(), c.gitFetchDepth.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
@@ -2788,6 +2820,7 @@ func LoadConfig() *Config {
 	// root file that cannot be read refuses the start before any ingest. A
 	// relative trusted_root resolves beside registry.yaml.
 	c.attestation = resolveAttestation(os.Getenv, fileSigstore, filepath.Dir(registryYAMLPath()), clock.Real{}.Now())
+	c.bootstrapReqs = resolveBootstrapRequirements(os.Getenv(layerTrustRequirementsFileEnv), c.trustInstanceKnown)
 	// §13.12: the Pinecone namespace prefix defaults to "default"
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
@@ -2926,6 +2959,9 @@ func (c *Config) SettingErrors() []error {
 	if c.layerTrust.err != nil {
 		errs = append(errs, c.layerTrust.err)
 	}
+	if c.bootstrapReqs.err != nil {
+		errs = append(errs, c.bootstrapReqs.err)
+	}
 	return append(errs, c.attestation.errs...)
 }
 
@@ -3023,6 +3059,9 @@ func (c *Config) validate() error {
 	}
 	if err := c.declaredLayerTrustErr(); err != nil {
 		return err
+	}
+	if c.bootstrapReqs.err != nil {
+		return c.bootstrapReqs.err
 	}
 	return c.semanticOverlapGuard()
 }

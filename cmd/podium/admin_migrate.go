@@ -408,10 +408,15 @@ func pumpTenant(ctx context.Context, tp tenantPlan, target store.Store) error {
 			return fmt.Errorf("put manifest %s/%s: %w", tp.tenant.ID, m.ArtifactID, err)
 		}
 	}
+	// Spec: §13.4, §4.7.11 (Migration copy) — the copy carries the source's
+	// attestation mark and commit under the copy rule, and names what it did
+	// with each layer's record.
 	for _, l := range tp.layerConfigs {
-		if err := target.PutLayerConfig(ctx, l); err != nil {
+		out, err := target.MigrateLayerConfig(ctx, l)
+		if err != nil {
 			return fmt.Errorf("put layer config %s/%s: %w", tp.tenant.ID, l.ID, err)
 		}
+		fmt.Printf("layer %s/%s: attestation record %s\n", tp.tenant.ID, l.ID, out)
 	}
 	for _, g := range tp.adminGrants {
 		if err := target.GrantAdmin(ctx, g); err != nil {

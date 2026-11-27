@@ -18,6 +18,9 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `layer.history_rewritten`      | Force-push or history rewrite detected on a `git`-source layer     | Registry |
 | `layer.config_changed`         | An admin-defined layer was added, removed, restored, or patched, or the tenant's layer order was changed | Registry |
 | `layer.user_registered`        | A personal layer was registered, unregistered, patched, restored, or erased | Registry |
+| `layer.attestation_verified`   | An ingest cycle passed the §4.7.11 layer step: the snapshot reference, the layer attested time, each accepted bundle with its attestation digest, predicate type, instance, issuer, identity, log index, attested time, and whether its timestamp carries an RSA signature with a digest other than SHA-256, the counts of matched, mismatched, and missing artifacts, and each bundle no requirement accepted with its refusal reason | Registry |
+| `layer.attestation_failed`     | An ingest cycle's §4.7.11 layer step failed or its trust policy was invalid: the §6.10 code, the `details.constraint`, the `details`, the mode in force, and the snapshot reference where known | Registry |
+| `layer.attestation_mark_reset` | A §4.7.11 mark reset was applied: the previous mark, the previous attested commit, the commit the reset named, and the caller | Registry |
 | `admin.granted`                | An admin grant was added or revoked                                | Registry |
 | `visibility.denied`            | A call was rejected because the requested resource was not visible | Registry |
 | `freeze.break_glass`           | An admin used break-glass during a freeze window                   | Registry |

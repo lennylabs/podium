@@ -288,6 +288,10 @@ type Request struct {
 	// whose claim it may hand back, from one that failed after, whose claim
 	// it keeps (§7.3.1).
 	OnFirstWrite func()
+	// Attestation runs the §4.7.11 attestation steps of a layer whose
+	// resolved trust mode is warn or require (AttestationConfig.Cycle). Nil
+	// runs none and writes no attestation record, which is the mode none.
+	Attestation *AttestationCycle
 }
 
 // SemanticOverlapFunc computes the §7.3.1 overlap records of the (artifact,
@@ -425,6 +429,11 @@ type Result struct {
 	//
 	// Spec: §7.3.1 (Removed artifacts)
 	Superseded bool
+	// Attestation is the result of the cycle's attestation steps under warn
+	// or require, nil under none.
+	//
+	// Spec: §4.7.11
+	Attestation *AttestationReport
 }
 
 // IngestedArtifact names an (artifact_id, version) pair present in a layer
@@ -527,21 +536,57 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 
 	now := req.Clock.Now().UTC()
 
-	// Spec: §7.3.1 (Removed artifacts) — a cycle that a later cycle of the
-	// layer has already superseded stores nothing: its puts would restore
-	// versions the later cycle removed. The check runs before the first write.
-	if req.IngestClaim != "" {
-		err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, nil, now, req.IngestClaim)
-		switch {
-		case errors.Is(err, store.ErrIngestSuperseded):
-			return &Result{Removed: []string{}, Superseded: true}, nil
-		case err != nil:
-			return nil, fmt.Errorf("ingest: check the ingest claim: %w", err)
+	// Spec: §4.7.11 (Ingest verification) — a cycle of a layer whose policy
+	// is invalid is refused after its claim and before it reads its snapshot.
+	att := req.Attestation
+	if att != nil {
+		att.bind(req.Clock, req.AuditEmit)
+		if superseded, err := att.CheckPolicy(ctx, st, req.OnFirstWrite); superseded || err != nil {
+			return supersededResult(superseded, err)
 		}
 	}
-	// Every return from here on follows a store write or an attempted one.
-	if req.OnFirstWrite != nil {
-		req.OnFirstWrite()
+	// Spec: §4.7.11 (Snapshot reads) — the cycle reads each file of its
+	// snapshot once, so the bytes the layer step digests are the bytes the
+	// cycle parses, stores, and serves.
+	req.Files = readOnce(req.Files)
+	// Spec: §4.7.11 (Ingest verification) — the domain walk and package
+	// discovery run before the cycle's first store write, so the attestation
+	// steps can refuse a cycle that has written nothing.
+	domainRecs := walkDomains(req.Files, req.TenantID, req.LayerID)
+	// Walk the layer's filesystem to find every package: a directory holding
+	// ARTIFACT.md, or one holding SKILL.md below no other package (§4.2).
+	all, err := walkLayer(req.Files, req.LayerID)
+	if err != nil {
+		return nil, err
+	}
+	// Spec: §7.3.1 (Removed artifacts) — every package the snapshot holds
+	// counts as present, whatever the cycle then does with it.
+	inSnapshot := make(map[string]bool, len(all))
+	for _, rec := range all {
+		inSnapshot[rec.ID] = true
+	}
+
+	// The §4.1 unparseable-manifest rule, the §4.6 no-inheritance rule, and
+	// the §4.1 removed-type rule run before lint and before every other
+	// per-artifact rule, and the refused records leave the set lint, the
+	// description advisories, and the server_identifier index read, so a
+	// refused mcp-server never resolves an mcpServers edge and an unparseable
+	// record, which carries no parsed fields, reaches no later rule.
+	records, refused := refuseInvalidArtifacts(all)
+
+	// Spec: §4.7.11 (Ingest verification) — the layer step, then the artifact
+	// step for the artifacts the pre-lint rules keep, then the attestation
+	// record write, which is the cycle's first store write and checks its
+	// claim. A cycle without attestation steps checks its claim alone.
+	var verdict *attestationVerdict
+	if att != nil {
+		var superseded bool
+		verdict, superseded, err = att.run(ctx, st, req.Files, all, records, req.OnFirstWrite)
+		if superseded || err != nil {
+			return supersededResult(superseded, err)
+		}
+	} else if superseded, err := checkClaim(ctx, st, req, now); superseded || err != nil {
+		return supersededResult(superseded, err)
 	}
 
 	// §4.5.1 — persist every DOMAIN.md so load_domain can read domain
@@ -553,76 +598,16 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// §8.1: a DOMAIN.md that is newly added or whose source changed since
 	// the previous ingest emits domain.published. Compare against the
 	// stored record so an unchanged re-ingest stays quiet.
-	prevDomains := map[string]string{}
-	if existing, lerr := st.ListDomains(ctx, req.TenantID); lerr == nil {
-		for _, d := range existing {
-			if d.Layer == req.LayerID {
-				prevDomains[d.Path] = string(d.Raw)
-			}
-		}
-	}
-	domainRecs := walkDomains(req.Files, req.TenantID, req.LayerID)
-	var domainAdvisories []lint.Diagnostic
-	for _, dr := range domainRecs {
-		prev, seen := prevDomains[dr.Path]
-		if err := st.PutDomain(ctx, dr); err != nil {
-			return nil, err
-		}
-		if !seen || prev != string(dr.Raw) {
-			// §7.3.2 outbound webhook + §8.1 audit: a DOMAIN.md that was
-			// added or whose source changed emits domain.published. Both
-			// the change-event seam and the audit sink fire so receivers
-			// and SIEM pipelines see one event per real change.
-			if req.PublishEvent != nil {
-				scope := core.EventScope{TenantID: dr.TenantID, Layers: []string{dr.Layer}, Path: dr.Path}
-				req.PublishEvent(ctx, scope, string(audit.EventDomainPublished), map[string]any{
-					"domain": dr.Path,
-					"layer":  dr.Layer,
-					"tenant": dr.TenantID,
-				})
-			}
-			if req.AuditEmit != nil {
-				req.AuditEmit(string(audit.EventDomainPublished), dr.Path,
-					map[string]string{"layer": dr.Layer})
-			}
-		}
-		// spec: §12 — "ingest-time lint flags newly-set unlisted: true for
-		// review". An unlisted: true DOMAIN.md hides its whole
-		// subtree from enumeration (§4.5.3), so a freshly-set value is
-		// surfaced as an advisory. A domain that was already unlisted in the
-		// prior ingest draws no advisory (the flag is not newly-set), so a
-		// steady-state reingest stays quiet.
-		if adv := newlyUnlistedAdvisory(dr, prev, seen); adv != nil {
-			domainAdvisories = append(domainAdvisories, *adv)
-		}
-	}
-
-	// Walk the layer's filesystem to find every package: a directory holding
-	// ARTIFACT.md, or one holding SKILL.md below no other package (§4.2).
-	records, err := walkLayer(req.Files, req.LayerID)
+	domainAdvisories, err := persistDomains(ctx, st, req, domainRecs)
 	if err != nil {
 		return nil, err
 	}
-	// Spec: §7.3.1 (Removed artifacts) — every package the snapshot holds
-	// counts as present, whatever the cycle then does with it.
-	inSnapshot := make(map[string]bool, len(records))
-	for _, rec := range records {
-		inSnapshot[rec.ID] = true
-	}
-
-	// The §4.1 unparseable-manifest rule, the §4.6 no-inheritance rule, and
-	// the §4.1 removed-type rule run before lint and before every other
-	// per-artifact rule, and the refused records leave the set lint, the
-	// description advisories, and the server_identifier index read, so a
-	// refused mcp-server never resolves an mcpServers edge and an unparseable
-	// record, which carries no parsed fields, reaches no later rule.
-	records, refused := refuseInvalidArtifacts(records)
 
 	// Run lint over the collected set; diagnostics with severity Error
 	// abort their artifact's ingest.
 	diags := req.Linter.Lint(ctx, nil, records)
 
-	res := &Result{Rejected: refused}
+	res := &Result{Rejected: refused, Attestation: verdict.report(att)}
 	errsByID := groupLintErrors(diags)
 
 	// The §7.3.1 catalog advisories run over the ingested layer's records,
@@ -678,6 +663,14 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	serverIDs := serverIdentifierIndex(records)
 
 	for _, rec := range records {
+		// Spec: §4.7.11 (Artifact step) — an artifact the artifact step drops
+		// is reported with its attestation code and never counted as a lint
+		// failure, so its own lint diagnostics are discarded. It stays in the
+		// set lint read and in the server_identifier index.
+		if rej, dropped := verdict.drop(rec.ID); dropped {
+			res.Rejected = append(res.Rejected, rej)
+			continue
+		}
 		// Lint blocks ingest at error severity.
 		if errs, ok := errsByID[rec.ID]; ok {
 			res.LintFailures = append(res.LintFailures, errs...)

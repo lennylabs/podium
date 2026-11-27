@@ -406,7 +406,7 @@ func TestLayerReingest_FlagsAfterPositional(t *testing.T) {
 
 	assertUsageExit(t, "layerReingest", layerReingest,
 		[]string{"--registry", ts.URL},
-		"usage: podium layer reingest [--break-glass --justification <text>] <id>")
+		"usage: podium layer reingest [--break-glass --justification <text>] [--reset-attestation-mark [--to-commit <sha>]] <id>")
 }
 
 // Spec: §4.5 — `podium domain analyze [<path>]` reads the subtree from the

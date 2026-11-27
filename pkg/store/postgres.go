@@ -137,6 +137,12 @@ var orgTableStmts = []string{
 		trust_mode TEXT NOT NULL DEFAULT '',
 		trust_requirements TEXT NOT NULL DEFAULT '',
 		trust_layer_root TEXT NOT NULL DEFAULT '',
+		attestation_mark TIMESTAMPTZ,
+		attested_commit TEXT NOT NULL DEFAULT '',
+		attestation_status TEXT NOT NULL DEFAULT '',
+		attestation_details TEXT NOT NULL DEFAULT '',
+		attestation_dropped BIGINT NOT NULL DEFAULT 0,
+		attestation_checked_at TIMESTAMPTZ,
 		PRIMARY KEY (tenant_id, id)
 	)`,
 	// §7.3.1 semantic overlap records, keyed by owner and peer, and the
@@ -1505,8 +1511,20 @@ func (p *Postgres) RevokeAdmin(ctx context.Context, userID, orgID string) error 
 
 // PutLayerConfig inserts or replaces a layer config.
 func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
-	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
-	// statement, so a config it refuses writes nothing.
+	conn, release, err := p.org(ctx, cfg.TenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return pgPutLayer(ctx, conn, cfg)
+}
+
+// pgPutLayer writes cfg through ex, an org connection or a transaction on
+// one. The write rules run before any statement, so a config they refuse
+// writes nothing.
+//
+// Spec: §7.3.1 (Repository credentials)
+func pgPutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) error {
 	repo, userinfo, err := LayerRepoColumns(cfg)
 	if err != nil {
 		return err
@@ -1523,42 +1541,14 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	conn, release, err := p.org(ctx, cfg.TenantID)
-	if err != nil {
-		return err
-	}
-	defer release()
-	_, err = conn.ExecContext(ctx, `
+	_, err = ex.ExecContext(ctx, `
 		INSERT INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-		ON CONFLICT (tenant_id, id) DO UPDATE SET
-			source_type = EXCLUDED.source_type,
-			repo = EXCLUDED.repo,
-			ref = EXCLUDED.ref,
-			root = EXCLUDED.root,
-			local_path = EXCLUDED.local_path,
-			ord = EXCLUDED.ord,
-			user_defined = EXCLUDED.user_defined,
-			owner = EXCLUDED.owner,
-			public = EXCLUDED.public,
-			organization = EXCLUDED.organization,
-			groups = EXCLUDED.groups,
-			users = EXCLUDED.users,
-			webhook_secret = EXCLUDED.webhook_secret,
-			last_ingested_ref = EXCLUDED.last_ingested_ref,
-			force_push_policy = EXCLUDED.force_push_policy,
-			git_provider = EXCLUDED.git_provider,
-			created_at = EXCLUDED.created_at,
-			deleted_at = EXCLUDED.deleted_at,
-			last_ingested_at = EXCLUDED.last_ingested_at,
-			repo_userinfo = EXCLUDED.repo_userinfo,
-			trust_mode = EXCLUDED.trust_mode,
-			trust_requirements = EXCLUDED.trust_requirements,
-			trust_layer_root = EXCLUDED.trust_layer_root`,
+		ON CONFLICT (tenant_id, id) DO UPDATE SET `+layerWriteAssignments,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
@@ -1580,7 +1570,8 @@ func (p *Postgres) GetLayerConfig(ctx context.Context, tenantID, id string) (Lay
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
 		FROM layer_configs
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfigPG(row)
@@ -1601,7 +1592,8 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -1695,7 +1687,8 @@ func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string)
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1848,8 +1841,9 @@ func ptrFromNullTime(nt sql.NullTime) *time.Time {
 func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var repo, groups, users, trustReqs string
-	var deletedAt, lastIngestedAt sql.NullTime
+	var deletedAt, lastIngestedAt, mark, checkedAt sql.NullTime
 	var repoUserinfo sql.NullString
+	var details string
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
@@ -1857,13 +1851,20 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 		&cfg.Public, &cfg.Organization, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
 		&cfg.CreatedAt, &deletedAt, &lastIngestedAt, &repoUserinfo,
-		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot)
+		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot,
+		&mark, &cfg.Commit, &cfg.Status, &details,
+		&cfg.Dropped, &checkedAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}
 	if cfg.TrustRequirements, err = parseTrustRequirements(trustReqs); err != nil {
 		return LayerConfig{}, err
 	}
+	if cfg.Details, err = parseAttestationDetails(details); err != nil {
+		return LayerConfig{}, err
+	}
+	cfg.Mark = ptrFromNullTime(mark)
+	cfg.CheckedAt = ptrFromNullTime(checkedAt)
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)
 	if groups != "" {
 		cfg.Groups = strings.Split(groups, layerListSeparator)

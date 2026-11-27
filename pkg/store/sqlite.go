@@ -150,6 +150,12 @@ func (s *SQLite) applySchema() error {
 			trust_mode TEXT NOT NULL DEFAULT '',
 			trust_requirements TEXT NOT NULL DEFAULT '',
 			trust_layer_root TEXT NOT NULL DEFAULT '',
+			attestation_mark TEXT,
+			attested_commit TEXT NOT NULL DEFAULT '',
+			attestation_status TEXT NOT NULL DEFAULT '',
+			attestation_details TEXT NOT NULL DEFAULT '',
+			attestation_dropped INTEGER NOT NULL DEFAULT 0,
+			attestation_checked_at TEXT,
 			PRIMARY KEY (tenant_id, id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS vector_pending (
@@ -489,38 +495,8 @@ func sqliteHoldsClaim(ctx context.Context, q queryRower, tenantID, layerID, clai
 // returns the layer as stored and the claim it replaced. A layer that is
 // absent or unregistered claims nothing.
 func (s *SQLite) ClaimLayerIngest(ctx context.Context, tenantID, layerID, claim string) (LayerConfig, string, error) {
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return LayerConfig{}, "", err
-	}
-	defer func() { _ = tx.Rollback() }()
-	// A no-op update takes the write lock before the read, so no other
-	// claim can land between reading the old claim and writing the new one.
-	locked, err := rowsChanged(tx.ExecContext(ctx, `
-		UPDATE layer_configs SET ingest_claim = ingest_claim
-		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, layerID))
-	if err != nil {
-		return LayerConfig{}, "", err
-	}
-	if !locked {
-		return LayerConfig{}, "", ErrNotFound
-	}
-	var previous sql.NullString
-	if err := tx.QueryRowContext(ctx, `
-		SELECT ingest_claim FROM layer_configs WHERE tenant_id = ? AND id = ?`,
-		tenantID, layerID).Scan(&previous); err != nil {
-		return LayerConfig{}, "", err
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE layer_configs SET ingest_claim = ? WHERE tenant_id = ? AND id = ?`,
-		claim, tenantID, layerID); err != nil {
-		return LayerConfig{}, "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return LayerConfig{}, "", err
-	}
-	cfg, err := s.GetLayerConfig(ctx, tenantID, layerID)
-	return cfg, previous.String, err
+	cfg, previous, _, err := s.claimLayer(ctx, tenantID, layerID, claim, nil)
+	return cfg, previous, err
 }
 
 // ReleaseLayerIngest puts previous back as the layer's ingest claim when the
@@ -1079,6 +1055,11 @@ func (s *SQLite) IsOperator(ctx context.Context, identity string) (bool, error) 
 
 // PutLayerConfig inserts or replaces a layer config.
 func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
+	return sqlitePutLayer(ctx, s.db, cfg)
+}
+
+// sqlitePutLayer writes cfg through ex, a database or a transaction.
+func sqlitePutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) error {
 	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
 	// statement, so a config it refuses writes nothing.
 	repo, userinfo, err := LayerRepoColumns(cfg)
@@ -1097,24 +1078,25 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
 	}
-	// The REPLACE deletes the old row, so the §7.3.1 ingest claim is carried
-	// over from it; dropping it would supersede a cycle in flight on every
-	// layer update.
-	_, err = s.db.ExecContext(ctx, `
-		INSERT OR REPLACE INTO layer_configs
+	// The upsert names the columns a layer write carries, so the §7.3.1 ingest
+	// claim and the §4.7.11 attestation record stay as stored, on a live row
+	// and on a soft-deleted one; dropping the claim would supersede a cycle in
+	// flight on every layer update.
+	_, err = ex.ExecContext(ctx, `
+		INSERT INTO layer_configs
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-			 repo_userinfo, ingest_claim, trust_mode, trust_requirements, trust_layer_root)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			(SELECT ingest_claim FROM layer_configs WHERE tenant_id = ? AND id = ?), ?, ?, ?)`,
+			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		ON CONFLICT (tenant_id, id) DO UPDATE SET `+layerWriteAssignments,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
-		userinfo, cfg.TenantID, cfg.ID, cfg.TrustMode, trustReqs, cfg.TrustLayerRoot)
+		userinfo, cfg.TrustMode, trustReqs, cfg.TrustLayerRoot)
 	return err
 }
 
@@ -1124,7 +1106,8 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
 		FROM layer_configs
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
@@ -1140,7 +1123,8 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -1220,7 +1204,8 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1283,7 +1268,8 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var userDefined, public, org int
 	var repo, groups, users, createdAt, trustReqs string
-	var deletedAt, lastIngestedAt, repoUserinfo sql.NullString
+	var deletedAt, lastIngestedAt, repoUserinfo, mark, checkedAt sql.NullString
+	var details string
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
@@ -1291,13 +1277,20 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 		&public, &org, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
 		&createdAt, &deletedAt, &lastIngestedAt, &repoUserinfo,
-		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot)
+		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot,
+		&mark, &cfg.Commit, &cfg.Status, &details,
+		&cfg.Dropped, &checkedAt)
 	if err != nil {
 		return LayerConfig{}, err
 	}
 	if cfg.TrustRequirements, err = parseTrustRequirements(trustReqs); err != nil {
 		return LayerConfig{}, err
 	}
+	if cfg.Details, err = parseAttestationDetails(details); err != nil {
+		return LayerConfig{}, err
+	}
+	cfg.Mark = parseNullTimeText(mark)
+	cfg.CheckedAt = parseNullTimeText(checkedAt)
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)
 	cfg.UserDefined = userDefined != 0
 	cfg.Public = public != 0

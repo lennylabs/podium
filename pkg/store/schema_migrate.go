@@ -96,6 +96,12 @@ var additiveColumns = []additiveColumn{
 	{"layer_configs", "trust_mode TEXT NOT NULL DEFAULT ''", "trust_mode TEXT NOT NULL DEFAULT ''"},
 	{"layer_configs", "trust_requirements TEXT NOT NULL DEFAULT ''", "trust_requirements TEXT NOT NULL DEFAULT ''"},
 	{"layer_configs", "trust_layer_root TEXT NOT NULL DEFAULT ''", "trust_layer_root TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "attestation_mark TEXT", "attestation_mark TIMESTAMPTZ"},
+	{"layer_configs", "attested_commit TEXT NOT NULL DEFAULT ''", "attested_commit TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "attestation_status TEXT NOT NULL DEFAULT ''", "attestation_status TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "attestation_details TEXT NOT NULL DEFAULT ''", "attestation_details TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "attestation_dropped INTEGER NOT NULL DEFAULT 0", "attestation_dropped BIGINT NOT NULL DEFAULT 0"},
+	{"layer_configs", "attestation_checked_at TEXT", "attestation_checked_at TIMESTAMPTZ"},
 
 	// vector_pending
 	{"vector_pending", "attempts INTEGER NOT NULL DEFAULT 0", "attempts BIGINT NOT NULL DEFAULT 0"},

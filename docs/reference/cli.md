@@ -1030,7 +1030,7 @@ No flag takes the token as an argument value. The force-push policy is also sett
 
 #### Trust policy flags
 
-The trust flags set the layer's trust policy, which ingest verification of author attestations applies. The registry stores and validates the policy; no ingest step verifies attestations against it yet. [Layer trust policy](../deployment/content/layers#layer-trust-policy) describes the policy.
+The trust flags set the layer's trust policy, which ingest verification of author attestations applies. Every ingest cycle of a layer under `warn` or `require` verifies the layer's bundles against it ([Ingest verification](../deployment/content/layers#ingest-verification)). [Layer trust policy](../deployment/content/layers#layer-trust-policy) describes the policy.
 
 | Flag | Effect |
 |:--|:--|
@@ -1137,7 +1137,7 @@ Prints one layer, with its trust policy.
 podium layer show <id> [--requirements]
 ```
 
-The command reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output. The object includes `trust_mode`, `trust_requirements`, and `trust_layer_root`, with any source binding members the registry derived. The command exits 1 when the caller's layer read holds no layer with that ID, which includes a layer the caller cannot read, and when the read fails. It exits 2 on a usage error.
+The command reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output. The object includes `trust_mode`, `trust_requirements`, and `trust_layer_root`, with any source binding members the registry derived, and the layer's attestation record: `attestation_mark`, `attested_commit`, `attestation_status`, `attestation_details`, `attestation_dropped`, and `attestation_checked_at`, each present once an ingest cycle has written it. When `attestation_status` is neither empty nor `ok`, the command writes on standard error the next step for that code and constraint. It also writes there the number of artifacts the last cycle dropped, and, for a layer in the mode `none` that holds a record, that no cycle updates the record in that mode. A control character in the object is written as a `\u` escape. The command exits 1 when the caller's layer read holds no layer with that ID, which includes a layer the caller cannot read, and when the read fails. It exits 2 on a usage error.
 
 With `--requirements`, the command prints the layer's `trust_requirements` as a requirements file in place of the layer object, with the members the registry derived, and exits 1 when the layer has no requirement. [`podium attest check --requirements`](#podium-attest-check) reads the file and applies the bindings the registry applies:
 
@@ -1197,7 +1197,7 @@ podium layer restore <id>
 Forces a re-pull of a layer's source.
 
 ```
-podium layer reingest <id> [--break-glass --justification <text> --approver <id> --approver <id>]
+podium layer reingest <id> [--break-glass --justification <text> --approver <id> --approver <id>] [--reset-attestation-mark [--to-commit <sha>]]
 ```
 
 | Flag | Effect |
@@ -1205,6 +1205,8 @@ podium layer reingest <id> [--break-glass --justification <text> --approver <id>
 | `--break-glass` | Override an active freeze window. Requires `--justification`. |
 | `--justification <text>` | Reason for the break-glass override. |
 | `--approver <id>` | Break-glass approver identity. Repeatable. |
+| `--reset-attestation-mark` | Clear the layer's attestation mark and recorded commit in the write that claims the layer for this reingest, so the cycle accepts a layer subject older than the last accepted one. |
+| `--to-commit <sha>` | With `--reset-attestation-mark`, record this full commit name, so the cycle accepts only a layer subject whose signed commit equals it or descends from it. Refused on a `local` layer. |
 
 During a freeze window, ingest is blocked unless `--break-glass` is passed with a justification. Break-glass requires dual sign-off, so supply two distinct approver identities with repeated `--approver` flags. A grant expires automatically after 24 hours and queues for post-hoc security review.
 
@@ -1219,10 +1221,10 @@ The command reports each artifact of the cycle:
 | Exit code | Meaning |
 |:--|:--|
 | `0` | None of the conditions below applies. |
-| `1` | The cycle dropped at least one artifact, a lint diagnostic rejected one, or the request failed. |
+| `1` | The cycle dropped at least one artifact, a lint diagnostic rejected one, an attestation step refused the cycle, or the request failed. |
 | `2` | Usage error. |
 
-A non-blocking advisory and an artifact whose embedding call failed are reported without changing the exit status, and the artifact is stored and served. The reingest response reports lint diagnostics only as a count. To read the per-artifact diagnostics, run `podium lint --registry <path>` against the source.
+A non-blocking advisory and an artifact whose embedding call failed are reported without changing the exit status, and the artifact is stored and served. A cycle of a layer under `require` that the [layer trust policy](../deployment/content/layers#ingest-verification) refuses prints the `ingest.attestation_*` error response with its `details`. The reingest response reports lint diagnostics only as a count. To read the per-artifact diagnostics, run `podium lint --registry <path>` against the source.
 
 ### `podium layer update`
 

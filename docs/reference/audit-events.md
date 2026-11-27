@@ -49,7 +49,7 @@ The client reports `caller.client` itself, and the registry does not verify it. 
 
 Read events and the events of write and administrative requests, including `user.erased`, carry `caller.client` when the request named its client. The following events carry none:
 
-- The events the ingest pipeline raises: `artifact.published`, `artifact.deprecated`, `artifact.signed`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, and `freeze.break_glass`. They carry no `caller.client` even when a reingest or webhook request triggered the ingest.
+- The events the ingest pipeline raises: `artifact.published`, `artifact.deprecated`, `artifact.signed`, `domain.published`, `layer.ingested`, `layer.history_rewritten`, `layer.attestation_verified`, `layer.attestation_failed`, `layer.attestation_mark_reset`, and `freeze.break_glass`. They carry no `caller.client` even when a reingest or webhook request triggered the ingest.
 - Events raised without a request, such as the `user.erased` that `podium admin erase --local` writes.
 - Events about the registry as a whole, such as `audit.anchored`. This includes the `audit.anchored` the registry appends after an erasure while it serves the erase request.
 
@@ -75,6 +75,9 @@ The registry stream records the following events. Each carries the trace ID of t
 | `domain.published` | A `DOMAIN.md` was added or changed. |
 | `layer.ingested` | A layer completed an ingest cycle. |
 | `layer.history_rewritten` | A force-push or history rewrite was detected on a `git`-source layer. |
+| `layer.attestation_verified` | An ingest cycle passed the layer step of its trust policy. The context carries the snapshot reference, the layer attested time, the accepted bundles with their digest, predicate type, instance, issuer, identity, log index, and attested time, the counts of matched, mismatched, and missing artifacts, and the bundles no requirement accepted with their refusal reasons. |
+| `layer.attestation_failed` | An ingest cycle's layer step failed, or its trust policy was invalid. The context carries the code, the constraint, the `details`, the mode, and the snapshot reference where known. |
+| `layer.attestation_mark_reset` | A reingest reset the layer's attestation mark. The context carries the previous mark, the previous commit, the commit the reset named, and the caller. |
 | `layer.config_changed` | An admin-defined layer was added, removed, restored, or patched, or the tenant's layer order changed. |
 | `layer.user_registered` | A personal layer was registered, unregistered, patched, restored, or erased. |
 | `admin.granted` | An admin grant was added or revoked. |

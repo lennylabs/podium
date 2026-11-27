@@ -134,7 +134,7 @@ func TestBootstrapLayerPath_KeepsStoredTrustPolicy(t *testing.T) {
 	st := newMemoryStoreWithTenant(t)
 	policy := store.LayerConfig{TrustMode: "warn", TrustLayerRoot: "skills",
 		TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: "i", Identity: "alice@acme.com"}}}}}
-	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 	if err != nil || len(layers) != 1 {
 		t.Fatalf("first start: %v %v", layers, err)
 	}
@@ -144,7 +144,7 @@ func TestBootstrapLayerPath_KeepsStoredTrustPolicy(t *testing.T) {
 	if err := st.PutLayerConfig(context.Background(), stored); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil); err != nil {
+	if _, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{}); err != nil {
 		t.Fatalf("second start: %v", err)
 	}
 	if got, _ := st.GetLayerConfig(context.Background(), "default", id); !layer.TrustPolicyEqual(got, policy) {
@@ -233,7 +233,7 @@ func TestLayerTrust_SeedPathsFailClosed(t *testing.T) {
 	}
 	root := t.TempDir()
 	testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "a/ARTIFACT.md", Content: artifactBody})
-	if _, err := bootstrapLayerPath(failingGetStore{newMemoryStoreWithTenant(t)}, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil); err == nil {
+	if _, err := bootstrapLayerPath(failingGetStore{newMemoryStoreWithTenant(t)}, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{}); err == nil {
 		t.Error("a failed read of the stored layer did not abort the re-seed")
 	}
 	if got := trustLogTenants(context.Background(), failingTenantsStore{newMemoryStoreWithTenant(t)}, true, "default"); len(got) != 1 || got[0] != "default" {

@@ -674,12 +674,12 @@ func (m *markerRecorder) PutManifest(ctx context.Context, rec store.ManifestReco
 	return m.Store.PutManifest(ctx, rec)
 }
 
-func (m *markerRecorder) PutLayerConfig(ctx context.Context, cfg store.LayerConfig) error {
+func (m *markerRecorder) MigrateLayerConfig(ctx context.Context, cfg store.LayerConfig) (store.AttestationCopy, error) {
 	m.calls = append(m.calls, "layer:"+cfg.TenantID)
 	if m.layerErr != nil {
-		return m.layerErr
+		return "", m.layerErr
 	}
-	return m.Store.PutLayerConfig(ctx, cfg)
+	return m.Store.MigrateLayerConfig(ctx, cfg)
 }
 
 func (m *markerRecorder) GrantAdmin(ctx context.Context, g store.AdminGrant) error {
@@ -934,7 +934,7 @@ func TestPumpStore_WritesTenantsInIDOrderAndResumes(t *testing.T) {
 // TestPumpStore_TenantWriteErrorsStopThePump pins that a CreateTenant or
 // UpdateTenant failure stops the pump before any of the tenant's rows are
 // written, where the pump once discarded the CreateTenant error, and that a
-// PutLayerConfig or GrantAdmin failure stops the pump with an error naming the
+// MigrateLayerConfig or GrantAdmin failure stops the pump with an error naming the
 // tenant.
 //
 // Spec: §13.10

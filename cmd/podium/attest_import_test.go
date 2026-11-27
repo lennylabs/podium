@@ -295,15 +295,15 @@ func TestAttestImport_Refusals(t *testing.T) {
 // overflowed the read limit.
 func TestReadAttestLimits(t *testing.T) {
 	l, err := readAttestLimits(func(string) string { return "" })
-	if err != nil || l.maxBytes != attest.DefaultMaxBundleBytes || l.maxBundles != attest.DefaultMaxBundles {
+	if err != nil || l.MaxBytes != attest.DefaultMaxBundleBytes || l.MaxBundles != attest.DefaultMaxBundles {
 		t.Fatalf("defaults = %+v, %v", l, err)
 	}
 	env := map[string]string{attestMaxBytesEnv: " 2048 ", attestMaxBundlesEnv: "3"}
-	if l, err := readAttestLimits(func(k string) string { return env[k] }); err != nil || l.maxBytes != 2048 || l.maxBundles != 3 {
+	if l, err := readAttestLimits(func(k string) string { return env[k] }); err != nil || l.MaxBytes != 2048 || l.MaxBundles != 3 {
 		t.Fatalf("set = %+v, %v", l, err)
 	}
 	at := map[string]string{attestMaxBytesEnv: "1073741824", attestMaxBundlesEnv: "4096"}
-	if l, err := readAttestLimits(func(k string) string { return at[k] }); err != nil || l.maxBytes != 1<<30 || l.maxBundles != 4096 {
+	if l, err := readAttestLimits(func(k string) string { return at[k] }); err != nil || l.MaxBytes != 1<<30 || l.MaxBundles != 4096 {
 		t.Fatalf("the largest values = %+v, %v", l, err)
 	}
 	if readLimit(math.MaxInt64) != math.MaxInt64 || readLimit(5) != 6 {

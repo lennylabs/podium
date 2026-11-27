@@ -37,8 +37,10 @@ func escapingLayerTree(t *testing.T) (parent, root string) {
 
 // Spec: §7.3.1, §6.10 — a bundled resource reached through a symbolic link
 // that leaves the layer directory fails the layer's whole ingest with the
-// source-unreachable sentinel. The domain walk commits ahead of the artifact
-// walk, so the domain record is present while no artifact is.
+// source-unreachable sentinel. Spec: §4.7.11 (Ingest verification) — both
+// walks run before the cycle's first store write, so the refused cycle
+// writes neither an artifact nor a domain record and emits no
+// domain.published.
 func TestSourceIngest_EscapingResourceFailsTheLayer(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -83,14 +85,15 @@ func TestSourceIngest_EscapingResourceFailsTheLayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDomains: %v", err)
 	}
-	if len(domains) != 1 {
-		t.Fatalf("want the layer's domain record, got %d", len(domains))
+	if len(domains) != 0 || len(published) != 0 || countDomainPublished(audited) != 0 {
+		t.Fatalf("refused cycle wrote %d domain records and emitted %d change events and %d audited domain.published, want none",
+			len(domains), len(published), countDomainPublished(audited))
 	}
 	firstPublished := len(published)
 	firstAudited := countDomainPublished(audited)
 
-	// A second refused cycle over the same unchanged tree keeps the domain
-	// record and emits no further domain.published on either seam.
+	// A second refused cycle over the same unchanged tree writes nothing
+	// either.
 	if _, err := ingest.Ingest(ctx, st, req()); !errors.Is(err, source.ErrSourceUnreachable) {
 		t.Fatalf("second cycle: want ErrSourceUnreachable, got %v", err)
 	}
@@ -98,8 +101,8 @@ func TestSourceIngest_EscapingResourceFailsTheLayer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDomains: %v", err)
 	}
-	if len(domains) != 1 {
-		t.Errorf("second cycle: want 1 domain record, got %d", len(domains))
+	if len(domains) != 0 {
+		t.Errorf("second cycle: want no domain record, got %d", len(domains))
 	}
 	if len(published) != firstPublished {
 		t.Errorf("second cycle emitted %d further change events, want 0", len(published)-firstPublished)

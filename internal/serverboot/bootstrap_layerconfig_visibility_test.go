@@ -28,7 +28,7 @@ func TestBootstrapLayerPath_HonorsLayerConfigVisibility(t *testing.T) {
 
 	// Bootstrap default is public (no-identity standalone). The declared
 	// layer must override it; the undeclared layer must keep it.
-	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -91,7 +91,7 @@ func TestBootstrapLayerPath_EmptyLayerConfigFallsBackToDefault(t *testing.T) {
 		testharness.WriteTreeOption{Path: "lyr/.layer-config", Content: "visibility:\n"},
 	)
 
-	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}

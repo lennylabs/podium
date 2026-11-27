@@ -217,6 +217,8 @@ func TestLayerWriteAuth_UserDefinedOwnerOrAdmin(t *testing.T) {
 // field is supplied by the requesting caller. A refused caller runs no
 // ingest, and a break-glass body is refused on the same terms, because the
 // gate runs before the pipeline and so bypasses no freeze window (§4.7.2).
+// Spec: §4.7.11 (Mark reset) — a reset body needs the same authority, so a
+// refused caller's reset never reaches the pipeline.
 func TestLayerWriteAuth_ReingestAdminDefined(t *testing.T) {
 	t.Parallel()
 	callers := []struct {
@@ -238,6 +240,7 @@ func TestLayerWriteAuth_ReingestAdminDefined(t *testing.T) {
 		{name: "break-glass", body: map[string]any{
 			"break_glass": true, "justification": "incident 7", "approvers": []string{"ops", "sec"},
 		}},
+		{name: "mark-reset", body: map[string]any{"reset_attestation_mark": true}},
 	}
 	for _, c := range callers {
 		for _, b := range bodies {
@@ -247,9 +250,12 @@ func TestLayerWriteAuth_ReingestAdminDefined(t *testing.T) {
 				// The stored Owner names alice on an admin-defined layer,
 				// which is the caller-supplied field the rule disregards.
 				seedLayer(t, st, store.LayerConfig{ID: "own", Owner: "alice"})
-				var ran atomic.Int64
-				runner := func(context.Context, store.LayerConfig, *server.BreakGlass) (*ingest.Result, error) {
+				var ran, resets atomic.Int64
+				runner := func(ctx context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
 					ran.Add(1)
+					if server.MarkResetFromContext(ctx) != nil {
+						resets.Add(1)
+					}
 					return &ingest.Result{Accepted: 1}, nil
 				}
 				base := newLayerWriteServer(t, st, c.admin, c.id, runner)
@@ -269,8 +275,53 @@ func TestLayerWriteAuth_ReingestAdminDefined(t *testing.T) {
 				if n := ran.Load(); n != 1 {
 					t.Errorf("authorized reingest ran the pipeline %d times, want 1", n)
 				}
+				if want := int64(0); b.name == "mark-reset" && resets.Load() != 1 || b.name != "mark-reset" && resets.Load() != want {
+					t.Errorf("resets reaching the pipeline = %d", resets.Load())
+				}
 			})
 		}
+	}
+}
+
+// Spec: §4.7.11 (Mark reset), §7.3.1 — on a user-defined layer a reingest
+// that carries a mark reset is authorized to the stored owner and to a tenant
+// admin, and refused with auth.forbidden to another subject and to a caller
+// with no subject, whose reset never reaches the pipeline.
+func TestLayerWriteAuth_MarkResetUserDefined(t *testing.T) {
+	t.Parallel()
+	for _, c := range []struct {
+		name  string
+		id    layer.Identity
+		admin bool
+		want  int
+	}{
+		{"owner", aliceID, false, http.StatusOK},
+		{"other-subject", bobID, false, http.StatusForbidden},
+		{"no-subject", noSubject, false, http.StatusForbidden},
+		{"admin", bobID, true, http.StatusOK},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			st := newLayerWriteStore(t)
+			cfg := store.LayerConfig{ID: "own", UserDefined: true, Owner: "alice", Users: []string{"alice"}}
+			gitSource(&cfg)
+			seedLayer(t, st, cfg)
+			var resets atomic.Int64
+			runner := func(ctx context.Context, _ store.LayerConfig, _ *server.BreakGlass) (*ingest.Result, error) {
+				if server.MarkResetFromContext(ctx) != nil {
+					resets.Add(1)
+				}
+				return &ingest.Result{Removed: []string{}}, nil
+			}
+			base := newLayerWriteServer(t, st, c.admin, c.id, runner)
+			resp, body := mustPost(t, base, "/v1/layers/reingest?id=own", map[string]any{"reset_attestation_mark": true})
+			if resp.StatusCode != c.want {
+				t.Fatalf("status %d, want %d: %s", resp.StatusCode, c.want, body)
+			}
+			if c.want == http.StatusForbidden && errCode(t, body) != "auth.forbidden" || (c.want == http.StatusOK) != (resets.Load() == 1) {
+				t.Errorf("code %q, resets reaching the pipeline %d", errCode(t, body), resets.Load())
+			}
+		})
 	}
 }
 

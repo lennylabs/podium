@@ -81,6 +81,10 @@ func TestWakesWatchers_EveryField(t *testing.T) {
 		{"LastIngestedAt", func(c *store.LayerConfig) { c.LastIngestedAt = &other }, false},
 		{"CreatedAt", func(c *store.LayerConfig) { c.CreatedAt = other }, false},
 		{"DeletedAt", func(c *store.LayerConfig) { c.DeletedAt = &other }, false},
+		// Spec: §4.7.11 (Attestation record) — no layer write carries the
+		// record, so a difference in it is no change of the layer and wakes
+		// no watcher.
+		{"AttestationRecord", func(c *store.LayerConfig) { c.Status = "ok" }, false},
 	}
 
 	tabled := map[string]bool{}
@@ -90,7 +94,11 @@ func TestWakesWatchers_EveryField(t *testing.T) {
 			before := baseLayerConfig()
 			after := baseLayerConfig()
 			tc.mutate(&after)
-			if layerConfigEqual(before, after) {
+			if tc.field == "AttestationRecord" {
+				if !layerConfigEqual(before, after) {
+					t.Errorf("layerConfigEqual compares the attestation record, which no layer write carries")
+				}
+			} else if layerConfigEqual(before, after) {
 				t.Fatalf("%s: the case mutated nothing, so it tests nothing", tc.field)
 			}
 			if got := wakesWatchers(before, after); got != tc.wake {

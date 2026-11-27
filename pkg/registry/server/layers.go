@@ -2362,6 +2362,10 @@ type reingestRequest struct {
 	BreakGlass    bool     `json:"break_glass,omitempty"`
 	Justification string   `json:"justification,omitempty"`
 	Approvers     []string `json:"approvers,omitempty"`
+	// ResetAttestationMark and ToCommit request the §4.7.11 mark reset,
+	// which the cycle applies in the write that claims the layer.
+	ResetAttestationMark bool   `json:"reset_attestation_mark,omitempty"`
+	ToCommit             string `json:"to_commit,omitempty"`
 }
 
 // reingest handles POST /v1/layers/reingest?id=ID, the §7.3.1 manual reingest
@@ -2434,6 +2438,23 @@ func (e *LayerEndpoint) reingest(w http.ResponseWriter, r *http.Request) {
 	// process's own rights, so it is a tenant admin's operation.
 	if !e.authorizeLocalSource(w, r, cfg.SourceType, cfg.LocalPath, cfg.CloneRepo()) {
 		return
+	}
+	// Spec: §4.7.11 (Mark reset) — the reset needs the layer write
+	// authority above, and the cycle applies it with its claim.
+	reset, err := markReset(body, cfg)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	if reset != nil {
+		// A registry with no ingest pipeline records the reingest as queued
+		// and would drop the reset, so it refuses the request instead.
+		if e.reingestRunner == nil {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument",
+				"reset_attestation_mark needs the ingest pipeline, which this registry does not run")
+			return
+		}
+		r = r.WithContext(WithMarkReset(r.Context(), reset))
 	}
 	e.runIngestAndRespond(w, r, cfg, bg)
 }
@@ -2624,6 +2645,11 @@ func writeReingestError(w http.ResponseWriter, err error, res *ingest.Result) {
 		writeError(w, http.StatusConflict, "ingest.frozen", err.Error())
 	case errors.Is(err, ingest.ErrHistoryRewritten):
 		writeError(w, http.StatusConflict, "ingest.history_rewritten", err.Error())
+	case errors.Is(err, ingest.ErrAttestationRefused):
+		// Spec: §4.7.11 (Ingest verification) — a refused cycle answers with
+		// the attestation code and its details object.
+		e, _ := spi.AsError(err)
+		writeErrorDetails(w, http.StatusUnprocessableEntity, e.Code, err.Error(), e.Details)
 	case errors.Is(err, ingest.ErrLintFailed), errors.Is(err, ingest.ErrInvalidArtifact):
 		if res != nil && len(res.Removed) > 0 {
 			writeErrorDetails(w, http.StatusUnprocessableEntity, "ingest.lint_failed", err.Error(),

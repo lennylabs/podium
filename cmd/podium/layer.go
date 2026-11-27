@@ -415,7 +415,9 @@ func layerList(args []string) int {
 		fmt.Fprintf(os.Stderr, "list failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
-	fmt.Println(string(out))
+	// Spec: §4.7.11 (Reported strings) — a control character a layer object
+	// carries is written as a \u escape.
+	fmt.Println(string(escapeControls(out)))
 	return 0
 }
 
@@ -510,6 +512,11 @@ func layerReingest(args []string) int {
 	// dual-signoff rule) two distinct approvers, both supplied by the
 	// repeatable --approver flag.
 	breakGlass := fs.Bool("break-glass", false, "override an active freeze window (requires --justification)")
+	// Spec: §4.7.11 (Mark reset) — clear the attestation mark, and with
+	// --to-commit record the commit the next accepted layer subject must
+	// equal or descend from.
+	resetMark := fs.Bool("reset-attestation-mark", false, "clear the layer's attestation mark and recorded attested commit")
+	toCommit := fs.String("to-commit", "", "with --reset-attestation-mark, the commit to record as the attested commit")
 	justification := fs.String("justification", "", "reason for the break-glass override")
 	var approvers stringSliceFlag
 	fs.Var(&approvers, "approver", "break-glass approver identity (repeatable, for dual-signoff)")
@@ -519,7 +526,11 @@ func layerReingest(args []string) int {
 		return parseExit(err)
 	}
 	if nargs != 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium layer reingest [--break-glass --justification <text>] <id>")
+		fmt.Fprintln(os.Stderr, "usage: podium layer reingest [--break-glass --justification <text>] [--reset-attestation-mark [--to-commit <sha>]] <id>")
+		return 2
+	}
+	if *toCommit != "" && !*resetMark {
+		fmt.Fprintln(os.Stderr, "error: --to-commit is only valid with --reset-attestation-mark")
 		return 2
 	}
 	*registry = resolveLayerRegistry(*registry)
@@ -532,15 +543,24 @@ func layerReingest(args []string) int {
 		return 2
 	}
 	var body any
+	req := map[string]any{}
 	if *breakGlass {
 		if *justification == "" {
 			fmt.Fprintln(os.Stderr, "error: --break-glass requires --justification")
 			return 2
 		}
-		req := map[string]any{"break_glass": true, "justification": *justification}
+		req["break_glass"], req["justification"] = true, *justification
 		if len(approvers) > 0 {
 			req["approvers"] = []string(approvers)
 		}
+	}
+	if *resetMark {
+		req["reset_attestation_mark"] = true
+		if *toCommit != "" {
+			req["to_commit"] = *toCommit
+		}
+	}
+	if len(req) > 0 {
 		body = req
 	}
 	out, status := doJSON(*registry+"/v1/layers/reingest?id="+id, "POST", body)
