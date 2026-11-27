@@ -277,8 +277,8 @@ func TestSigstoreKeyless_VerifyRefusals(t *testing.T) {
 		{name: "leaf issued by the TSA root", env: []sh.EnvOpt{sh.WithLeafIssuedByTSARoot()}, want: "does not chain"},
 		{name: "token signed under the Fulcio root", env: []sh.EnvOpt{sh.WithTimestampSignedByFulcioCA()}, want: "verifies under no authority"},
 		{name: "no certificate authority", root: []sh.RootOpt{sh.WithoutCAs()}, want: "does not chain"},
-		{name: "no log key", root: []sh.RootOpt{sh.WithoutTLogs()}, want: "names no transparency log"},
-		{name: "only another log's key", root: []sh.RootOpt{sh.WithoutTLogs(), sh.WithUnsupportedLogKey(), sh.WithExtraTLog()}, want: "names no transparency log"},
+		{name: "no log key", root: []sh.RootOpt{sh.WithoutTLogs()}, want: "names no log of the trusted root"},
+		{name: "only another log's key", root: []sh.RootOpt{sh.WithoutTLogs(), sh.WithUnsupportedLogKey(), sh.WithExtraTLog()}, want: "names no log of the trusted root"},
 		{name: "no timestamp authority", root: []sh.RootOpt{sh.WithoutTSAs()}, want: "verifies under no authority"},
 		{name: "timestamp authority expired", root: []sh.RootOpt{sh.WithTSAValidFor(&tsaStart, &tsaEnd)}, want: "verifies under no authority"},
 		{name: "CT log listed and no SCT", root: []sh.RootOpt{sh.WithCTLogKey()}, want: "no signed certificate timestamp"},
@@ -399,7 +399,7 @@ func TestSigstoreKeyless_VerifyLogEntryRefusals(t *testing.T) {
 			want: "checkpoint whose origin is not the log's host"},
 		{name: "bound v2 body under a Rekor v1 checkpoint", env: []sh.EnvOpt{sh.WithKeylessV1Checkpoint()},
 			want: "checkpoint whose origin is not the log's host"},
-		{name: "log ID of an unlisted key", env: []sh.EnvOpt{sh.WithForeignLogID()}, want: "names no transparency log"},
+		{name: "log ID of an unlisted key", env: []sh.EnvOpt{sh.WithForeignLogID()}, want: "names no log of the trusted root"},
 		{name: "no inclusion proof", env: []sh.EnvOpt{sh.WithoutInclusionProof()}, want: "(parse)"},
 		{name: "flipped proof hash", env: []sh.EnvOpt{sh.WithFlippedProofHash()}, want: "log entry does not verify"},
 		{name: "wrong log index", env: []sh.EnvOpt{sh.WithLogIndex(4)}, want: "log entry does not verify"},
@@ -470,8 +470,8 @@ func TestSigstoreKeyless_VerifyTrustedRootWindows(t *testing.T) {
 		want string // empty means accepted
 	}{
 		{"log window ending at T", sh.WithLogValidFor(sh.Window{Start: at(-time.Hour), End: at(0)}), ""},
-		{"log window ending before T", sh.WithLogValidFor(sh.Window{Start: at(-time.Hour), End: at(-time.Second)}), "window excludes a verified time"},
-		{"log window starting after T", sh.WithLogValidFor(sh.Window{Start: at(time.Second)}), "window excludes a verified time"},
+		{"log window ending before T", sh.WithLogValidFor(sh.Window{Start: at(-time.Hour), End: at(-time.Second)}), "outside the log key's validity window (time)"},
+		{"log window starting after T", sh.WithLogValidFor(sh.Window{Start: at(time.Second)}), "outside the log key's validity window (time)"},
 		{"CA window starting at T", sh.WithCAValidFor(at(0), nil), ""},
 		{"CA window ending before T", sh.WithCAValidFor(at(-2*time.Hour), at(-time.Second)), "does not chain"},
 		{"TSA window ending before T", sh.WithTSAValidFor(at(-2*time.Hour), at(-time.Second)), "verifies under no authority"},
@@ -480,7 +480,7 @@ func TestSigstoreKeyless_VerifyTrustedRootWindows(t *testing.T) {
 			sh.Window{Start: at(-time.Second)}), ""},
 		{"key listed twice, the last listing excludes T", sh.WithLogValidFor(
 			sh.Window{Start: at(-time.Second)},
-			sh.Window{Start: at(-2 * time.Hour), End: at(-time.Hour)}), "window excludes a verified time"},
+			sh.Window{Start: at(-2 * time.Hour), End: at(-time.Hour)}), "outside the log key's validity window (time)"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

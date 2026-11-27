@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
-	"encoding/hex"
 	"errors"
 	"fmt"
 
@@ -84,19 +83,15 @@ func parseKeylessBundle(raw, digest []byte) (*bundle.Bundle, *protobundle.Bundle
 	return b, pb, nil
 }
 
-// checkKeylessEntry requires the bundle's log entry to have a Rekor v2
-// body, of a log the trusted root lists, whose key window contains each
-// verified time. The entry form is a §4.7.11 rule, which checkLog applies
-// through checkLogEntryForm: the kind and version come from the signed
-// body, and a Rekor v2 body is a hashedrekord 0.0.2 body under a
-// checkpoint whose origin is the log's host, where the library rebuilds
-// the entry from the bundle. §4.7.9 admits the Rekor v2 form alone, so a
-// Rekor v1 body, which that rule accepts under a v1 checkpoint, is refused
-// here. sigstore-go selects the log by the entry's log ID and does not
-// read the window for an inclusion proof, so the window is checked here,
-// as §4.7.9 requires of every trust-root entry. A log listed more than
-// once under one log ID is known to the library by its last listing, and
-// that listing's window applies.
+// checkKeylessEntry requires the bundle's one log entry to have a Rekor v2
+// body. The rest of the log entry conditions are §4.7.11 rules that
+// checkLog applies to both paths: checkLogEntryForm reads the kind and
+// version from the signed body, requires a Rekor v2 body to be a
+// hashedrekord 0.0.2 body of a listed log under a checkpoint whose origin
+// is the log's host, where the library rebuilds the entry from the bundle,
+// and checkLogKeyWindow requires the log key's window to contain each
+// verified time. §4.7.9 admits the Rekor v2 form alone, so a Rekor v1 body,
+// which §4.7.11 accepts under a v1 checkpoint, is refused here.
 //
 // Spec: §4.7.9.
 func (v *bundleVerification) checkKeylessEntry() error {
@@ -106,16 +101,6 @@ func (v *bundleVerification) checkKeylessEntry() error {
 	}
 	if !entries[0].IsRekorV2() {
 		return refuse(ReasonLogEntry, "the log entry body is not a Rekor v2 hashedrekord 0.0.2 entry", nil)
-	}
-	log, ok := v.root.RekorLogs()[hex.EncodeToString([]byte(entries[0].LogKeyID()))]
-	if !ok {
-		return refuse(ReasonLogEntry, "the log entry names no transparency log of the trusted root", nil)
-	}
-	for _, t := range v.times {
-		if (!log.ValidityPeriodStart.IsZero() && t.Before(log.ValidityPeriodStart)) ||
-			(!log.ValidityPeriodEnd.IsZero() && t.After(log.ValidityPeriodEnd)) {
-			return refuse(ReasonLogEntry, "the log key's window excludes a verified time", nil)
-		}
 	}
 	return nil
 }
