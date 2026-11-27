@@ -71,9 +71,13 @@ var (
 // Registry is the core registry type. Construct one per tenant; the
 // caller passes Identity in per request to drive visibility filtering.
 type Registry struct {
-	store    store.Store
-	tenantID string
-	layers   []layer.Layer
+	store store.Store
+	// attestationPolicy decides the §4.7.11 served outcome of a verified
+	// version while its layer's policy is invalid. Nil serves the stored
+	// outcome.
+	attestationPolicy AttestationPolicyCheck
+	tenantID          string
+	layers            []layer.Layer
 	// projection caches the name and when_to_use a stored row's bytes
 	// resolve to, for the rows a SQL store returns without them.
 	projection *projectionFieldCache
@@ -1549,6 +1553,14 @@ type LoadArtifactResult struct {
 	//
 	// Spec: §7.2, §13.4.
 	PackageDigest string
+	// Attestations and AttestationOutcome are the §7.2 attestation members:
+	// the links of the served version and the outcome the registry serves
+	// for it, nil for not_evaluated. The registry asserts both, and neither is
+	// a field of the §4.7.10 delivery record.
+	//
+	// Spec: §7.2 (Attestation members)
+	Attestations       []AttestationReference
+	AttestationOutcome *ServedOutcome
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1829,6 +1841,11 @@ func (r *Registry) assembleResult(ctx context.Context, rec store.ManifestRecord)
 	res := withDeprecationWarning(resultFromRecord(served))
 	// Spec: §4.7.10 — the revision is the resolved row's ingest time.
 	res.ArtifactRevision = version.FormatArtifactRevision(rec.IngestedAt)
+	// Spec: §7.2 (Attestation members) — the provenance of the served
+	// version, outside the delivery record.
+	if err := r.attachProvenance(ctx, res, rec); err != nil {
+		return nil, store.ManifestRecord{}, err
+	}
 	return res, served, nil
 }
 

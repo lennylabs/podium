@@ -422,6 +422,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("/v1/catalog", s.handleCatalog)
 	mux.HandleFunc("/v1/load_artifact", s.handleLoadArtifact)
 	mux.HandleFunc("/v1/artifacts:batchLoad", s.handleBatchLoad)
+	mux.HandleFunc("GET /v1/attestations/{digest}", s.handleAttestation)
 	mux.HandleFunc("/v1/sync/manifest", s.handleSyncManifest)
 	mux.HandleFunc("/v1/dependents", s.handleDependents)
 	mux.HandleFunc("/v1/scope/preview", s.handleScopePreview)
@@ -741,6 +742,11 @@ type LoadArtifactResponse struct {
 	// served version, absent when it stores none. It is a member the §4.7.10
 	// procedure does not read, and a batch entry does not carry it (§7.6.2).
 	PackageDigest string `json:"package_digest,omitempty"`
+	// Attestations and AttestationOutcome are the §7.2 attestation members,
+	// outside the delivery record: the links of the served version, absent
+	// when it has none, and the served outcome, absent for not_evaluated.
+	Attestations       []core.AttestationReference `json:"attestations,omitempty"`
+	AttestationOutcome *core.ServedOutcome         `json:"attestation_outcome,omitempty"`
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
@@ -1255,6 +1261,8 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		DeprecationWarning: res.DeprecationWarning,
 		ArtifactRevision:   res.ArtifactRevision,
 		PackageDigest:      res.PackageDigest,
+		Attestations:       res.Attestations,
+		AttestationOutcome: res.AttestationOutcome,
 	}
 	// Spec: §4.7.10 — attest the record before the manifest-body channel
 	// clears the inline document, because the record frames the served

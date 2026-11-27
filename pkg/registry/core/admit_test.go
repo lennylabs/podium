@@ -512,6 +512,12 @@ var admDispositions = map[string]string{
 	// consumer check reads; ingest and the fill compute it from the covered
 	// fields with the resolution admission applies.
 	"ManifestRecord.PackageDigest": "served as stored",
+	// §7.2, §4.7.11: registry assertions outside the delivery record that no
+	// consumer check reads; serving decides the policy validity of a
+	// verified outcome.
+	"ManifestRecord.AttestationOutcome":     "served as stored, or as failed while the layer's policy is invalid",
+	"ManifestRecord.AttestationFailure":     "served as stored",
+	"ManifestRecord.AttestationEvaluatedAt": "served as stored",
 }
 
 // Spec: §13.4 — every stored field has one admission disposition, so a field
