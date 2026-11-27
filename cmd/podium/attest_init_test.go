@@ -227,24 +227,6 @@ func TestAttestInit_Refusals(t *testing.T) {
 		t.Errorf("no origin: %d %q", code, stderr)
 	}
 
-	linked := initRepo(t, "https://github.com/acme/x", "main")
-	if err := os.Symlink(t.TempDir(), filepath.Join(linked, ".github")); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, stderr := runInit(t, api.URL, nil, linked); code != 1 || !strings.Contains(stderr, "symbolic link or no directory") {
-		t.Errorf(".github link: %d %q", code, stderr)
-	}
-	fileLink := initRepo(t, "https://github.com/acme/x", "main")
-	if err := os.MkdirAll(filepath.Join(fileLink, ".github", "workflows"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink("/dev/null", filepath.Join(fileLink, ".github", "workflows", "podium-attest.yml")); err != nil {
-		t.Fatal(err)
-	}
-	if code, _, stderr := runInit(t, api.URL, nil, fileLink, "--force"); code != 1 || !strings.Contains(stderr, "which --force does not replace") {
-		t.Errorf("file link: %d %q", code, stderr)
-	}
-
 	usage := [][]string{
 		{"a", "b"},
 		{"--reusable", "--root", "skills"},

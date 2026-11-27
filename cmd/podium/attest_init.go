@@ -181,24 +181,18 @@ func defaultBranch(origin source.Origin, rec ghactions.Record, recErr error, std
 // regular file alone.
 func writeWorkflowFile(dir string, content []byte, force bool) (string, error) {
 	path := filepath.Join(dir, filepath.FromSlash(ghactions.WorkflowPath))
-	parent := dir
-	for _, seg := range []string{".github", "workflows"} {
-		parent = filepath.Join(parent, seg)
-		info, err := os.Lstat(parent)
-		switch {
-		case errors.Is(err, fs.ErrNotExist):
-			if err := os.Mkdir(parent, 0o755); err != nil {
-				return "", fmt.Errorf("create %s: %w", parent, err)
-			}
-		case err != nil:
-			return "", fmt.Errorf("read %s: %w", parent, err)
-		case !info.IsDir():
-			return "", fmt.Errorf("%s is a symbolic link or no directory", parent)
-		}
-	}
 	flags, err := workflowFileState(dir, force)
 	if err != nil {
 		return "", err
+	}
+	parent := dir
+	for _, seg := range []string{".github", "workflows"} {
+		parent = filepath.Join(parent, seg)
+		// workflowFileState refused a parent that is no directory, so an
+		// existing entry here is one.
+		if err := os.Mkdir(parent, 0o755); err != nil && !errors.Is(err, fs.ErrExist) {
+			return "", fmt.Errorf("create %s: %w", parent, err)
+		}
 	}
 	f, err := os.OpenFile(path, flags, 0o644)
 	if err != nil {
@@ -216,9 +210,24 @@ func writeWorkflowFile(dir string, content []byte, force bool) (string, error) {
 
 // workflowFileState returns the open flags that write the workflow file
 // under dir: a new file, or with force the truncation of an existing
-// regular file. It refuses an existing entry without force, and a symbolic
-// link or an entry other than a regular file with it.
+// regular file. It refuses a symbolic link or an entry other than a
+// directory at .github or .github/workflows, an existing entry at the file
+// without force, and a symbolic link or an entry other than a regular file
+// with it.
 func workflowFileState(dir string, force bool) (int, error) {
+	parent := dir
+	for _, seg := range []string{".github", "workflows"} {
+		parent = filepath.Join(parent, seg)
+		info, err := os.Lstat(parent)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return os.O_WRONLY | os.O_CREATE | os.O_EXCL, nil
+		case err != nil:
+			return 0, fmt.Errorf("read %s: %w", parent, err)
+		case !info.IsDir():
+			return 0, fmt.Errorf("%s is a symbolic link or no directory", parent)
+		}
+	}
 	path := filepath.Join(dir, filepath.FromSlash(ghactions.WorkflowPath))
 	info, err := os.Lstat(path)
 	switch {
