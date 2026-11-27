@@ -346,8 +346,9 @@ func openTargetStore(kind, postgresDSN, sqlitePath string) (store.Store, func(),
 }
 
 // pumpStore writes the plan to the target one tenant at a time, in the
-// ascending ID order the plan holds, after clearing the target's record of the
-// content-hash rewrite and copying the source's verified-identity record. The
+// ascending ID order the plan holds, after clearing the target's records of the
+// content-hash rewrite and the package digest fill and copying the source's
+// verified-identity record. The
 // order is deterministic, so an error names the tenant the run stopped in, and
 // a re-run rewrites every record idempotently.
 //
@@ -363,6 +364,12 @@ func pumpStore(ctx context.Context, plan *migrationPlan, target store.Store) err
 	if plan.manifestCount > 0 {
 		if err := target.SetDataMigrationApplied(ctx, store.DataMigrationContentHashFraming, false); err != nil {
 			return fmt.Errorf("clear data-migration marker: %w", err)
+		}
+		// §13.4: PutManifest copies each row's stored package digest, and a
+		// source row stored before the source ran the package digest fill
+		// carries none, so the target's next start fills those rows.
+		if err := target.SetDataMigrationApplied(ctx, store.DataMigrationPackageDigest, false); err != nil {
+			return fmt.Errorf("clear package digest marker: %w", err)
 		}
 	}
 	// §13.10: the source's verified-identity record is written before the

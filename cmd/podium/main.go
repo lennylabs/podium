@@ -79,6 +79,8 @@ func main() {
 		os.Exit(logoutCmd(os.Args[2:]))
 	case "status":
 		os.Exit(statusCmd(os.Args[2:]))
+	case "attest":
+		os.Exit(attestCmd(os.Args[2:]))
 	case "sign":
 		os.Exit(signCmd(os.Args[2:]))
 	case "verify":
@@ -196,6 +198,7 @@ Commands:
   sync override       Add or remove ephemeral artifact toggles.
   sync save-as        Capture the current target state as a sync.yaml profile.
   lint                Validate manifests in a filesystem-source registry.
+  attest              Write the subjects an author attestation of a layer signs.
   search              Hybrid search over artifacts (registry HTTP API).
   overlap             Report description overlap across every layer you can see (registry HTTP API).
   usage               Report artifact loads, syncs, and search hits per artifact, per layer, and for the catalog (registry HTTP API).
@@ -1525,10 +1528,15 @@ func artifactShow(args []string) int {
 	if *asJSON {
 		// spec: §7.6.1 — emit the documented {id, version, content_hash,
 		// frontmatter, body} schema. The wire response keys the manifest text
-		// "manifest_body" and delivers frontmatter as a raw string.
+		// "manifest_body" and delivers frontmatter as a raw string. The
+		// envelope carries package_digest, so standard error does not repeat it.
 		emitArtifactShowJSON(body)
 		return 0
 	}
+	// spec: §7.6.1, §7.2 — in the default output the registry-asserted
+	// package digest goes to standard error, so standard output stays the
+	// manifest document.
+	printPackageDigest(os.Stderr, body)
 	printArtifactHuman(body)
 	return 0
 }

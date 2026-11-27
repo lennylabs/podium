@@ -737,6 +737,10 @@ type LoadArtifactResponse struct {
 	// the §7.2.1 timestamp layout. It is present on every response because
 	// DeliveryHash frames it, and it stays out of the §12 entity tag.
 	ArtifactRevision string `json:"artifact_revision"`
+	// PackageDigest is the §4.7.6 package digest the registry stores for the
+	// served version, absent when it stores none. It is a member the §4.7.10
+	// procedure does not read, and a batch entry does not carry it (§7.6.2).
+	PackageDigest string `json:"package_digest,omitempty"`
 }
 
 // LargeResourceLink describes one resource whose payload exceeded
@@ -1250,6 +1254,7 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 		ArtifactRevision:   res.ArtifactRevision,
+		PackageDigest:      res.PackageDigest,
 	}
 	// Spec: §4.7.10 — attest the record before the manifest-body channel
 	// clears the inline document, because the record frames the served

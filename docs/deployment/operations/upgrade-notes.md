@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, and the Sigstore keyless signature as a Sigstore bundle, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -154,6 +154,19 @@ From 0.8.0, each start under `oidc-jwt`, `trusted-headers`, or `injected-session
 - `podium admin migrate-to-standard` copies the record from its source to its target.
 - A start that exits with the code after an upgrade, where no removal was intended, has lost an identity-provider setting. Restore it, as [Removing an identity provider](../identity/#removing-an-identity-provider) describes.
 - A rollback to 0.7.0 needs no step. 0.7.0 ignores the record and the variable.
+
+### Package digest of stored versions
+
+From 0.8.0, the registry stores the package digest of each version it ingests and serves it in the `package_digest` member of a `load_artifact` response. The digest covers the path and SHA-256 digest of every file of the package and the `type`, `sensitivity`, `deprecated`, and `replaced_by` values its documents declare. `podium artifact show` prints it on standard error as `package_digest: <digest>` in its default output and carries it in its `--json` object. A batch item does not carry it, and no consumer check reads it. 0.7.0 stored and served no such value.
+
+- The first 0.8.0 start whose listener binds computes the digest of every stored version, soft-deleted versions included, from the stored `ARTIFACT.md`, `SKILL.md`, and resource content hashes, and records completion in the metadata store, so later starts skip the computation. It reads no object from object storage. The start logs one summary line that begins with `package digest fill:`.
+- The computed digest reflects the files that the earlier release stored for the version. For a package that the changes in this release to dot-prefixed directories inside a package and to symbolic-link layer paths affect, it can differ from the digest of the current tree, which `podium attest` computes. Ingesting such a package at a new version stores the digest of the current tree.
+- A stored skill whose `SKILL.md` does not parse receives the digest of an unresolved package, which matches the stored values the registry serves for it, as [Skills whose `SKILL.md` is missing or does not parse](#skills-whose-skillmd-is-missing-or-does-not-parse) describes.
+- A version whose stored files do not form a package, such as one with two resources under one path, receives no digest, and the start logs its ID. Ingest stores no such version.
+- The computation does not require every 0.7.0 process to stop first. A version that a 0.7.0 process stores after the computation, during a rolling upgrade or after a rollback, has no digest, and a load of it carries no `package_digest` member. A 0.8.0 ingest that finds the version unchanged stores its digest, so `podium layer reingest <id>` on the layer fills it.
+- When the write of one version's digest fails, the start logs it and continues, and the next start computes the digests again. A version whose content hash another replica rewrites during the computation is read again and computed from its current bytes. When its hash changes a second time, the next start computes the digests again.
+- `podium admin migrate-to-standard` copies each version's digest and removes the target's completion record, so the target's next start computes the digest of each version that the source stored without one.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the `package_digest` column.
 
 ### Sigstore keyless signatures as Sigstore bundles
 

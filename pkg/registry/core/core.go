@@ -1543,6 +1543,12 @@ type LoadArtifactResult struct {
 	//
 	// Spec: §4.7.10, §4.7.6.
 	ArtifactRevision string
+	// PackageDigest is the §4.7.6 package digest the registry stores for the
+	// served version, empty when it stores none. The registry asserts it, and
+	// it is no field of the §4.7.10 delivery record.
+	//
+	// Spec: §7.2, §13.4.
+	PackageDigest string
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1917,6 +1923,9 @@ func resultFromRecord(rec store.ManifestRecord) *LoadArtifactResult {
 		Resources:    rec.Resources,
 		Deprecated:   rec.Deprecated,
 		ReplacedBy:   rec.ReplacedBy,
+		// Spec: §7.2 — the stored digest, which frames the fields admission
+		// resolved from the same bytes (§13.4).
+		PackageDigest: rec.PackageDigest,
 	}
 }
 

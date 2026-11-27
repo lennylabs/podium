@@ -88,6 +88,7 @@ var orgTableStmts = []string{
 		resources BYTEA,
 		deprecated_at TIMESTAMPTZ,
 		deleted_at TIMESTAMPTZ,
+		package_digest TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (tenant_id, artifact_id, version)
 	)`,
 	`CREATE TABLE IF NOT EXISTS domains (
@@ -748,8 +749,8 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -758,7 +759,7 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw)
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw, rec.PackageDigest)
 	if err != nil {
 		return err
 	}
@@ -798,14 +799,14 @@ func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, i
 		UPDATE manifests SET
 			type = $1, description = $2, tags = $3, sensitivity = $4, layer = $5, deprecated = $6,
 			ingested_at = $7, frontmatter = $8, body = $9, skill_raw = $10, signature = $11,
-			search_visibility = $12, resources = $13, deprecated_at = $14, deleted_at = NULL
+			search_visibility = $12, resources = $13, deprecated_at = $14, package_digest = $19, deleted_at = NULL
 		WHERE tenant_id = $15 AND artifact_id = $16 AND version = $17
 			AND content_hash = $18 AND layer = $5 AND deleted_at IS NOT NULL`,
 		rec.Type, rec.Description, strings.Join(rec.Tags, "\n"), rec.Sensitivity, rec.Layer,
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
 		nullTimePG(rec.DeprecatedAt),
-		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash)
+		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.PackageDigest)
 	return rowsChanged(res, err)
 }
 
@@ -964,8 +965,8 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -974,7 +975,7 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw)
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw, rec.PackageDigest)
 	if err != nil {
 		return err
 	}
@@ -1106,7 +1107,7 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	row := conn.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw
+		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest
 		FROM manifests
 		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3 AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
@@ -1155,6 +1156,40 @@ func (p *Postgres) RehashManifest(ctx context.Context, tenantID, artifactID, ver
 	}
 	if err != nil {
 		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	return ErrImmutableViolation
+}
+
+// SetPackageDigest stores one row's package digest under the content-hash
+// condition the Store interface documents. It carries no deleted_at
+// condition, because the §13.4 fill covers a soft-deleted row a restore would
+// bring back.
+func (p *Postgres) SetPackageDigest(ctx context.Context, tenantID, artifactID, version, contentHash, digest string) error {
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	res, err := conn.ExecContext(ctx, `
+		UPDATE manifests SET package_digest = $1
+		WHERE tenant_id = $2 AND artifact_id = $3 AND version = $4 AND content_hash = $5`,
+		digest, tenantID, artifactID, version, contentHash)
+	changed, err := rowsChanged(res, err)
+	if err != nil {
+		return fmt.Errorf("store: set package digest %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	if changed {
+		return nil
+	}
+	var found int
+	err = conn.QueryRowContext(ctx, `
+		SELECT 1 FROM manifests WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3`,
+		tenantID, artifactID, version).Scan(&found)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("store: set package digest %s/%s@%s: %w", tenantID, artifactID, version, err)
 	}
 	return ErrImmutableViolation
 }
@@ -1218,7 +1253,7 @@ func (p *Postgres) listManifests(ctx context.Context, tenantID string, includeDe
 	rows, err := conn.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw
+		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest
 		FROM manifests
 		WHERE tenant_id = $1 `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -1775,7 +1810,7 @@ func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&rec.Deprecated, &rec.IngestedAt, &rec.Frontmatter, &rec.Body,
 		&rec.Signature, &rec.SearchVisibility, &resources,
-		&deprecatedAt, &deletedAt, &rec.SkillRaw)
+		&deprecatedAt, &deletedAt, &rec.SkillRaw, &rec.PackageDigest)
 	if err != nil {
 		return ManifestRecord{}, err
 	}

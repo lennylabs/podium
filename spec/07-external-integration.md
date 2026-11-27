@@ -33,7 +33,7 @@ At or below the inline cutoff, resources are returned inline. This avoids round-
 
 **Record fields.** The registry's HTTP `load_artifact` response carries each field of the §4.7.10 delivery record other than the resource content hashes in its own string member, and this list is the complete mapping a consumer reconstructs the record from: the identity in `id`, the version in `version`, the type in `type`, the content hash in `content_hash`, the sensitivity in `sensitivity` (absent when the artifact declares none), the ingest time in `artifact_revision`, the `ARTIFACT.md` document in `frontmatter`, the manifest body in `manifest_body`, and the `SKILL.md` in `skill_raw` (absent for every type other than a skill). `delivery_hash` and `delivery_signature` are strings. `resources` is an object that maps each inline resource path to its body as a string, and the boolean `resources_base64`, when true, marks every value in that object as base64. `large_resources` is an object that maps each other resource path to a link object. A link object carries the strings `presigned_url` and `content_hash`. When the manifest document exceeds the inline cutoff, `manifest_body_url` carries a link object, and the response carries no inline `manifest_body` and no inline copy of that document (`skill_raw` for a skill, `frontmatter` for every other type). The members this paragraph names are the members the §4.7.10 verification procedure reads. The §4.7.10 canonical serialization fixes the order in which the record frames these fields.
 
-**Other response members.** The response also carries members the §4.7.10 verification procedure does not read, among them `layer`, a string naming the layer the served version comes from and absent when the registry records none, and a link object's `size`, an integer byte count, and `content_type`, a string absent when the registry records none. §7.6.2 states which members a batch entry carries.
+**Other response members.** The response also carries members the §4.7.10 verification procedure does not read, among them `layer`, a string naming the layer the served version comes from and absent when the registry records none, `package_digest`, a string holding the §4.7.6 package digest that the registry stores for the served version and absent when the registry stores none for it (§13.4), and a link object's `size`, an integer byte count, and `content_type`, a string absent when the registry records none. §7.6.2 states which members a batch entry carries. The registry asserts `package_digest`, and it is no field of the §4.7.10 delivery record, so a consumer that needs the package digest of a served version computes it rather than reading the member.
 
 **Deprecation members.** A `load_artifact` response and each `status: ok` batch entry (§7.6.2) carry the §4.7.4 lifecycle signal in three members outside the delivery record, which the §4.7.10 procedure does not read: `deprecated`, a boolean that is true when the served version is deprecated and absent otherwise; `replaced_by`, a string naming the upgrade target §4.7.4 returns for the load, absent when none applies; and `deprecation_warning`, a human-readable string present when §4.7.4 returns a warning for the load and absent otherwise. A HEAD revalidation of a load for which §4.7.4 returns a warning carries the same text in the `X-Podium-Deprecation-Warning` response header, and the registry answers such a load with the full response rather than `304` even when its `If-None-Match` matches, so a consumer revalidating a cached record receives the warning. The warning depends on the versions the caller can see as well as on the served version, so the content hash, which a revalidation confirms, does not change when a newer version is deprecated.
 
@@ -176,6 +176,8 @@ podium layer watch <id> [--interval <duration>]
 The trust flags set the §4.7.11 trust policy of the layer. `--trust <mode>` sets `trust_mode`, and `--trust-layer-root <root>` sets `trust_layer_root`. `--trust-signer <issuer>=<identity>`, which is repeatable and splits at its first `=`, names the signers of the requirement. `--trust-source-repository`, `--trust-source-owner`, `--trust-source-repository-id`, `--trust-source-owner-id`, `--trust-source-repository-ref`, `--trust-any-source`, `--trust-any-ref`, and `--trust-instance` set the matching member, `source_repository`, `source_repository_owner`, `source_repository_id`, `source_repository_owner_id`, `source_repository_ref`, `any_source`, `any_ref`, or `instance`, on every signer that `--trust-signer` names, and the command refuses them with exit code 2 when no `--trust-signer` is given. The command sends the requirement as the one entry of `trust_requirements`. On `podium layer update`, a requirement built from the flags replaces the stored requirement, and `--clear-trust-requirements` sends an empty `trust_requirements`, which the command refuses beside `--trust-signer`. A requirement with a `predicate_type` is written through the layer endpoints or a `registry.yaml` declaration.
 
 `podium layer show <id>` reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output, including its trust policy with the members the registry derived. It exits 1 when the response holds no layer with that ID, which covers a layer the caller cannot read, and when the read fails.
+
+`podium attest` (§7.3.5) writes the subjects that an author attestation of a layer signs.
 
 `podium layer register` returns the webhook URL and HMAC secret to register on the source repo. On a multi-tenant registry, the URL carries the layer's tenant ID, because a delivery carries no caller organization from which §6.3.1 could select the tenant. A delivery naming a tenant that is not provisioned and active is refused as naming no layer. Registering a Git source without configuring the webhook leaves the layer at its initial commit until the first manual reingest.
 
@@ -329,6 +331,55 @@ The authentication routes are registered only where the browser flow is enabled,
 The response carries no other field, and in particular no issuer, client identifier, endpoint, filesystem path, or other configuration value, and no subject, email, or authorization belonging to any caller other than the one that asked. The read discloses the deployment's identity configuration and the requesting caller's own subject and email, and it discloses no artifact, layer, tenant, or other caller's data. It is registered wherever the registry serves the web UI, whether or not the browser flow is enabled, so a registry started without the web UI never registers it and answers a request for that path as it answers any path it does not register.
 
 Sign-in, the callback, sign-out, and the posture read mutate no registry state, so none of them is a write endpoint under §13.2.1, a read-only registry serves each of them exactly as it serves it otherwise, and none of them returns `registry.read_only`.
+
+### 7.3.5 Attestation Subjects
+
+`podium attest` writes the subjects that an author attestation of one layer signs: the layer subject with the layer digest, and one subject per artifact with its package digest (§4.7.6). The command does not sign and sends no request to a registry. A signing tool that the CI platform or the author runs signs the files it writes.
+
+```
+podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-subjects <n>] [--format checksums|statement] [--predicate-type <uri>]
+```
+
+**Layer root.** The layer root is `<dir>`, which defaults to the current directory, joined with `--root`. `--root` takes the layer's registered `root` (§4.6). The command removes the leading and trailing `/` characters of `--root`, and it refuses a value that then holds an empty segment, a `.` segment, a `..` segment, or a character that the §4.7.6 subject name rule excludes. The layer subject name is built from the value after that removal (§4.7.6).
+
+**Commit and working tree.** With `--commit <rev>`, the command reads the layer from the tree of the commit that `<rev>` names in the Git object database of the repository at `<dir>`. `<rev>` is a revision that Git resolves, such as `HEAD`, a branch name, or a commit hash. `<dir>` is the top of a working tree or a bare repository, and the layer's path in the commit's tree is `--root`. The command refuses a `<dir>` below the top of a working tree, because a `git` layer's `root` is its path from the top of the repository, and the layer subject name built from `--root` would then name another path than the one the command reads. The command reads the tree with the walk that registry ingest applies to a `git` snapshot, so for a `git` layer at that commit its digests are the ones the registry computes: the blob bytes and tree paths, with no line-ending conversion and no Git LFS smudge, and with a symbolic-link entry read as its link text.
+
+Without `--commit`, the command reads the directory with the walk of a `local` layer and a filesystem source, and its digests are the ones the registry computes for a `local` layer at that directory. A checkout of a `git` layer gives the registry's digests only when it holds the commit's bytes and paths. A checkout that applies a line-ending or Git LFS filter, that writes a symbolic link as a link, or that lies on a case-insensitive file system where two paths collide gives other digests (§4.7.6). When `<dir>` lies inside a Git working tree and `--commit` is absent, the command writes a warning on standard error that names `--commit`.
+
+**Output.** `--format checksums`, the default, writes files in the format of the `sha256sum` tool. Each line holds the 64 lowercase hexadecimal digits of a digest, two spaces, and a subject name, and ends with a line feed. `--format statement` writes in-toto Statement v1 documents for a tool that signs a prepared statement. Each document is one JSON object followed by a line feed. Its members are `_type`, whose value is `https://in-toto.io/Statement/v1`, `subject`, `predicateType`, and `predicate`, whose value is an empty object. Each element of `subject` is `{name, digest: {sha256}}`, where `sha256` holds the 64 lowercase hexadecimal digits of the digest.
+
+`predicateType` defaults to `https://lennylabs.github.io/podium/attestation/subjects/v1`, which Podium defines here and publishes at that URI on its documentation site: a statement of that type states that its signer attests the listed subjects, and its predicate is the empty object. Podium reads `predicateType` and does not read `predicate`, so the type adds no meaning beyond the subjects. `--predicate-type <uri>` sets another type, so that a statement signed through this format carries the type of another recipe, such as the `https://slsa.dev/provenance/v1` type that GitHub's attestation action signs. The predicate stays the empty object whatever the type, and a type whose schema requires members, as SLSA provenance does, then gives a statement that tools which check the predicate refuse. The value is an absolute URI with a scheme, and it holds no white space or control character. `--predicate-type` applies to the statement format alone, because the tool that signs a checksums file chooses the type of that statement.
+
+In both formats each file begins with the layer subject and continues with one subject per artifact in ascending byte-wise order of its canonical ID. `--max-subjects <n>` bounds the subjects of one file, the layer subject included. It defaults to 1024, which is the most subjects that GitHub's attestation action accepts in one statement. A layer with more artifacts is written over several files, and each file begins with the layer subject. The files are named `podium-subjects-<n>.sha256` for checksums and `podium-statement-<n>.json` for statements, where `<n>` is a decimal number. The command writes them to `--out`, which defaults to the current directory and is created when it is absent.
+
+Before it writes, the command removes each regular file in `--out` whose name has either form and whose first subject is this run's layer subject, so that the directory holds one run's files for that layer. It reads at most the first 64 KiB of such a file: the first line of a checksums file, and the first element of `subject` of a statement file. The following entries stay:
+
+- A file whose first subject is another layer subject, such as the files of another layer root that a run for each root writes to one `--out`.
+- A file the command cannot read, or whose first subject it cannot read within that bound.
+- An entry that is not a regular file, such as a symbolic link, a directory, a named pipe, or a device. The command neither reads nor follows it.
+
+The command then creates each of its files under the lowest number from 1 upward whose name no entry of `--out` holds. It creates a file only when no entry of that name exists, and it takes the next number when another run created one first, so two runs never write one file. A file number therefore does not identify a layer root. The command prints the path of each file it writes on standard output, one per line, and a signing recipe signs the files at the paths the command printed.
+
+**Warnings.** For each package whose canonical ID or bundled resource path holds a segment that is not a portable name (§4.2), the command writes the `lint.non_portable_name` warning on standard error, prefixed `warning: `. The warning changes no exit status. The command writes the warnings before it checks the subject names, so a run that refuses the layer writes them as well.
+
+**Exit status.** The command exits 0 when it wrote the files.
+
+It exits 1, and writes and removes no file, in each of these cases:
+
+- The layer root does not exist or is not a directory.
+- `--commit` names no commit, `<dir>` lies below the top of its working tree, or the commit's tree holds no directory at the layer's path.
+- The walk of the layer fails (§4.2, §4.7.6).
+- A package of the layer has no subject name (§4.7.6), such as a package whose directory name holds a line feed. The message names the package's path relative to the layer root with each character that the subject name rule excludes written as an escape, so no line of the output holds such a character.
+
+It also exits 1 when it cannot remove or write a file, and the files it wrote before the failure stay.
+
+It exits 2 on a usage error, which is one of these:
+
+- A `--format` other than `checksums` or `statement`.
+- A `--max-subjects` that is not an integer of at least 2.
+- A `--root` that the rule above refuses.
+- A `--predicate-type` that is not an absolute URI, or one given with the checksums format.
+- More than one `<dir>`.
 
 ## 7.4 Degraded Network
 
@@ -779,7 +830,7 @@ For shell pipelines and language-agnostic scripts that don't want to take a Pyth
 | `podium search <query>`       | `Client.search_artifacts(...)`             | Hybrid search over artifacts. Flags `--type`, `--tags`, `--scope`, `--top-k` mirror the SDK args. Returns ranked descriptors.                                                    |
 | `podium domain search <query>`| `Client.search_domains(...)`               | Hybrid search over domains. Flags `--scope`, `--top-k` mirror the SDK args. Returns ranked domain descriptors.                                                                   |
 | `podium domain show [<path>]` | `Client.load_domain(path)`                 | Domain map for `<path>` (or root when no path is given).                                                                                                                         |
-| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout, and the §4.7.4 deprecation warning to stderr when the registry returns one. Runs no §4.7.10 delivery check. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
+| `podium artifact show <id>`   | `Client.load_artifact(id)` (manifest only) | Prints the manifest body and frontmatter to stdout, and the §4.7.4 deprecation warning to stderr when the registry returns one. In the default output it also prints the §7.2 `package_digest` member to stderr when the registry returns it, and under `--json` the envelope carries the member instead. Runs no §4.7.10 delivery check. **Does not materialize bundled resources**; for that, use `podium sync --include <id>`. Flags: `--version`, `--session-id`.  |
 
 Output formats:
 
@@ -813,9 +864,11 @@ Output formats:
   // podium artifact show <id> --json
   { "id": "...", "version": "...", "content_hash": "...",
     "frontmatter": { ... }, "body": "...",
-    "deprecated": true, "replaced_by": "...", "deprecation_warning": "..." }
+    "deprecated": true, "replaced_by": "...", "deprecation_warning": "...",
+    "package_digest": "sha256:..." }
   // deprecated, replaced_by, and deprecation_warning are the §7.2
-  // deprecation members, each omitted when the registry omits it.
+  // deprecation members, and package_digest is the §7.2 member of that
+  // name, each omitted when the registry omits it.
   ```
 
 The CLI and SDK are intentionally interchangeable for these read operations. Pick whichever fits the surrounding code. Both defer to the same `RegistrySearchProvider`, `LayerComposer`, and cache paths server-side; output drift between them is treated as a bug. The exception is the §4.7.10 delivery check, which the SDK runs and the read CLI does not, so an SDK call can refuse with a §6.10 code a record that the read CLI prints.

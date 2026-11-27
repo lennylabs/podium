@@ -68,6 +68,7 @@ var additiveColumns = []additiveColumn{
 	{"manifests", "resources BLOB", "resources BYTEA"},
 	{"manifests", "deprecated_at TEXT", "deprecated_at TIMESTAMPTZ"},
 	{"manifests", "deleted_at TEXT", "deleted_at TIMESTAMPTZ"},
+	{"manifests", "package_digest TEXT NOT NULL DEFAULT ''", "package_digest TEXT NOT NULL DEFAULT ''"},
 
 	// domains
 	{"domains", "raw BLOB", "raw BYTEA"},

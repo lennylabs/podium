@@ -74,6 +74,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerRestoreKeepsRemovedArtifacts", func(t *testing.T) { layerRestoreKeepsRemovedArtifacts(t, factory(t)) })
 	t.Run("SearchVisibilityRoundTrip", func(t *testing.T) { searchVisibilityRoundTrip(t, factory(t)) })
 	t.Run("SkillRawRoundTrip", func(t *testing.T) { skillRawRoundTrip(t, factory(t)) })
+	t.Run("PackageDigestRoundTrip", func(t *testing.T) { packageDigestRoundTrip(t, factory(t)) })
 	t.Run("ResourcesRoundTrip", func(t *testing.T) { resourcesRoundTrip(t, factory(t)) })
 	t.Run("DomainRecordRoundTrip", func(t *testing.T) { domainRecordRoundTrip(t, factory(t)) })
 	t.Run("DomainPutReplacesPerLayer", func(t *testing.T) { domainPutReplacesPerLayer(t, factory(t)) })
@@ -212,6 +213,48 @@ func skillRawRoundTrip(t *testing.T, s store.Store) {
 	}
 	if len(list) != 1 || string(list[0].SkillRaw) != string(skillRaw) {
 		t.Errorf("ListManifests SkillRaw not preserved: %+v", list)
+	}
+}
+
+// Spec: §4.7.6, §13.4 — the package digest round-trips through PutManifest
+// and the reads. SetPackageDigest writes it only while the row holds the
+// caller's content hash, reaches a soft-deleted row, and touches one tenant's
+// row, and a put that restores a tombstoned row writes the digest it states.
+// The checks are combined into one assertion so the suite adds one branch.
+func packageDigestRoundTrip(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "a")
+	mustCreateTenant(t, s, "b")
+	rec := manifestRec("a", "x", "1.0.0", "sha:1")
+	rec.PackageDigest = "sha256:put"
+	mustPut(t, s, rec)
+	mustPut(t, s, manifestRec("b", "x", "1.0.0", "sha:1"))
+	put, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+
+	must(t, s.SetPackageDigest(ctx, "a", "x", "1.0.0", "sha:1", "sha256:filled"))
+	filled, err := s.GetManifest(ctx, "a", "x", "1.0.0")
+	must(t, err)
+	staleErr := s.SetPackageDigest(ctx, "a", "x", "1.0.0", "sha:other", "sha256:stale")
+	absentErr := s.SetPackageDigest(ctx, "a", "absent", "1.0.0", "sha:1", "sha256:absent")
+	must(t, s.SoftDeleteArtifacts(ctx, "a", "test-layer", []string{"x"}, time.Now(), ""))
+	must(t, s.SetPackageDigest(ctx, "a", "x", "1.0.0", "sha:1", "sha256:deleted"))
+	deleted, err := s.ListManifestsIncludingDeleted(ctx, "a")
+	must(t, err)
+	rec.PackageDigest = "sha256:revived"
+	mustPut(t, s, rec)
+	revived, err := s.ListManifests(ctx, "a")
+	must(t, err)
+	other, err := s.GetManifest(ctx, "b", "x", "1.0.0")
+	must(t, err)
+
+	if put.PackageDigest != "sha256:put" || filled.PackageDigest != "sha256:filled" ||
+		!errors.Is(staleErr, store.ErrImmutableViolation) || !errors.Is(absentErr, store.ErrNotFound) ||
+		len(deleted) != 1 || deleted[0].PackageDigest != "sha256:deleted" ||
+		len(revived) != 1 || revived[0].PackageDigest != "sha256:revived" || other.PackageDigest != "" {
+		t.Errorf("put %q, filled %q, stale write %v, absent write %v, soft-deleted %+v, revived %+v, other tenant %q",
+			put.PackageDigest, filled.PackageDigest, staleErr, absentErr, deleted, revived, other.PackageDigest)
 	}
 }
 
