@@ -239,11 +239,11 @@ const (
 // sigstoreKeylessProvider builds the keyless provider from the environment.
 // The trust root is the trusted_root.json at
 // PODIUM_SIGSTORE_TRUSTED_ROOT_FILE; a read failure leaves it empty rather
-// than failing the command, because Verify refuses every envelope against an
+// than failing the command, because Verify refuses every bundle against an
 // empty trust root and Sign does not read it. The signing endpoints take their
 // §6.2 defaults when unset or empty. The identity policy comes from
 // PODIUM_SIGSTORE_CERT_IDENTITY and PODIUM_SIGSTORE_CERT_OIDC_ISSUER, and an
-// incomplete policy makes Verify refuse every envelope. For keyForSign the
+// incomplete policy makes Verify refuse every bundle. For keyForSign the
 // per-request deadline comes from PODIUM_SIGSTORE_REQUEST_TIMEOUT, and an
 // invalid value fails before Sign contacts any Sigstore endpoint. For
 // keyForVerify the variable is not read, because verification is offline and
