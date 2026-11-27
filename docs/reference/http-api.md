@@ -1368,7 +1368,7 @@ PUT  /v1/layers/update?id={id}
 |:--|:--|
 | `public`, `organization`, `groups`, `users` | By presence. See [Visibility members](#visibility-members). |
 | `ref`, `root`, `local_path`, `owner`, `git_provider`, `force_push_policy` | By value. A non-zero field replaces the corresponding value, and a zero field leaves it unchanged. |
-| `trust_mode`, `trust_requirements`, `trust_layer_root` | By presence, matched without regard to letter case. A member the body carries replaces the stored value, so `"trust_mode": ""` returns the layer to `PODIUM_LAYER_TRUST_DEFAULT` and `"trust_requirements": []` or `null` removes the requirement; `null` for `trust_mode` or `trust_layer_root` is refused. An update that carries one of them checks the resulting policy; one that carries none leaves the stored policy unchecked. A trust member for a layer declared in `registry.yaml` is refused. |
+| `trust_mode`, `trust_requirements`, `trust_layer_root` | By presence, matched without regard to letter case. A member the body carries replaces the stored value, so `"trust_mode": ""` returns the layer to `PODIUM_LAYER_TRUST_DEFAULT` and `"trust_requirements": []` or `null` removes the requirement; `null` for `trust_mode` or `trust_layer_root` is refused. An update that carries one of them checks the resulting policy; one that carries none leaves the stored policy unchecked. A trust member that changes the policy of a layer declared in `registry.yaml` is refused. |
 | `repo_token`, `repo_username`, `clear_repo_credential` | See [Repository credential on update](#repository-credential-on-update). |
 | `rotate_webhook_secret` | Requests a webhook-secret rotation. The response then carries the new secret in `webhook_secret`. |
 

@@ -1089,7 +1089,7 @@ podium layer update --id <id>
 - A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored one.
 - `--clear-trust-requirements` removes the requirement. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
 - An update that carries no trust flag leaves the stored policy as it is.
-- A trust flag on a layer declared in `registry.yaml` is refused with `registry.invalid_argument` and a message stating that the layer's trust policy is declared in `registry.yaml`, because the next start re-applies the declaration. Change the declaration instead.
+- A trust flag that changes the policy of a layer declared in `registry.yaml` is refused with `registry.invalid_argument` and a message stating that the layer's trust policy is declared in `registry.yaml`, because the next start re-applies the declaration. Change the declaration instead.
 - While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, an update that leaves the layer with no `trust_mode` and no requirement is refused, and so is a registration without trust flags.
 - Changing the policy of an admin-defined layer requires the per-tenant `admin` role, and the owner of a user-defined layer can change its own.
 
