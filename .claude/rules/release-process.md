@@ -68,9 +68,11 @@ git tag -a vX.Y.Z -m "vX.Y.Z"
 git push origin vX.Y.Z
 ```
 
-The tag push triggers `.github/workflows/release.yml`. A `validate-tag` job rejects any tag whose commit is not reachable from `main` or a `release/*` branch, so tag from one of those branches. Once the test battery passes, the workflow refuses a binary built with the `podiumtest` tag, attests each binary with `actions/attest-build-provenance` (the workflow that `podium attest init` writes verifies the binary it installs against that attestation), and publishes the cross-compiled binaries to the GitHub Release, the wheel and sdist to PyPI, the npm package, and the container image to ghcr.io.
+The tag push triggers `.github/workflows/release.yml`. A `validate-tag` job rejects any tag whose commit is not reachable from `main` or a `release/*` branch, so tag from one of those branches. Once the test battery passes, the workflow refuses a binary built with the `podiumtest` tag, attests each binary with `actions/attest-build-provenance` (the workflow that `podium attest init` writes verifies the binary it installs against that attestation, with the exact identity of `release.yml` at the tag), and publishes the cross-compiled binaries to the GitHub Release, the wheel and sdist to PyPI, the npm package, and the container image to ghcr.io.
 
 Push the tag after the prep PR merges, against the merged commit on `main`. The prep PR itself carries no tag.
+
+The `v*` tags of lennylabs/podium are protected by a tag ruleset that limits their creation, update, and deletion to the maintainers. The binary attestations name `release.yml@refs/tags/vX.Y.Z` as their identity, so anyone who could push such a tag could obtain an attestation that the workflow of `podium attest init` accepts. Keep the ruleset in place.
 
 ## Patch releases
 

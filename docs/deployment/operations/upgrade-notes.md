@@ -32,7 +32,7 @@ From 0.8.0, the registry loads the Sigstore instances and trusted roots of autho
 
 ### Attested release binaries
 
-From 0.8.0, the release workflow attests each published binary (`podium`, `podium-server`, and `podium-mcp` for each platform) with `actions/attest-build-provenance`, signed by `lennylabs/podium/.github/workflows/release.yml`. Verify a downloaded binary with `gh attestation verify <file> --repo lennylabs/podium --signer-workflow lennylabs/podium/.github/workflows/release.yml`.
+From 0.8.0, the release workflow attests each published binary (`podium`, `podium-server`, and `podium-mcp` for each platform) with `actions/attest-build-provenance`, signed by `lennylabs/podium/.github/workflows/release.yml`. Verify a downloaded binary with `gh attestation verify <file> --repo lennylabs/podium --cert-identity https://github.com/lennylabs/podium/.github/workflows/release.yml@refs/tags/vX.Y.Z --cert-oidc-issuer https://token.actions.githubusercontent.com --deny-self-hosted-runners`, where `vX.Y.Z` is the release's tag. The exact identity names the tag, so an attestation from a run of the release workflow on another ref does not pass.
 
 - The workflow that `podium attest init` writes verifies the binary it installs this way and fails when the verification fails. Binaries of 0.7.0 and earlier carry no attestation, so the workflow cannot install them, and it installs 0.8.0 when the version that wrote it is older. [Signing with GitHub Actions](../../authoring/signing-with-github-actions) describes the workflow.
 - No step is needed on upgrade or rollback.
