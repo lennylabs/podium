@@ -775,7 +775,7 @@ func (s *SQLite) RehashManifest(ctx context.Context, tenantID, artifactID, versi
 	if n > 0 {
 		return nil
 	}
-	return s.classifyRehashMiss(ctx, tenantID, artifactID, version)
+	return s.classifyConditionalMiss(ctx, "rehash", tenantID, artifactID, version)
 }
 
 // SetPackageDigest stores one row's package digest under the content-hash
@@ -794,13 +794,14 @@ func (s *SQLite) SetPackageDigest(ctx context.Context, tenantID, artifactID, ver
 	if changed {
 		return nil
 	}
-	return s.classifyRehashMiss(ctx, tenantID, artifactID, version)
+	return s.classifyConditionalMiss(ctx, "set package digest", tenantID, artifactID, version)
 }
 
-// classifyRehashMiss reads the row back to tell an absent key (ErrNotFound)
+// classifyConditionalMiss reads the row back after a conditional update of
+// operation op changed nothing, to tell an absent key (ErrNotFound)
 // from a stored value that no longer matches what the caller read
 // (ErrImmutableViolation).
-func (s *SQLite) classifyRehashMiss(ctx context.Context, tenantID, artifactID, version string) error {
+func (s *SQLite) classifyConditionalMiss(ctx context.Context, op, tenantID, artifactID, version string) error {
 	var existing string
 	err := s.db.QueryRowContext(ctx, `
 		SELECT content_hash FROM manifests
@@ -810,7 +811,7 @@ func (s *SQLite) classifyRehashMiss(ctx context.Context, tenantID, artifactID, v
 		return ErrNotFound
 	}
 	if err != nil {
-		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
+		return fmt.Errorf("store: %s %s/%s@%s: %w", op, tenantID, artifactID, version, err)
 	}
 	return ErrImmutableViolation
 }
