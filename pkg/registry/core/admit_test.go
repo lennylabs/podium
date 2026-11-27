@@ -895,3 +895,30 @@ func TestAdmit_EmptyManifestWithUnparseableSkillKeepsStoredValues(t *testing.T) 
 		t.Errorf("frontmatter = %q, want the empty stored manifest", res.Frontmatter)
 	}
 }
+
+// Spec: §13.4, §4.7.6 — a stored skill row whose manifest parses and declares
+// type: skill and whose SKILL.md does not parse is an unresolved package, so
+// admission serves its stored values rather than resolving the manifest
+// alone. Before the change, the load served the manifest's sensitivity,
+// deprecation, and replacement, which no package digest of the row frames.
+func TestLoadArtifact_SkillWithUnparseableSkillMDKeepsStoredFields(t *testing.T) {
+	t.Parallel()
+	f := newAdmFixture(t)
+	f.put(t, storetest.Seal(t, store.ManifestRecord{
+		TenantID: admTenant, ArtifactID: "ops/legacy", Version: "1.0.0", Layer: "L", Type: "skill",
+		Sensitivity: "low", Body: []byte("Stored body.\n"),
+		Frontmatter: []byte("---\ntype: skill\nversion: 1.0.0\nsensitivity: high\ndeprecated: true\nreplaced_by: ops/next\n---\n"),
+		SkillRaw:    []byte("---\nname: [unclosed\n---\n\nBody.\n"),
+	}, nil, nil))
+	res, err := admLoadVersion(f.registry(nil), "ops/legacy", "1.0.0")
+	if err != nil {
+		t.Fatalf("LoadArtifact: %v", err)
+	}
+	if res.Type != "skill" || res.Sensitivity != "low" || res.Deprecated || res.ReplacedBy != "" {
+		t.Errorf("served type=%q sensitivity=%q deprecated=%v replaced_by=%q, want the stored skill, low, false, and none",
+			res.Type, res.Sensitivity, res.Deprecated, res.ReplacedBy)
+	}
+	if res.ManifestBody != "Stored body.\n" {
+		t.Errorf("served body = %q, want the stored body", res.ManifestBody)
+	}
+}

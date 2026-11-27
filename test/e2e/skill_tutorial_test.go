@@ -431,10 +431,11 @@ func TestSkillTutorial_NameMustMatchDir(t *testing.T) {
 	}
 }
 
-// a type:skill artifact without SKILL.md is a hard
-// error. The registry walk (filesystem.Walk) rejects it before the lint
-// rules run, so lint exits 1 with "<id>: type: skill missing SKILL.md" on
-// stderr rather than a lint.skill_md_compliance diagnostic on stdout.
+// a type:skill artifact without SKILL.md is a hard error. The registry walk
+// (filesystem.Walk) refuses it per artifact under the §4.1
+// unparseable-manifest rule before the lint rules run, so lint exits 1 with a
+// refusal whose reason names "<id>/SKILL.md: manifest: type: skill missing
+// SKILL.md" rather than a lint.skill_md_compliance diagnostic.
 func TestSkillTutorial_MissingSkillMD(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

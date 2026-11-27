@@ -82,23 +82,29 @@ func (r *Registry) admitBytes(ctx context.Context, rec store.ManifestRecord) (*m
 	return admittedArtifact(rec), nil
 }
 
-// admittedArtifact parses the row's admitted manifest. A skill row resolves
-// its §4.3.4 fields from the admitted SKILL.md metadata, with an ARTIFACT.md
-// key taking precedence when the manifest states it, so a load serves the
-// values ingest resolved rather than dropping the metadata ones. A plain-skill
-// row has no manifest, so its artifact is built from its admitted SKILL.md
-// rather than left nil, which would serve the row's unhashed columns. A
-// both-files row whose SKILL.md does not parse falls through to its manifest.
+// admittedArtifact resolves the row's admitted manifest and SKILL.md with the
+// §4.7.6 resolution. A skill row resolves its §4.3.4 fields from the admitted
+// SKILL.md metadata, with an ARTIFACT.md key taking precedence when the
+// manifest states it, so a load serves the values ingest resolved rather than
+// dropping the metadata ones. A plain-skill row has no manifest, so its
+// artifact is built from its admitted SKILL.md rather than left nil, which
+// would serve the row's unhashed columns. A row whose bytes do not resolve
+// yields nil and is served with its stored values. That includes a both-files
+// row whose SKILL.md does not parse: admission does not fall back to the
+// manifest alone for it, as manifest.ResolveArtifact does for a consumer, so
+// every field admission serves from the bytes is a value the row's package
+// digest frames.
 //
-// Spec: §4.3.4, §13.4 — a row whose manifest is empty and whose SKILL.md
-// parses is a skill with no ARTIFACT.md, and a skill row's sensitivity,
-// deprecation flag, and replacement are the values §4.3.4 resolves.
+// Spec: §4.3.4, §4.7.6, §13.4 — a row whose manifest is empty and whose
+// SKILL.md parses is a skill with no ARTIFACT.md, and a skill row's
+// sensitivity, deprecation flag, and replacement are the values §4.3.4
+// resolves.
 func admittedArtifact(rec store.ManifestRecord) *manifest.Artifact {
-	a, err := manifest.ResolveArtifact(rec.Frontmatter, rec.SkillRaw)
-	if err != nil {
+	res := manifest.ResolvePackage(manifest.StoredDocuments(rec.Frontmatter, rec.SkillRaw))
+	if !res.Resolved {
 		return nil
 	}
-	return a
+	return res.Artifact
 }
 
 // distinctResourcePaths refuses a row with two refs under one path. The hash

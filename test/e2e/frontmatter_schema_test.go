@@ -204,10 +204,11 @@ func TestFrontmatter_ValidSkillLints(t *testing.T) {
 	}
 }
 
-// a skill missing SKILL.md fails lint. The registry walk
-// rejects it before the lint rules run, so the message is
-// "type: skill missing SKILL.md" (exit 1) rather than a lint.skill_md_compliance
-// diagnostic. spec: doc "File allocation for skills".
+// a skill missing SKILL.md fails lint. The registry walk refuses it per
+// artifact under the §4.1 unparseable-manifest rule before the lint rules
+// run, so the reason names "type: skill missing SKILL.md" (exit 1) rather
+// than a lint.skill_md_compliance diagnostic. spec: doc "File allocation for
+// skills".
 func TestFrontmatter_SkillMissingSkillMD(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{

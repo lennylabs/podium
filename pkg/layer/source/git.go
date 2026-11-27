@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing"
+	"github.com/go-git/go-git/v5/plumbing/filemode"
 	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport"
 	"github.com/go-git/go-git/v5/storage/memory"
@@ -315,6 +316,20 @@ func refNameFor(ref string) plumbing.ReferenceName {
 	return plumbing.NewBranchReferenceName(ref)
 }
 
+// gitlinkError is the error of opening a submodule (gitlink) entry. It reads
+// as fs.ErrNotExist, because the snapshot holds no file at that path, and its
+// text names the gitlink so a refused walk says why.
+type gitlinkError struct{}
+
+func (gitlinkError) Error() string {
+	return "the entry is a Git submodule (gitlink), and a layer snapshot holds no submodule files"
+}
+
+func (gitlinkError) Unwrap() error { return fs.ErrNotExist }
+
+// errGitlink is the gitlinkError value Open returns.
+var errGitlink error = gitlinkError{}
+
 // gitTreeFS adapts a *object.Tree to fs.FS so the ingest pipeline can
 // walk it like a directory.
 type gitTreeFS struct {
@@ -327,6 +342,16 @@ func (g *gitTreeFS) Open(name string) (fs.File, error) {
 		return &gitDir{tree: g.tree, name: "."}, nil
 	}
 	clean := strings.TrimSuffix(strings.TrimPrefix(name, "./"), "/")
+
+	// spec: §4.4, §4.7.6 — a submodule is a gitlink entry: the commit records
+	// another repository's commit, and the snapshot holds none of its files.
+	// Opening one fails with an error that names it, so a gitlink inside an
+	// artifact package fails the walk as the spec states rather than with a
+	// bare missing-file message. The error still reads as not-exist, so a
+	// gitlink that only shares a manifest's name is no manifest.
+	if e, err := g.tree.FindEntry(clean); err == nil && e.Mode == filemode.Submodule {
+		return nil, &fs.PathError{Op: "open", Path: name, Err: errGitlink}
+	}
 
 	// Try a file first.
 	entry, err := g.tree.File(clean)
