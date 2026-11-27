@@ -68,9 +68,11 @@ jobs:
       # §4.7.11: a release binary counts the age of its embedded public-good
       # Sigstore root from its build date, which holds only when the
       # embedded root is the current TUF target. A stale copy fails the
-      # release; refresh it with `go run ./tools/sigstoreroot`.
+      # release; refresh it with `go run ./tools/sigstoreroot`. The script
+      # retries a failed fetch twice with a growing delay, and the
+      # sigstore-root workflow runs the same check on each release prep PR.
       - name: Embedded Sigstore root is current
-        run: go run ./tools/sigstoreroot -check
+        run: bash tools/sigstoreroot/check.sh
       - run: make lint
       - run: make speccov-drift
       - run: make matrix-audit

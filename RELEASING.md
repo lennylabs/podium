@@ -44,7 +44,7 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
    On a MINOR or MAJOR bump, re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` first: each listed product's name, availability, and stated capabilities, plus new products in the covered categories. A correction to §1.5 goes through the proposal pipeline and merges before the prep PR. `.claude/rules/release-process.md` states the full check.
 
-   Run `go run ./tools/sigstoreroot -check` as well. When it reports that the embedded public-good Sigstore trusted root is not current, run `go run ./tools/sigstoreroot` and land the changed `pkg/sign/embedded/public-good.trusted_root.json` in its own pull request before the prep PR. A release binary counts the age of that root from its build date (§4.7.11), so the release workflow refuses a tag whose embedded root differs from the current TUF target.
+   Run `go run ./tools/sigstoreroot -check` as well. When it reports that the embedded public-good Sigstore trusted root is not current, run `go run ./tools/sigstoreroot` and land the changed `pkg/sign/embedded/public-good.trusted_root.json` in its own pull request before the prep PR. A release binary counts the age of that root from its build date (§4.7.11), so the release workflow refuses a tag whose embedded root differs from the current TUF target. The `sigstore-root` workflow runs the same check on each prep PR whose head branch is `release/*` and weekly against `main`, and `.claude/rules/release-process.md` carries the same step.
 
 2. **Bump the Go default version and the chart** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.

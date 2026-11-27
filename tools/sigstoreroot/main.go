@@ -9,6 +9,10 @@
 //
 //	go run ./tools/sigstoreroot          # refresh the embedded copy
 //	go run ./tools/sigstoreroot -check   # fail when it is not current
+//
+// The exit status is 0 on success, 1 when the copy differs from the target
+// or cannot be read or written, 2 on a usage error, and 3 when the target
+// cannot be fetched, so a caller retries only a fetch that failed.
 package main
 
 import (
@@ -26,6 +30,14 @@ import (
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
+// The exit statuses.
+const (
+	exitOK       = 0
+	exitMismatch = 1
+	exitUsage    = 2
+	exitFetch    = 3
+)
+
 func main() {
 	os.Exit(run(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 }
@@ -40,23 +52,23 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	timeout := fs.Duration("timeout", 2*time.Minute, "deadline of the fetch")
 	tufRoot := fs.String("tuf-root", "", "a TUF root.json to start from instead of the one sigstore-go embeds")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return exitUsage
 	}
 	current, err := fetchCurrent(ctx, *mirror, *tufRoot, *timeout)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "sigstoreroot: %v\n", err)
-		return 1
+		return exitFetch
 	}
 	if *check {
 		return compare(*out, current, stdout, stderr)
 	}
 	if err := os.WriteFile(*out, current, 0o644); err != nil {
 		_, _ = fmt.Fprintf(stderr, "sigstoreroot: write %s: %v\n", *out, err)
-		return 1
+		return exitMismatch
 	}
 	r, _ := sign.ParseAttestationRoot(current)
 	_, _ = fmt.Fprintf(stdout, "wrote %s (%s)\n", *out, r.Digest())
-	return 0
+	return exitOK
 }
 
 // fetchCurrent returns the verified trusted_root.json target, checked
@@ -80,12 +92,12 @@ func compare(path string, current []byte, stdout, stderr io.Writer) int {
 	have, err := os.ReadFile(path)
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "sigstoreroot: read %s: %v\n", path, err)
-		return 1
+		return exitMismatch
 	}
 	if !bytes.Equal(have, current) {
 		_, _ = fmt.Fprintf(stderr, "sigstoreroot: %s differs from the current public-good trusted root; run `go run ./tools/sigstoreroot` and commit the result\n", path)
-		return 1
+		return exitMismatch
 	}
 	_, _ = fmt.Fprintf(stdout, "%s is current\n", path)
-	return 0
+	return exitOK
 }

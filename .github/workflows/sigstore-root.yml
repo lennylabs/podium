@@ -1,0 +1,32 @@
+name: sigstore-root
+
+# Checks that the public-good Sigstore trusted root embedded in
+# pkg/sign/embedded/ is the current target of the Sigstore TUF repository
+# (spec §4.7.11). A release binary counts the age of that root from its
+# build date, and the release workflow refuses a tag whose root is stale.
+# This workflow surfaces a stale root earlier: weekly against main, so the
+# failure notification reaches the maintainers between releases, and on
+# each release prep PR (head branch release/*), so the refresh lands in its
+# own PR before the tag. `go run ./tools/sigstoreroot` refreshes the root.
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # 06:00 UTC every Monday
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  embedded-root:
+    name: embedded Sigstore root is current
+    if: github.event_name != 'pull_request' || startsWith(github.head_ref, 'release/')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: bash tools/sigstoreroot/check.sh
