@@ -28,11 +28,11 @@ func TestSelectIdentityProvider_Builtins(t *testing.T) {
 	}
 }
 
-// spec: §9.2 — server-side identity modes that are not MCP-server providers
-// (the empty standalone default, OIDC) are absent from the registry and
+// spec: §9.2 / §13.10 — the values that select no provider (the empty
+// standalone default, none, and external) are absent from the registry and
 // resolve to nil so the server stays on the anonymous resolver.
 func TestSelectIdentityProvider_NonProviderModes(t *testing.T) {
-	for _, id := range []string{"", "oidc", "public"} {
+	for _, id := range []string{"", "none", "external"} {
 		p, err := selectIdentityProvider(&Config{identityProvider: id})
 		if err != nil {
 			t.Fatalf("%q: unexpected err %v", id, err)

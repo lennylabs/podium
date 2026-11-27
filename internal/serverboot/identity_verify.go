@@ -49,8 +49,7 @@ func injectedTokenVerifier(keys identity.RuntimeKeyVerifierStore, audiences []st
 // verbatim, so the endpoint refuses a credential that failed verification
 // with the §6.10 envelope the server already maps that error to, and it
 // returns the anonymous-public caller with no error when no verifier is
-// wired, which is the no-provider, public-mode, and free-form-label
-// deployment. Whether an absent credential is a failure is the provider's
+// wired, which is the no-provider, public-mode, and external deployment. Whether an absent credential is a failure is the provider's
 // own rule and is not decided here: injectedTokenVerifier reports one,
 // oidcJWTVerifier and trustedHeadersVerifier do not.
 func layerCallerResolver(verify func(*http.Request) (layer.Identity, error)) func(*http.Request) (layer.Identity, error) {
@@ -110,10 +109,12 @@ var verifiedProviders = []string{"injected-session-token", "oidc-jwt", "trusted-
 
 // The guard keys on providerSelected: a real provider resolved from the
 // identity.Default registry (a seeded built-in such as oauth-device-code or
-// oidc-jwt, or an imported custom provider). A
-// non-registered free-form label such as "oidc" yields providerSelected =
-// false; those deployments front the registry with external auth and are
-// exempt, matching selectIdentityProvider. Public mode opts out of identity
+// oidc-jwt, or an imported custom provider). The external value yields
+// providerSelected = false; that deployment declares that authentication in
+// front of the registry decides who reaches it and is exempt, matching
+// selectIdentityProvider. Every other unregistered value never reaches this
+// guard, because identityProviderLabelGuard refuses it in validate before the
+// store opens. Public mode opts out of identity
 // by design (every layer visible); the empty/standalone default has no
 // authenticated callers (the local operator is the de facto admin, §13.10).
 // The remedy names the preconditions for public mode: no identity provider
@@ -129,9 +130,10 @@ func identityVisibilityGuard(identityProvider string, providerSelected, publicMo
 }
 
 // multiTenantVerifierGuard refuses a multi-tenant configuration whose identity
-// provider resolves to no registered provider: an empty value, a free-form
-// label such as "oidc" or "none", or public mode, which config.public_mode_with_idp
-// already confines to those values. A multi-tenant registry selects each
+// provider resolves to no registered provider: an empty value, "none",
+// "external", or public mode, which config.public_mode_with_idp already
+// confines to the first two. Any other unregistered value is refused earlier by
+// identityProviderLabelGuard, so it does not reach this guard from validate. A multi-tenant registry selects each
 // request's tenant from the verified identity, so without a verifier it would
 // bind every request to the no-data tenant and route none. A registered
 // provider without a verifier is left to identityVisibilityGuard, which
@@ -150,6 +152,32 @@ func multiTenantVerifierGuard(multiTenant, publicMode bool, identityProvider str
 		remedy = "unset PODIUM_PUBLIC_MODE and " + remedy
 	}
 	return fmt.Errorf("config.multitenant_no_verifier: PODIUM_MULTI_TENANT=true selects each request's tenant from the verified caller identity (§6.3.1), and %s; %s, or unset PODIUM_MULTI_TENANT", cause, remedy)
+}
+
+// identityProviderLabelGuard refuses a PODIUM_IDENTITY_PROVIDER value that
+// names no identity provider the registry recognizes.
+//
+// Such a value used to start a registry with no request-time verifier and no
+// error: selectIdentityProvider returned nil for it, identityVisibilityGuard
+// exempted it, and ConfiguresIdentityProvider reported it as configured, so it
+// also skipped the loopback-bind refusal. A one-character typo such as
+// "oidc-jwy" therefore served every layer to every caller on any address. The
+// guard admits the values that configure no provider ("" and "none"), the
+// explicit external declaration, and every id identity.Default registers;
+// a registered id without a verifier is left to identityVisibilityGuard, which
+// reports it with the same code. It runs first among the identity and bind
+// checks in validate, so a typo is reported as a typo rather than as whichever
+// later check the misread value happens to trip.
+//
+// Spec: §6.3 / §13.10 (External authentication) / §13.12
+func identityProviderLabelGuard(identityProvider string) error {
+	if !server.ConfiguresIdentityProvider(identityProvider) ||
+		identityProvider == server.ExternalIdentityProvider ||
+		identity.Default.Has(identityProvider) {
+		return nil
+	}
+	return fmt.Errorf("config.identity_provider_unverified: PODIUM_IDENTITY_PROVIDER=%q names no identity provider this registry recognizes, so it would verify no caller, resolve every caller as anonymous-public, and never apply per-layer visibility (§4.6, §6.3); the registry verifies %s server-side. Select one of those, or set PODIUM_IDENTITY_PROVIDER=%s when authentication in front of the registry decides who reaches it (§13.10)",
+		identityProvider, strings.Join(verifiedProviders, ", "), server.ExternalIdentityProvider)
 }
 
 // canonicalAudience returns the canonical entry of the accepted-audience set
@@ -208,8 +236,8 @@ func runtimeKeyBootstrapGuard(identityProvider, path string, keys identity.Runti
 // (§9.2). It returns the instantiated provider when the id is registered
 // (the built-in oauth-device-code / injected-session-token, or a custom
 // provider an imported plugin registered), nil when the id is not a
-// registered MCP-server provider (the empty standalone default, a
-// server-side mode such as "oidc", or public mode), and an error only when
+// registered MCP-server provider (the empty standalone default, "none",
+// "external", or public mode), and an error only when
 // a registered provider's factory fails. This is the build-path consumer
 // that makes "import a custom IdentityProvider into a source build" change
 // behavior, the gap §9.2 names by example.

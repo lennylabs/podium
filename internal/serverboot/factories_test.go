@@ -344,7 +344,8 @@ func TestModeBanner(t *testing.T) {
 	cases := map[string]*Config{
 		"standalone": {},
 		"public":     {publicMode: true},
-		"oidc":       {identityProvider: "oidc"},
+		"external":   {identityProvider: "external"},
+		"oidc-jwt":   {identityProvider: "oidc-jwt"},
 	}
 	for want, cfg := range cases {
 		if got := cfg.modeBanner(); got != want {

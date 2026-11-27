@@ -108,8 +108,8 @@ func buildSCIMHandler(store scim.Store) *scim.Handler {
 // would reverse a decision the gateway made and hand a caller a layer the
 // gateway kept from it.
 //
-// The default arm denies, so an unset provider, a free-form label the registry
-// resolves to no provider, and any provider added later resolve group
+// The default arm denies, so an unset provider, the external value, and any
+// provider added later resolve group
 // membership from the caller's own identity until they are named here. A
 // provider that gains directory-resolved group membership is added in the same
 // change that gives it one.
@@ -1554,9 +1554,10 @@ func run(ctx context.Context, stop func()) error {
 	// oauth-device-code, injected-session-token, oidc-jwt, and trusted-headers
 	// providers are seeded into the registry; the last three additionally
 	// install a request-time verifier so the registry resolves the caller on
-	// every meta-tool call. Server-side identity modes that are not MCP-server providers (the
-	// empty standalone default, "oidc", public mode) are absent from the
-	// registry and stay on the anonymous resolver.
+	// every meta-tool call. The values that select no provider (the empty
+	// standalone default, "none", "external", and public mode) are absent from
+	// the registry and stay on the anonymous resolver; validate refuses every
+	// other unregistered value before this point.
 	verifierInstalled := false
 	providerSelected := false
 	// layerVerify is the request-time verifier the §7.3.1 layer endpoint uses
@@ -2818,6 +2819,12 @@ func (c *Config) validate() error {
 	// may have been meant to come from it.
 	if c.configFileErr != nil {
 		return c.configFileErr
+	}
+	// §6.3 / §13.10: an unrecognized PODIUM_IDENTITY_PROVIDER refuses the
+	// start ahead of the identity and bind checks below, each of which would
+	// otherwise read the mistyped value as a configured provider.
+	if err := identityProviderLabelGuard(c.identityProvider); err != nil {
+		return err
 	}
 	startup := server.StartupConfig{
 		PublicMode:           c.publicMode,

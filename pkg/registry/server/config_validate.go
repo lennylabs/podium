@@ -18,11 +18,12 @@ var (
 	ErrPublicModeWithIdP = errors.New("config.public_mode_with_idp")
 
 	// ErrPublicBindNonLoopback signals that a registry that authenticates no
-	// caller, one in public mode or one with no identity provider, was given
-	// a non-loopback bind address and --allow-public-bind was not set. §13.10
-	// ("Loopback bind by default", "Loopback bind without an identity
-	// provider") and §13.2.2 require such a registry to bind 127.0.0.1 unless
-	// the operator explicitly opts into a non-loopback bind. Maps to
+	// caller, one in public mode, one with no identity provider, or one with
+	// PODIUM_IDENTITY_PROVIDER=external, was given a non-loopback bind address
+	// and --allow-public-bind was not set. §13.10 ("Loopback bind by default",
+	// "Loopback bind without an identity provider", "External
+	// authentication") and §13.2.2 require such a registry to bind 127.0.0.1
+	// unless the operator explicitly opts into a non-loopback bind. Maps to
 	// config.public_bind_refused.
 	ErrPublicBindNonLoopback = errors.New("config.public_bind_refused")
 
@@ -122,8 +123,8 @@ type StartupConfig struct {
 //
 //   - public_mode and an identity provider are mutually exclusive.
 //   - public_mode binds a loopback address unless --allow-public-bind is set.
-//   - a registry with no identity provider binds a loopback address unless
-//     --allow-public-bind is set.
+//   - a registry with no identity provider, or with the external value,
+//     binds a loopback address unless --allow-public-bind is set.
 //   - the §6.3.4 browser flow is enabled only on a configuration that
 //     satisfies every conjunct of the browser-flow guard.
 func (c StartupConfig) Validate() error {
@@ -158,6 +159,14 @@ func (c StartupConfig) Validate() error {
 	// guard's own code.
 	if !c.PublicMode && !ConfiguresIdentityProvider(c.IdentityProvider) && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
 		return fmt.Errorf("%w: a registry with no identity provider admits every caller as an admin, so it binds a loopback address; %q is not one (configure an identity provider, or set PODIUM_ALLOW_PUBLIC_BIND=true or pass --allow-public-bind when something else limits who can reach it)",
+			ErrPublicBindNonLoopback, c.Bind)
+	}
+	// §13.10 "External authentication": external wires no request-time
+	// verifier, so every caller that reaches the address sees every layer. The
+	// registry cannot tell whether the fronting authentication is the only
+	// path to it, so a non-loopback bind takes the same explicit opt-in.
+	if c.IdentityProvider == ExternalIdentityProvider && !c.AllowPublicBind && !isLoopbackBind(c.Bind) {
+		return fmt.Errorf("%w: PODIUM_IDENTITY_PROVIDER=external verifies no caller, so every caller that reaches the registry sees every layer, and it binds a loopback address; %q is not one (set PODIUM_ALLOW_PUBLIC_BIND=true or pass --allow-public-bind when the authentication in front of the registry is the only path to it)",
 			ErrPublicBindNonLoopback, c.Bind)
 	}
 	// §6.3.3 / §13.10 "Bind restriction under trusted-headers": the provider
@@ -199,6 +208,21 @@ func (c StartupConfig) Validate() error {
 func ConfiguresIdentityProvider(provider string) bool {
 	return provider != "" && provider != "none"
 }
+
+// ExternalIdentityProvider is the PODIUM_IDENTITY_PROVIDER value that declares
+// authentication in front of the registry decides who reaches it. The registry
+// wires no request-time verifier for it, so it resolves every caller as
+// anonymous-public (§4.6 No-identity bypass). It is the one value outside the
+// recognized providers that a registry starts with: any other unrecognized
+// value is refused, so a mistyped provider name cannot start a registry that
+// verifies no caller.
+//
+// ConfiguresIdentityProvider reports it as configured, so the admin arm, the
+// default layer visibility, and the session posture treat it as a configured
+// provider. The loopback-bind refusal in Validate applies to it explicitly.
+//
+// Spec: §13.10 (External authentication)
+const ExternalIdentityProvider = "external"
 
 // validateBrowserFlow enforces the §13.10 browser-flow configuration guard.
 // The browser flow returns an IdP-signed token in __Host-podium_session and
