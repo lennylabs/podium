@@ -67,6 +67,8 @@ Identity providers attach the caller's OAuth-attested identity to every registry
 - **`injected-session-token`**. The MCP server reads a signed JWT from an env var or file path configured by the runtime. The runtime is responsible for token issuance and refresh. Options: `PODIUM_SESSION_TOKEN_ENV`, `PODIUM_SESSION_TOKEN_FILE`.
 - **(Extensible.)** Additional implementations register through the `IdentityProvider` interface (§9).
 
+The registry process reads its own `PODIUM_IDENTITY_PROVIDER` (§13.12). It starts with `injected-session-token` (§6.3.2), `oidc-jwt` or `trusted-headers` (§6.3.3), `external`, `none`, or an unset or empty value. An unset value, an empty value, and `none` configure no identity provider (§13.10). `external` declares that authentication in front of the registry, such as an authenticating reverse proxy, decides who reaches it. The registry wires no request-time verifier for `external`, so it resolves every caller as anonymous-public (§4.6) and binds a loopback address unless `--allow-public-bind` is set (§13.10). Every other value fails startup with `config.identity_provider_unverified`, which names the value and the providers the registry verifies. That covers `oauth-device-code`, a provider registered through the `IdentityProvider` interface for which the registry wires no request-time verifier, and a value that names no provider at all, so a mistyped provider name stops the registry instead of starting one that verifies no caller.
+
 ### 6.3.1 Claim Derivation
 
 The IdP returns a JWT with claims `{sub, org_id, email, exp, iss, aud, groups?}`. Group membership is resolved registry-side via SCIM 2.0 push from the IdP; the registry maintains a directory of `(user_id → groups)`.
