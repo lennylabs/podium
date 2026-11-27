@@ -60,6 +60,18 @@ files the previous run wrote. Every sync reconciles the target against
 `<target>/.podium/sync.lock`, deletes the paths that are no longer in scope, and
 prunes the directories those paths leave empty.
 
+The lock records a `file_hash` for each file sync writes whole: the SHA-256
+digest of the file's bytes, written as `sha256:<hex>`. Sync deletes an
+out-of-scope file only when its current bytes still match that hash. A file
+edited after sync wrote it therefore stays in place when its artifact leaves the
+scope, and sync names it on standard error. A target committed to Git changes
+bytes the same way when Git converts line endings on checkout, for example
+under `core.autocrlf=true`, so a stale file in such a checkout also stays in
+place and is named. A shared config file that sync merges entries into, such as
+`.mcp.json`, `.claude/settings.json`, or `AGENTS.md`, records no `file_hash`.
+Sync never deletes such a file; it removes Podium's entries from it and leaves
+the rest in place.
+
 The removal treats the lock as untrusted, because a committed lock can come from
 anyone who pushes to the repository. Sync skips a lock entry, names it on
 standard error, and leaves it out of the next lock in these cases:
@@ -78,6 +90,20 @@ standard error, and leaves it out of the next lock in these cases:
 - The path reaches a symbolic link that resolves outside the target.
 - The path names a symbolic link, a directory, or another file that is not a
   regular file.
+- The entry records no `file_hash`, as an entry written by Podium 0.7.0 or
+  earlier does.
+- The file's current bytes do not match the entry's `file_hash`, or sync cannot
+  read the file.
+
+A skipped file stays on disk. Because the next lock omits its entry, later syncs
+neither delete it nor name it again. A `kind: marketplace` render fails instead
+when it would keep a file for one of the last two reasons; see
+[Reconciliation](../deployment/content/publishing#reconciliation).
+
+A forged lock entry cannot delete a file whose bytes its author cannot predict,
+such as a file with local edits. A file with predictable content, such as an
+empty file, a `.gitkeep`, or a standard license text, has a predictable hash,
+so a forged entry can name it whether or not Git tracks it.
 
 Sync applies the same rule to the paths it writes, so an artifact whose output
 path has such a segment is not written. A registry or workspace overlay package

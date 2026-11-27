@@ -1,16 +1,13 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"testing"
-	"time"
 
-	"github.com/lennylabs/podium/internal/serverboot"
 	"github.com/lennylabs/podium/internal/testharness"
 )
 
@@ -88,8 +85,7 @@ func TestServe_LayerPathBootstrap_E2E(t *testing.T) {
 	t.Setenv("PODIUM_VECTOR_BACKEND", "")
 	t.Setenv("PODIUM_LAYER_PATH", layerDir)
 
-	go func() { _ = serverboot.Run() }()
-	waitForServer(t, port)
+	bootServer(t, port)
 
 	// /v1/layers must surface the bootstrap layer so /v1/layers/reingest
 	// and the admin UI can address it. The list answers the §7.3.1 layer
@@ -155,24 +151,6 @@ func TestServeCmd_PresignTTLFlagOmittedPreservesEnv(t *testing.T) {
 	if got := os.Getenv("PODIUM_PRESIGN_TTL_SECONDS"); got != "1800" {
 		t.Errorf("PODIUM_PRESIGN_TTL_SECONDS = %q, want 1800 (env preserved when flag omitted)", got)
 	}
-}
-
-func waitForServer(t *testing.T, port int) {
-	t.Helper()
-	url := fmt.Sprintf("http://127.0.0.1:%d/healthz", port)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		resp, err := http.DefaultClient.Do(req)
-		cancel()
-		if err == nil {
-			_ = resp.Body.Close()
-			return
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	t.Fatalf("server never came up on port %d", port)
 }
 
 func getJSON(t *testing.T, port int, path string) map[string]any {

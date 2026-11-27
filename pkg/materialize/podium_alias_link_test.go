@@ -53,11 +53,12 @@ func TestWrite_RefusesPathThroughAliasedPodiumLink(t *testing.T) {
 
 // Spec: §7.5.3 — the stale-file cleanup refuses a recorded path whose
 // directory names .podium under the aliasing rule and is a symbolic link, and
-// removes nothing behind it.
+// removes nothing behind it. The entry carries the hash of the file behind
+// the link, so the link alone is what keeps the file in place.
 func TestRemoveStale_RefusesAliasedPodiumLink(t *testing.T) {
 	t.Parallel()
 	dest, victim := podiumAliasLink(t)
-	if err := RemoveStale(dest, "PODIUM~1/resources/x"); !errors.Is(err, ErrPodiumNotDirectory) {
+	if err := RemoveStale(dest, "PODIUM~1/resources/x", FileHash([]byte("operator\n"))); !errors.Is(err, ErrPodiumNotDirectory) {
 		t.Errorf("RemoveStale through PODIUM~1 = %v, want ErrPodiumNotDirectory", err)
 	}
 	wantVictimUnchanged(t, victim)
