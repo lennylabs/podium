@@ -195,6 +195,9 @@ var errAttestationDirEntry = errors.New("is a symbolic link or no directory; the
 //
 // Spec: §4.7.11, §7.3.5
 func attestationDir(dir, root string, create bool) (path string, exists bool, err error) {
+	if err := checkRootSegments(dir, root); err != nil {
+		return "", false, err
+	}
 	path = filepath.Join(dir, filepath.FromSlash(root))
 	for _, seg := range strings.Split(attest.AttestationDir, "/") {
 		path = filepath.Join(path, seg)

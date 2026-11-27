@@ -142,6 +142,9 @@ func loadCheckRequirements(path string, insts *checkInstances) ([]store.TrustReq
 //
 // Spec: §7.3.5
 func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequirement, insts *checkInstances, r *checkReport, stderr io.Writer) error {
+	if err := checkRootSegments(opts.layer.dir, opts.layer.root); err != nil {
+		return err
+	}
 	records, files, err := readAttestLayer(ctx, opts.layer, stderr)
 	if err != nil {
 		return err

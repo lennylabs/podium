@@ -60,6 +60,11 @@ func runAttestImport(ctx context.Context, args []string, stdout, stderr io.Write
 //
 // Spec: §4.7.11, §7.3.5
 func importBundles(ctx context.Context, opts importOptions, stdout, stderr io.Writer) error {
+	// The layer root is checked before the layer is read from a commit,
+	// because the bundles are written below it on disk.
+	if err := checkRootSegments(opts.layer.dir, opts.layer.root); err != nil {
+		return err
+	}
 	imported, err := readImportInputs(opts)
 	if err != nil {
 		return err

@@ -9,6 +9,9 @@ import (
 	"syscall"
 	"testing"
 
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
+
 	sh "github.com/lennylabs/podium/internal/testharness/sigstoreharness"
 )
 
@@ -128,5 +131,77 @@ func TestAttestImport_FileModeFollowsUmask(t *testing.T) {
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Errorf("%s mode %v (%v), want 0600 under umask 077", n, info.Mode(), err)
 		}
+	}
+}
+
+// Spec: §7.3.5 (Layer root) — a --root segment that is a symbolic link to
+// another layer of the checkout is refused by podium attest, attest import,
+// and attest check, each exiting 1 with the path named, so the import walks,
+// writes, and prunes nothing of the other layer. A link above <dir> is not
+// checked. With --commit, a root that is a link entry in the commit's tree
+// names no directory and is refused as well.
+func TestAttest_RootSegmentLink(t *testing.T) {
+	base := t.TempDir()
+	if err := os.Symlink(t.TempDir(), filepath.Join(base, "checkout")); err != nil {
+		t.Fatal(err)
+	}
+	// <dir> itself lies below a link, as a checkout under /tmp on macOS does.
+	dir := filepath.Join(base, "checkout")
+	writeAttestLayer(t, dir, map[string]string{"other/team/z/ARTIFACT.md": attestRuleMD})
+	h := sh.New(t)
+	placeBundles(t, dir, "other", ghBundleOf(t, h, importSLSA, layerSubjectsOf(t, dir, "other")))
+	link := filepath.Join(dir, "skills")
+	if err := os.Symlink("other", link); err != nil {
+		t.Fatal(err)
+	}
+	want := link + " is a symbolic link or no directory"
+	in := writeInput(t, ghBundleOf(t, h, importSLSA, layerSubjectsOf(t, dir, "other")))
+	before := bundleFiles(t, filepath.Join(dir, "other", ".podium", "attestations"))
+	for name, run := range map[string]func() (int, string, string){
+		"attest": func() (int, string, string) { return runAttestT(t, dir, "--root", "skills", "--out", t.TempDir()) },
+		"import": func() (int, string, string) { return runImportT(t, in, "--dir", dir, "--root", "skills") },
+		"import --no-prune": func() (int, string, string) {
+			return runImportT(t, in, "--dir", dir, "--root", "skills", "--no-prune")
+		},
+		"check": func() (int, string, string) { return runCheckT(t, nil, dir, "--root", "skills") },
+	} {
+		if code, _, stderr := run(); code != 1 || !strings.Contains(stderr, want) {
+			t.Errorf("%s: exit %d, stderr %q", name, code, stderr)
+		}
+	}
+	if got := bundleFiles(t, filepath.Join(dir, "other", ".podium", "attestations")); strings.Join(got, ",") != strings.Join(before, ",") {
+		t.Errorf("the other layer's directory changed: %v", got)
+	}
+	if code, stdout, _ := runCheckT(t, nil, dir, "--root", "other"); code != 0 {
+		t.Errorf("the other layer fails its check: %s", stdout)
+	}
+	// A file at a segment is refused in the same way.
+	writeAttestLayer(t, dir, map[string]string{"plain": "x"})
+	if code, _, stderr := runCheckT(t, nil, dir, "--root", "plain/x"); code != 1 || !strings.Contains(stderr, filepath.Join(dir, "plain")+" is a symbolic link") {
+		t.Errorf("file segment: exit %d, stderr %q", code, stderr)
+	}
+
+	repo := t.TempDir()
+	commitAttestRepo(t, repo, map[string]string{"other/team/z/ARTIFACT.md": attestRuleMD})
+	if err := os.Symlink("other", filepath.Join(repo, "skills")); err != nil {
+		t.Fatal(err)
+	}
+	r, err := git.PlainOpen(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wt, _ := r.Worktree()
+	if _, err := wt.Add("skills"); err != nil {
+		t.Fatal(err)
+	}
+	sig := &object.Signature{Name: "alice", Email: "alice@acme.com"}
+	if _, err := wt.Commit("link", &git.CommitOptions{Author: sig, Committer: sig}); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := runAttestT(t, repo, "--root", "skills", "--commit", "HEAD", "--out", t.TempDir()); code != 1 || stderr == "" {
+		t.Errorf("attest --commit with a link entry at the root: exit %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := runCheckT(t, nil, repo, "--root", "skills", "--commit", "HEAD"); code != 1 || !strings.Contains(stderr, "is a symbolic link") {
+		t.Errorf("check --commit: exit %d, stderr %q", code, stderr)
 	}
 }
