@@ -257,8 +257,10 @@ A cycle of a layer under `require` is refused with one of these codes, answered 
 | `ingest.attestation_mismatch` | `layer_digest` | No accepted bundle carries the snapshot's layer digest. `details` lists the differing subjects, and `subjects_agree: true` places the difference in a `DOMAIN.md` or `.layer-config`. |
 | `ingest.attestation_stale` | `mark` | The newest layer subject is older than the attestation mark. |
 | `ingest.attestation_stale` | `not_in_history`, `not_descendant` | The signed commit is outside the history of the tracked ref, or does not descend from the recorded commit. |
-| `ingest.attestation_invalid` | `limits`, `subject_name` | The directory exceeds `PODIUM_ATTESTATION_MAX_BUNDLES` or `PODIUM_ATTESTATION_MAX_BYTES`, or a package ID holds a character no subject name allows. |
-| `ingest.attestation_policy_invalid` | `no_requirements`, `unknown_instance`, `policy_rule` | The layer's trust policy cannot be applied. |
+| `ingest.attestation_invalid` | `limits`, `subject_name`, `unreadable` | The directory exceeds `PODIUM_ATTESTATION_MAX_BUNDLES` or `PODIUM_ATTESTATION_MAX_BYTES`, a package ID holds a character no subject name allows, or the directory or a `*.sigstore.json` entry, such as a dangling symbolic link or a link to a directory, cannot be read; `details.file` names it. |
+| `ingest.attestation_policy_invalid` | `no_requirements`, `unknown_instance`, `policy_rule` | The layer's trust policy cannot be applied, which includes a stored `trust_mode` other than `none`, `warn`, `require`, and empty, such as `REQUIRE`. |
+
+A `details` object stays below 32 KiB. When its lists would make it longer, the registry drops entries from the end of the longest list and sets `details.truncated` to `true`.
 
 #### ingest.invalid_artifact causes
 
