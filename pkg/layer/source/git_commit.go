@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"path"
 	"path/filepath"
 	"strings"
 
@@ -19,7 +18,7 @@ type CommitTree struct {
 	// Commit is the hash of the commit the revision resolved to.
 	Commit string
 	// Path is the slash path of the tree below the repository root, or ""
-	// for the root.
+	// for the root. It is the root a git layer of this tree registers.
 	Path string
 	// Files reads the tree from the Git object database with the fs.FS a
 	// git layer snapshot uses, so the ingest walk reads blob bytes and tree
@@ -28,11 +27,18 @@ type CommitTree struct {
 	Files fs.FS
 }
 
-// OpenCommitTree opens the Git repository that holds dir, resolves rev to a
-// commit, and returns that commit's tree below the path of dir relative to
-// the top of the working tree joined with root. A bare repository has no
-// working tree, so dir's own path contributes nothing there. It reads the
-// local object database alone and makes no network request.
+// ErrNotWorkTreeTop reports a directory below the top of its working tree.
+// A git layer's root is its path from the top of the repository, and the
+// layer subject name is built from root alone, so reading the tree from a
+// lower directory would digest one path and name another.
+var ErrNotWorkTreeTop = errors.New("source: not the top of the working tree")
+
+// OpenCommitTree opens the Git repository at dir, resolves rev to a commit,
+// and returns that commit's tree below root. dir is the top of a working
+// tree, which holds the .git directory or file, or a bare repository; a
+// directory below the top of a working tree returns an error wrapping
+// ErrNotWorkTreeTop. It reads the local object database alone and makes no
+// network request.
 //
 // `podium attest --commit` reads a git layer through it, so the digests it
 // writes are the ones registry ingest computes from a snapshot of the same
@@ -52,6 +58,9 @@ func OpenCommitTree(ctx context.Context, dir, rev, root string) (*CommitTree, er
 	if err != nil {
 		return nil, err
 	}
+	if prefix != "" && prefix != "." {
+		return nil, fmt.Errorf("%w: %s lies at %q below the top of its working tree; run from the top and name the layer's path with --root", ErrNotWorkTreeTop, dir, prefix)
+	}
 	hash, err := repo.ResolveRevision(plumbing.Revision(rev))
 	if err != nil {
 		return nil, fmt.Errorf("source: resolve %q: %w", rev, err)
@@ -64,10 +73,7 @@ func OpenCommitTree(ctx context.Context, dir, rev, root string) (*CommitTree, er
 	if err != nil {
 		return nil, fmt.Errorf("source: tree of commit %s: %w", hash, err)
 	}
-	sub := path.Join(prefix, strings.Trim(root, "/"))
-	if sub == "." {
-		sub = ""
-	}
+	sub := strings.Trim(root, "/")
 	if sub != "" {
 		if tree, err = tree.Tree(sub); err != nil {
 			return nil, fmt.Errorf("source: commit %s holds no directory %q: %w", hash, sub, err)

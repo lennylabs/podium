@@ -290,16 +290,17 @@ func TestAttest_CommitAndWorkingTree(t *testing.T) {
 	}
 
 	writeAttestLayer(t, dir, map[string]string{"skills/team/a/notes.md": "uncommitted\n"})
-	if code, _, _ := runAttestT(t, filepath.Join(dir, "skills"), "--commit", "HEAD", "--out", out); code != 0 {
-		t.Fatalf("--commit from the layer directory = %d", code)
+	// A <dir> below the top of the working tree would digest skills/ under
+	// the layer subject .podium/layer, which names another layer.
+	code, _, stderr := runAttestT(t, filepath.Join(dir, "skills"), "--commit", "HEAD", "--out", out)
+	if code != 1 || !strings.Contains(stderr, "below the top of its working tree") {
+		t.Errorf("--commit from the layer directory = %d, stderr %q, want 1 naming the top of the tree", code, stderr)
 	}
-	// The layer digest does not depend on the root; the name does.
-	want := strings.Replace(committed, "  .podium/layer/skills\n", "  .podium/layer\n", 1)
-	if got := readOut(out); got != want {
-		t.Errorf("--commit from the layer directory =\n%s\nwant\n%s", got, want)
+	if got := readOut(out); got != committed {
+		t.Errorf("a refused run changed the earlier file:\n%s", got)
 	}
 
-	code, _, stderr := runAttestT(t, dir, "--root", "skills", "--out", out)
+	code, _, stderr = runAttestT(t, dir, "--root", "skills", "--out", out)
 	if code != 0 || !strings.Contains(stderr, "Git working tree") || !strings.Contains(stderr, "--commit HEAD") {
 		t.Errorf("working tree = %d, stderr %q, want 0 and the checkout warning", code, stderr)
 	}

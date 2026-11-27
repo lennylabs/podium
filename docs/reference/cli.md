@@ -330,7 +330,7 @@ For a `git` layer, the registry digests the blob bytes and tree paths of the com
 podium attest --root skills --commit HEAD --out attest-out
 ```
 
-With `--commit`, the command finds the repository that holds `<dir>`, and the layer's path in the commit is the path of `<dir>` in the working tree joined with `--root`. It reads the tree with the walk registry ingest applies to a `git` snapshot, so line-ending rules, Git LFS filters, and symbolic links in the checkout do not affect the digests.
+With `--commit`, `<dir>` is the top of the repository's working tree, or a bare repository, and the layer's path in the commit is `--root`, which is the `root` the layer is registered with. The command refuses a `<dir>` below the top of the working tree, because the layer subject name would then name another path than the one it reads. It reads the tree with the walk registry ingest applies to a `git` snapshot, so line-ending rules, Git LFS filters, and symbolic links in the checkout do not affect the digests.
 
 Without `--commit`, the command reads the files on disk, as the registry reads a `local` layer. A checkout of a `git` layer then gives other digests than the registry's in these cases:
 
@@ -365,7 +365,7 @@ A package whose ID holds a control character, a white space character, or a back
 | Exit code | Meaning |
 |:--|:--|
 | `0` | The files were written. |
-| `1` | The layer root does not exist or is not a directory, `--commit` names no commit or the commit holds no directory at the layer's path, the walk of the layer failed, a package has no subject name, or a file could not be removed or written. |
+| `1` | The layer root does not exist or is not a directory, `--commit` names no commit, `<dir>` lies below the top of its working tree under `--commit`, the commit holds no directory at the layer's path, the walk of the layer failed, a package has no subject name, or a file could not be removed or written. |
 | `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, a `--root` the rule above refuses, or more than one `<dir>`. |
 
 ---

@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"errors"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -63,8 +64,7 @@ func TestOpenCommitTree_ReadsTheCommit(t *testing.T) {
 	for _, c := range []struct{ dir, root, path string }{
 		{dir, "skills", "skills"},
 		{dir, "/skills/", "skills"},
-		{filepath.Join(dir, "skills"), "", "skills"},
-		{filepath.Join(dir, "skills"), "team", "skills/team"},
+		{dir, "skills/team", "skills/team"},
 	} {
 		tree, err := OpenCommitTree(ctx, c.dir, "HEAD", c.root)
 		if err != nil {
@@ -85,6 +85,19 @@ func TestOpenCommitTree_ReadsTheCommit(t *testing.T) {
 	}
 	if _, err := fs.ReadFile(tree.Files, "README.md"); err != nil {
 		t.Errorf("read README.md at the root: %v", err)
+	}
+}
+
+// Spec: §7.3.5 — a directory below the top of the working tree is refused,
+// because the layer subject name is built from root alone and would not name
+// the tree path the subjects digest.
+func TestOpenCommitTree_RefusesASubdirectory(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	commitWorkTree(t, dir, map[string]string{"skills/team/pkg/ARTIFACT.md": "x\n"})
+	_, err := OpenCommitTree(context.Background(), filepath.Join(dir, "skills"), "HEAD", "")
+	if !errors.Is(err, ErrNotWorkTreeTop) || !strings.Contains(err.Error(), `"skills"`) {
+		t.Errorf("OpenCommitTree(subdirectory) = %v, want ErrNotWorkTreeTop naming skills", err)
 	}
 }
 
