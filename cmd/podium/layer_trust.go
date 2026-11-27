@@ -9,6 +9,9 @@ import (
 	"io"
 	"os"
 	"strings"
+
+	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 // trustFlags are the §7.3.1 trust policy flags `podium layer register` and
@@ -131,13 +134,14 @@ func layerShow(args []string) int {
 	fs := flag.NewFlagSet("layer show", flag.ContinueOnError)
 	setUsage(fs, "Print one registered layer, with its trust policy.")
 	registry := fs.String("registry", os.Getenv("PODIUM_REGISTRY"), "registry URL")
+	requirements := fs.Bool("requirements", false, "write the layer's trust_requirements as a requirements file for podium attest check")
 	fs.SetOutput(os.Stderr)
 	id, nargs, err := parsePositional(fs, args)
 	if err != nil {
 		return parseExit(err)
 	}
 	if nargs != 1 {
-		fmt.Fprintln(os.Stderr, "usage: podium layer show <id>")
+		fmt.Fprintln(os.Stderr, "usage: podium layer show <id> [--requirements]")
 		return 2
 	}
 	*registry = resolveLayerRegistry(*registry)
@@ -150,7 +154,11 @@ func layerShow(args []string) int {
 		fmt.Fprintf(os.Stderr, "show failed: HTTP %d\n%s\n", status, out)
 		return 1
 	}
-	if err := writeLayerObject(os.Stdout, out, id); err != nil {
+	write := writeLayerObject
+	if *requirements {
+		write = writeLayerRequirements
+	}
+	if err := write(os.Stdout, out, id); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
@@ -160,28 +168,66 @@ func layerShow(args []string) int {
 // writeLayerObject writes the layer object with ID id from a layer list body
 // to w as indented JSON, in the member order the registry sent.
 func writeLayerObject(w io.Writer, body []byte, id string) error {
+	raw, err := findLayerObject(body, id)
+	if err != nil {
+		return err
+	}
+	var buf bytes.Buffer
+	// raw decoded in findLayerObject, so it is valid JSON and Indent cannot
+	// fail on it; the guard keeps an impossible failure visible.
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return fmt.Errorf("format layer %s: %w", id, err)
+	}
+	buf.WriteByte('\n')
+	_, err = w.Write(buf.Bytes())
+	return err
+}
+
+// writeLayerRequirements writes the trust_requirements of the layer with ID
+// id from a layer list body to w as a §4.7.11 requirements file, which
+// `podium attest check --requirements` reads. The requirements carry the
+// members the registry derived, so the check applies the bindings the
+// registry applies. A layer with no requirement is an error.
+//
+// Spec: §4.7.11 (Requirements file), §7.3.1
+func writeLayerRequirements(w io.Writer, body []byte, id string) error {
+	raw, err := findLayerObject(body, id)
+	if err != nil {
+		return err
+	}
+	var l struct {
+		TrustRequirements []store.TrustRequirement `json:"trust_requirements"`
+	}
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return fmt.Errorf("decode the trust_requirements of layer %s: %w", id, err)
+	}
+	if len(l.TrustRequirements) == 0 {
+		return fmt.Errorf("layer %s has no trust requirement", id)
+	}
+	b, err := layer.MarshalRequirementsFile(l.TrustRequirements)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(b)
+	return err
+}
+
+// findLayerObject returns the layer object with ID id from a layer list
+// body.
+func findLayerObject(body []byte, id string) (json.RawMessage, error) {
 	var list struct {
 		Layers []json.RawMessage `json:"layers"`
 	}
 	if err := json.Unmarshal(body, &list); err != nil {
-		return fmt.Errorf("decode the layer list: %w", err)
+		return nil, fmt.Errorf("decode the layer list: %w", err)
 	}
 	for _, raw := range list.Layers {
 		var head struct {
 			ID string `json:"id"`
 		}
-		if json.Unmarshal(raw, &head) != nil || head.ID != id {
-			continue
+		if json.Unmarshal(raw, &head) == nil && head.ID == id {
+			return raw, nil
 		}
-		var buf bytes.Buffer
-		// raw decoded above, so it is valid JSON and Indent cannot fail on
-		// it; the guard keeps an impossible failure visible.
-		if err := json.Indent(&buf, raw, "", "  "); err != nil {
-			return fmt.Errorf("format layer %s: %w", id, err)
-		}
-		buf.WriteByte('\n')
-		_, err := w.Write(buf.Bytes())
-		return err
 	}
-	return fmt.Errorf("no layer %s in the layers this caller can read", id)
+	return nil, fmt.Errorf("no layer %s in the layers this caller can read", id)
 }

@@ -199,6 +199,8 @@ Commands:
   sync save-as        Capture the current target state as a sync.yaml profile.
   lint                Validate manifests in a filesystem-source registry.
   attest              Write the subjects an author attestation of a layer signs.
+  attest import       Copy signed bundles into a layer's attestation directory and prune it.
+  attest check        Compare a layer's attestation directory with its packages.
   search              Hybrid search over artifacts (registry HTTP API).
   overlap             Report description overlap across every layer you can see (registry HTTP API).
   usage               Report artifact loads, syncs, and search hits per artifact, per layer, and for the catalog (registry HTTP API).

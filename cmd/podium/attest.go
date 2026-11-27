@@ -21,12 +21,26 @@ import (
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
-// attestCmd writes the §7.3.5 subjects of one layer for a signing tool.
+// attestCmd writes the §7.3.5 subjects of one layer for a signing tool, and
+// dispatches the import and check subcommands. A first argument of import or
+// check names the subcommand, so a <dir> of either name is written ./import
+// or ./check.
 //
 //	podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>]
 //	              [--max-subjects <n>] [--format checksums|statement]
+//	podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]
+//	podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements <file>]
 func attestCmd(args []string) int {
-	return runAttest(context.Background(), args, os.Stdout, os.Stderr)
+	ctx := context.Background()
+	if len(args) > 0 {
+		switch args[0] {
+		case "import":
+			return runAttestImport(ctx, args[1:], os.Stdout, os.Stderr)
+		case "check":
+			return runAttestCheck(ctx, args[1:], os.Getenv, os.Stdout, os.Stderr)
+		}
+	}
+	return runAttest(ctx, args, os.Stdout, os.Stderr)
 }
 
 // attestOptions are the parsed flags and operand of `podium attest`.
@@ -101,10 +115,7 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 		_, _ = fmt.Fprintf(stderr, "error: --max-subjects %d: %v\n", opts.maxSubjects, attest.ErrMaxSubjects)
 		return opts, 2
 	}
-	if opts.root, err = attest.CheckLayerRoot(*root); err == nil {
-		opts.layerName, err = attest.LayerSubjectName(opts.root)
-	}
-	if err != nil {
+	if opts.root, opts.layerName, err = parseLayerRoot(*root); err != nil {
 		_, _ = fmt.Fprintf(stderr, "error: --root: %s\n", oneLine(err.Error()))
 		return opts, 2
 	}
@@ -112,6 +123,50 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 		return opts, code
 	}
 	return opts, -1
+}
+
+// parseLayerRoot applies the §7.3.5 --root rule and returns the root with
+// its slashes trimmed and the layer subject name built from it.
+//
+// Spec: §4.7.6, §7.3.5
+func parseLayerRoot(root string) (trimmed, layerName string, err error) {
+	if trimmed, err = attest.CheckLayerRoot(root); err != nil {
+		return "", "", err
+	}
+	layerName, err = attest.LayerSubjectName(trimmed)
+	return trimmed, layerName, err
+}
+
+// errRootSegmentEntry reports a --root segment that is a symbolic link or
+// an entry other than a directory.
+var errRootSegmentEntry = errors.New("is a symbolic link or no directory; each segment of --root must be a directory below <dir>")
+
+// checkRootSegments refuses a segment of root below dir that is a symbolic
+// link or an entry other than a directory. A git layer's tree holds such a
+// link as a link entry, so following it would read or write another layer.
+// dir and its ancestors are not checked: a checkout can lie below a linked
+// directory, such as /tmp on macOS. A missing segment is left to the
+// caller, which reports a missing layer root.
+//
+// Spec: §7.3.5
+func checkRootSegments(dir, root string) error {
+	if root == "" {
+		return nil
+	}
+	p := dir
+	for _, seg := range strings.Split(root, "/") {
+		p = filepath.Join(p, seg)
+		info, err := os.Lstat(p)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil
+		case err != nil:
+			return fmt.Errorf("read %s: %w", p, err)
+		case !info.IsDir():
+			return fmt.Errorf("%s %w", p, errRootSegmentEntry)
+		}
+	}
+	return nil
 }
 
 // parsePredicateType sets the predicate type of the statement format. It
@@ -154,6 +209,9 @@ func readAttestLayer(ctx context.Context, opts attestOptions, stderr io.Writer) 
 		}
 		return records, tree.Files, nil
 	}
+	if err := checkRootSegments(opts.dir, opts.root); err != nil {
+		return nil, nil, err
+	}
 	layerPath, err := filepath.Abs(filepath.Join(opts.dir, filepath.FromSlash(opts.root)))
 	if err != nil {
 		return nil, nil, err
@@ -181,22 +239,10 @@ func readAttestLayer(ctx context.Context, opts attestOptions, stderr io.Writer) 
 //
 // Spec: §4.2, §4.7.6, §7.3.5
 func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesystem.ArtifactRecord, files fs.FS, stderr io.Writer) ([][]byte, error) {
-	for _, d := range (&lint.Linter{Rules: []lint.Rule{lint.NonPortableNameRule()}}).Lint(ctx, nil, records) {
-		_, _ = fmt.Fprintf(stderr, "warning: %s: %s (%s)\n", oneLine(d.ArtifactID), oneLine(d.Message), d.Code)
-	}
-	for i := range records {
-		if _, err := records[i].SubjectName(); err != nil {
-			// The ID is the package's path relative to the layer root, and %q
-			// writes every character the subject name rule excludes as an
-			// escape.
-			return nil, fmt.Errorf("the package at %q has no subject name, so the layer cannot be attested: %w", records[i].ID, err)
-		}
-	}
-	content, err := filesystem.LayerDigestInput(records, files)
+	layer, content, err := attestLayerSubjects(ctx, opts.layerName, records, files, stderr)
 	if err != nil {
 		return nil, err
 	}
-	layer := attest.Subject{Name: opts.layerName, Digest: attest.LayerDigest(content)}
 	groups, err := attest.SubjectFiles(layer, content.Subjects, opts.maxSubjects)
 	if err != nil {
 		return nil, err
@@ -210,6 +256,33 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 		rendered = append(rendered, b.Bytes())
 	}
 	return rendered, nil
+}
+
+// attestLayerSubjects writes the portable-name warnings of records, checks
+// that every package has a subject name, and returns the layer subject named
+// layerName with the layer digest and the digest input, whose Subjects are
+// the artifact subjects. The warnings come first, so a run prints them
+// whether or not it then refuses. podium attest, attest import, and attest
+// check read a layer through it.
+//
+// Spec: §4.2, §4.7.6, §7.3.5
+func attestLayerSubjects(ctx context.Context, layerName string, records []filesystem.ArtifactRecord, files fs.FS, stderr io.Writer) (attest.Subject, attest.Layer, error) {
+	for _, d := range (&lint.Linter{Rules: []lint.Rule{lint.NonPortableNameRule()}}).Lint(ctx, nil, records) {
+		_, _ = fmt.Fprintf(stderr, "warning: %s: %s (%s)\n", oneLine(d.ArtifactID), oneLine(d.Message), d.Code)
+	}
+	for i := range records {
+		if _, err := records[i].SubjectName(); err != nil {
+			// The ID is the package's path relative to the layer root, and %q
+			// writes every character the subject name rule excludes as an
+			// escape.
+			return attest.Subject{}, attest.Layer{}, fmt.Errorf("the package at %q has no subject name, so the layer cannot be attested: %w", records[i].ID, err)
+		}
+	}
+	content, err := filesystem.LayerDigestInput(records, files)
+	if err != nil {
+		return attest.Subject{}, attest.Layer{}, err
+	}
+	return attest.Subject{Name: layerName, Digest: attest.LayerDigest(content)}, content, nil
 }
 
 // writeAttestFiles creates --out, removes the subject files an earlier run
