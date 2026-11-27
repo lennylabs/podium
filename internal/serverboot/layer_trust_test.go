@@ -302,17 +302,39 @@ func TestIsDeclaredLayer(t *testing.T) {
 }
 
 // Spec: §7.3.1 (Layer trust policy) — entryKeys follows merge keys to a
-// bounded depth.
+// bounded depth and refuses a deeper chain, whose merged keys the decode
+// would still apply.
 func TestEntryKeys_BoundsMergeDepth(t *testing.T) {
 	inner := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "trust_mod"}, {Kind: yaml.ScalarNode, Value: "x"}}}
-	m := inner
-	for range maxMergeDepth + 2 {
-		m = &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, m}}
+	chain := func(n int) *yaml.Node {
+		m := inner
+		for range n {
+			m = &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, m}}
+		}
+		return m
 	}
-	if keys := entryKeys(m, 0); len(keys) != 0 {
-		t.Errorf("entryKeys past the depth bound = %d keys", len(keys))
+	if keys, err := entryKeys(chain(maxMergeDepth+1), 0); err == nil || len(keys) != 0 {
+		t.Errorf("entryKeys past the depth bound = %d keys, err %v; want a refusal", len(keys), err)
 	}
-	if keys := entryKeys(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, inner}}, 0); len(keys) != 1 || keys[0].Value != "trust_mod" {
-		t.Errorf("entryKeys of one merge = %v", keys)
+	if keys, err := entryKeys(chain(maxMergeDepth), 0); err != nil || len(keys) != 1 || keys[0].Value != "trust_mod" {
+		t.Errorf("entryKeys at the depth bound = %v, err %v", keys, err)
+	}
+}
+
+// Spec: §7.3.1 (Layer trust policy) — a registry.yaml layer entry that takes
+// a misspelled trust key through a merge chain aborts the start at the depth
+// bound and past it, where entryKeys stops following the chain.
+func TestDeclaredLayerTrust_DeepMergeChainRefused(t *testing.T) {
+	for _, depth := range []int{maxMergeDepth, maxMergeDepth + 1, maxMergeDepth + 4} {
+		var b strings.Builder
+		b.WriteString("registry:\n  x:\n    a0: &a0 {trust_mod: require}\n")
+		for i := 1; i < depth; i++ {
+			fmt.Fprintf(&b, "    a%d: &a%d {<<: *a%d}\n", i, i, i-1)
+		}
+		fmt.Fprintf(&b, "  layers:\n    - id: finance\n      <<: *a%d\n      source:\n        local:\n          path: /tmp\n", depth-1)
+		err := loadTrustConfig(t, b.String(), "").validate()
+		if err == nil || !strings.HasPrefix(err.Error(), "config.invalid_layer_trust") {
+			t.Errorf("merge chain of depth %d: validate = %v, want config.invalid_layer_trust", depth, err)
+		}
 	}
 }
