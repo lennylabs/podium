@@ -166,7 +166,7 @@ podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] 
 podium layer register --id <id> --local <path> [<trust flags>]
 podium layer update --id <id> [<trust flags>] [--clear-trust-requirements]
 podium layer list
-podium layer show <id>
+podium layer show <id> [--requirements]
 podium layer reorder <id> [<id> ...]            # admin-defined layers (admin auth) or your own user-defined layers
 podium layer unregister <id>
 podium layer reingest <id> [--break-glass --justification <text>]
@@ -175,9 +175,9 @@ podium layer watch <id> [--interval <duration>]
 
 The trust flags set the §4.7.11 trust policy of the layer. `--trust <mode>` sets `trust_mode`, and `--trust-layer-root <root>` sets `trust_layer_root`. `--trust-signer <issuer>=<identity>`, which is repeatable and splits at its first `=`, names the signers of the requirement. `--trust-source-repository`, `--trust-source-owner`, `--trust-source-repository-id`, `--trust-source-owner-id`, `--trust-source-repository-ref`, `--trust-any-source`, `--trust-any-ref`, and `--trust-instance` set the matching member, `source_repository`, `source_repository_owner`, `source_repository_id`, `source_repository_owner_id`, `source_repository_ref`, `any_source`, `any_ref`, or `instance`, on every signer that `--trust-signer` names, and the command refuses them with exit code 2 when no `--trust-signer` is given. The command sends the requirement as the one entry of `trust_requirements`. On `podium layer update`, a requirement built from the flags replaces the stored requirement, and `--clear-trust-requirements` sends an empty `trust_requirements`, which the command refuses beside `--trust-signer`. A requirement with a `predicate_type` is written through the layer endpoints or a `registry.yaml` declaration.
 
-`podium layer show <id>` reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output, including its trust policy with the members the registry derived. It exits 1 when the response holds no layer with that ID, which covers a layer the caller cannot read, and when the read fails.
+`podium layer show <id>` reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output, including its trust policy with the members the registry derived. It exits 1 when the response holds no layer with that ID, which covers a layer the caller cannot read, and when the read fails. With `--requirements`, the command writes the layer's `trust_requirements` on standard output as a requirements file (§4.7.11) in place of the layer object, with the members the registry derived, so that `podium attest check --requirements` (§7.3.5) applies the bindings the registry applies. It exits 1 when the layer has no requirement.
 
-`podium attest` (§7.3.5) writes the subjects that an author attestation of a layer signs.
+`podium attest` (§7.3.5) writes the subjects that an author attestation of a layer signs. `podium attest import` copies signed bundles into the layer's attestation directory, and `podium attest check` compares that directory with the layer.
 
 `podium layer register` returns the webhook URL and HMAC secret to register on the source repo. On a multi-tenant registry, the URL carries the layer's tenant ID, because a delivery carries no caller organization from which §6.3.1 could select the tenant. A delivery naming a tenant that is not provisioned and active is refused as naming no layer. Registering a Git source without configuring the webhook leaves the layer at its initial commit until the first manual reingest.
 
@@ -332,7 +332,7 @@ The response carries no other field, and in particular no issuer, client identif
 
 Sign-in, the callback, sign-out, and the posture read mutate no registry state, so none of them is a write endpoint under §13.2.1, a read-only registry serves each of them exactly as it serves it otherwise, and none of them returns `registry.read_only`.
 
-### 7.3.5 Attestation Subjects
+### 7.3.5 Attestation Subjects and Bundles
 
 `podium attest` writes the subjects that an author attestation of one layer signs: the layer subject with the layer digest, and one subject per artifact with its package digest (§4.7.6). The command does not sign and sends no request to a registry. A signing tool that the CI platform or the author runs signs the files it writes.
 
@@ -380,6 +380,55 @@ It exits 2 on a usage error, which is one of these:
 - A `--root` that the rule above refuses.
 - A `--predicate-type` that is not an absolute URI, or one given with the checksums format.
 - More than one `<dir>`.
+
+#### Importing bundles
+
+`podium attest import` copies signed bundles into the attestation directory of one layer (§4.7.11) and removes the bundles there that no longer cover the layer.
+
+```
+podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]
+```
+
+The layer root is `--dir`, which defaults to the current directory, joined with `--root`, under the rules of **Layer root** above. The attestation directory is `.podium/attestations/` at the layer root, and the command creates it when it is absent. `--commit <rev>` reads the layer's packages from the commit's tree, as `podium attest --commit` does. The command writes and removes files in the directory on disk in either case.
+
+- *Input.* Each `<bundle-file>` holds one bundle, or several bundles in the JSON Lines format, one bundle on each line, which is what GitHub's attestation action writes. The command reads a file as a sequence of JSON values and takes each value as one bundle. It refuses a bundle that is not a bundle of the §4.7.11 *Bundle format*, and a bundle that holds more than `PODIUM_ATTESTATION_MAX_BYTES` bytes once the change below is made. It reads and checks every input before it writes a file, so a refused input leaves the directory as it was.
+- *Timestamp certificates.* The command removes the certificates that each RFC 3161 timestamp of a bundle embeds, which are the `certificates` member of the timestamp's CMS signed data. It changes no other member, so the DSSE envelope, its signature, the certificate, and the log entry are the ones the signing tool wrote. A bundle whose timestamps embed no certificate keeps its bytes. A bundle that the command changed differs in bytes from the bundle the signing tool wrote, and its attestation digest differs from the digest of a copy that the tool stored elsewhere, such as GitHub's attestation store. The command refuses a bundle whose timestamp does not parse as a DER TimeStampResp.
+- *File names.* The command writes each bundle to `<hex>.sigstore.json`, where `<hex>` is the 64 lowercase hexadecimal digits of the attestation digest of the bytes it writes. White space around a bundle's JSON value is not part of those bytes. A file of that name that holds the same bytes is left as it is.
+- *Pruning.* After it writes, the command removes each regular file of the directory whose name ends in `.sigstore.json`, that this run did not write, and that one of the following describes. A current subject is the layer subject of the layer root with the layer digest, or the subject of a package of the layer with its package digest (§4.7.6), and a subject of a bundle matches a current subject when it has the same name and its `sha256` member equals the digest's hexadecimal digits.
+  - The file holds more than `PODIUM_ATTESTATION_MAX_BYTES` bytes, or it does not parse as a bundle of the §4.7.11 *Bundle format*.
+  - None of its subjects matches a current subject.
+  - The bundles that this run wrote with the same predicate type and with the same certificate issuer and identity together list every one of its subjects that matches a current subject. The rule compares against the bundles of the run together, because adding one artifact changes how the subjects of a large layer divide across statements.
+
+  The command reads the issuer and the identity of a bundle from its leaf certificate, as §4.7.11 *Certificate fields* names them, without verifying the bundle. It cannot read the Sigstore instance of a bundle that way, so it treats bundles of two instances whose certificates carry one issuer and identity as bundles of one signer, and an import of one of them can remove a bundle of the other. A bundle of another signer or of another predicate type stays while one of its subjects matches a current subject. An entry that is not a regular file stays, and the command writes a warning that names it. `--no-prune` skips the pruning, and the command then does not read the layer.
+- *Limits.* When the directory holds more than `PODIUM_ATTESTATION_MAX_BUNDLES` bundle files after the run, the command writes a warning on standard error.
+
+The command reads the packages with the walk of `podium attest`, and it refuses a layer that holds a package with no subject name (§4.7.6), as `podium attest` does. For each file it writes it prints `wrote <path>` on standard output, and for each file it removes it prints `removed <path>` with the reason.
+
+The command exits 0 when it has written the bundles and pruned the directory. It exits 1, and writes and removes no file, when an input cannot be read, holds no bundle, or holds a bundle that the rules above refuse, or when the layer cannot be read or holds a package with no subject name. It also exits 1 when it cannot create the directory or write or remove a file, and the files it wrote before the failure stay. It exits 2 on a usage error: no `<bundle-file>`, a `--root` that **Layer root** refuses, or a `PODIUM_ATTESTATION_MAX_BYTES` or `PODIUM_ATTESTATION_MAX_BUNDLES` value that §13.12 does not admit.
+
+#### Checking bundles
+
+`podium attest check` compares the bundles in the attestation directory of one layer with the layer's packages, so a workflow step or a pull-request check finds a package or a layer state that ingest would find no subject for.
+
+```
+podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements <file>] [--trusted-root <instance>=<file>]...
+```
+
+The layer root is `<dir>`, which defaults to the current directory, joined with `--root`, under the rules of **Layer root** above. The command reads the layer's packages with the walk of `podium attest`: from the commit's tree with `--commit`, and from the directory otherwise. It reads the bundle files from the attestation directory on disk in either case, because a signing workflow imports its bundles before it commits them.
+
+- *Limits.* The command reports each bundle file that holds more than `PODIUM_ATTESTATION_MAX_BYTES` bytes, and a directory that holds more than `PODIUM_ATTESTATION_MAX_BUNDLES` bundle files, and either fails the check. A bundle file that does not parse as a bundle of the §4.7.11 *Bundle format* is reported in a warning and counts as no bundle.
+- *Counted bundles.* Without `--requirements`, every bundle that parses counts, and the command verifies no signature, which its output states. With `--requirements <file>`, the command reads a requirements file (§4.7.11) and verifies each bundle against each signer of its requirement under the §4.7.11 acceptance conditions, the identity comparison, and the source and ref bindings. A bundle that a signer accepts, and whose predicate type equals the requirement's `predicate_type` when the requirement names one, counts. For each other bundle the command prints its file and the reason, which is the reason that comes last in the §4.7.11 list where the signers refuse it for different reasons.
+- *Conditions.* The check passes when a counted bundle lists the layer subject of the layer root with the layer digest, and each package of the layer has a subject with its name and its package digest in a counted bundle. For each package without one, the command prints the subject name, the package digest, the resolution state, and, for a resolved package, the resolved fields that the digest frames (§4.7.6), so a reviewer reads the values a signature would attest. It also prints each digest under which a counted bundle lists that name.
+- *Commit and working tree.* With `--commit`, the command also lists each package whose digest in the directory on disk differs from its digest in the commit, with the paths of the files that differ, each package that only one of the two holds, and each layer file that differs. The list changes no exit status.
+- *Warnings.* The command writes the `lint.non_portable_name` warning for each package as `podium attest` does, and the warning changes no exit status.
+
+The requirements file holds at most one requirement, and the §4.7.11 *Policy rules* that read a requirement or a signer apply to it. A signer's instance needs a trusted root:
+
+- `public-good` takes the file that `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` names. When the variable is unset, the command refreshes the root once through the Sigstore TUF repository under `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`, keeps the TUF metadata and the verified copy in `.podium/sigstore/public-good/` under the user's home directory, and uses that copy, or the embedded copy when no copy verified, under `PODIUM_SIGSTORE_ROOT_MAX_AGE` (§13.12). A failed refresh is reported in a warning. The command refreshes only when a signer names `public-good`.
+- `--trusted-root <instance>=<file>` reads the trusted root of an instance from a file, under the §4.7.11 *Trusted root files* rules. For `public-good` the file replaces the refresh, and the root lists a transparency log and a certificate transparency log. The `github` instance requires neither log. Another instance requires a transparency log when its root lists one, and a signed certificate timestamp when its root lists a certificate transparency log, because the command reads no `registry.yaml`. The flag is repeatable, and an instance named twice is a usage error.
+- A signer whose instance has no trusted root fails the check.
+
+The command exits 0 when the check passes. It exits 1 when a condition fails, when a bundle file or the directory exceeds a limit, when a package has no subject name, or when the layer, the requirements file, or a trusted root cannot be read or is refused, which includes a `public-good` root past its maximum age. It exits 2 on a usage error: more than one `<dir>`, a `--root` that **Layer root** refuses, a `--trusted-root` value that is not `<instance>=<file>` or that names an instance twice, or a value of a setting it reads that §13.12 does not admit.
 
 ## 7.4 Degraded Network
 
