@@ -354,6 +354,16 @@ type LayerConfig struct {
 	// `podium layer register/update --force-push-policy` CLI flag, and
 	// the registry.yaml `source.git.force_push_policy` key (§7.3.1).
 	ForcePushPolicy string `json:"force_push_policy,omitempty"`
+	// TrustMode is the §4.7.11 trust mode: "none", "warn", "require", or
+	// empty, which resolves to PODIUM_LAYER_TRUST_DEFAULT.
+	TrustMode string `json:"trust_mode"`
+	// TrustRequirements is the §4.7.11 requirement list, which holds at most
+	// one requirement in this release. A signer's derived source binding is
+	// stored here as the registry derived it.
+	TrustRequirements []TrustRequirement `json:"trust_requirements"`
+	// TrustLayerRoot is the §4.7.11 root under which a local layer's content
+	// was signed. Empty expects the layer subject .podium/layer.
+	TrustLayerRoot string `json:"trust_layer_root"`
 	// LastIngestedAt records the wall-clock time of the most recent
 	// successful ingest cycle for this layer. The §7.3.1 layer list
 	// exposes it as `last_ingested_at` for staleness monitoring. Nil

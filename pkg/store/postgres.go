@@ -133,6 +133,9 @@ var orgTableStmts = []string{
 		last_ingested_at TIMESTAMPTZ,
 		repo_userinfo TEXT,
 		ingest_claim TEXT,
+		trust_mode TEXT NOT NULL DEFAULT '',
+		trust_requirements TEXT NOT NULL DEFAULT '',
+		trust_layer_root TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (tenant_id, id)
 	)`,
 	// §7.3.1 semantic overlap records, keyed by owner and peer, and the
@@ -1477,6 +1480,10 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if err != nil {
 		return err
 	}
+	trustReqs, err := trustRequirementsColumn(cfg.TrustRequirements)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -1491,8 +1498,8 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-			 repo_userinfo)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET
 			source_type = EXCLUDED.source_type,
 			repo = EXCLUDED.repo,
@@ -1513,14 +1520,17 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			created_at = EXCLUDED.created_at,
 			deleted_at = EXCLUDED.deleted_at,
 			last_ingested_at = EXCLUDED.last_ingested_at,
-			repo_userinfo = EXCLUDED.repo_userinfo`,
+			repo_userinfo = EXCLUDED.repo_userinfo,
+			trust_mode = EXCLUDED.trust_mode,
+			trust_requirements = EXCLUDED.trust_requirements,
+			trust_layer_root = EXCLUDED.trust_layer_root`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
 		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC(), nullTimePG(cfg.DeletedAt), nullTimePG(cfg.LastIngestedAt),
-		userinfo)
+		userinfo, cfg.TrustMode, trustReqs, cfg.TrustLayerRoot)
 	return err
 }
 
@@ -1535,7 +1545,7 @@ func (p *Postgres) GetLayerConfig(ctx context.Context, tenantID, id string) (Lay
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
 		FROM layer_configs
 		WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfigPG(row)
@@ -1556,7 +1566,7 @@ func (p *Postgres) ListLayerConfigs(ctx context.Context, tenantID string) ([]Lay
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -1650,7 +1660,7 @@ func (p *Postgres) ListDeletedLayerConfigs(ctx context.Context, tenantID string)
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
 		FROM layer_configs WHERE tenant_id = $1 AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1802,7 +1812,7 @@ func ptrFromNullTime(nt sql.NullTime) *time.Time {
 // columns are scanned directly; timestamps come back as time.Time.
 func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
-	var repo, groups, users string
+	var repo, groups, users, trustReqs string
 	var deletedAt, lastIngestedAt sql.NullTime
 	var repoUserinfo sql.NullString
 	err := scanner.Scan(
@@ -1811,8 +1821,12 @@ func scanLayerConfigPG(scanner rowScanner) (LayerConfig, error) {
 		&cfg.Order, &cfg.UserDefined, &cfg.Owner,
 		&cfg.Public, &cfg.Organization, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&cfg.CreatedAt, &deletedAt, &lastIngestedAt, &repoUserinfo)
+		&cfg.CreatedAt, &deletedAt, &lastIngestedAt, &repoUserinfo,
+		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot)
 	if err != nil {
+		return LayerConfig{}, err
+	}
+	if cfg.TrustRequirements, err = parseTrustRequirements(trustReqs); err != nil {
 		return LayerConfig{}, err
 	}
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)

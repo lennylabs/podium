@@ -92,6 +92,9 @@ var additiveColumns = []additiveColumn{
 	{"layer_configs", "last_ingested_at TEXT", "last_ingested_at TIMESTAMPTZ"},
 	{"layer_configs", "repo_userinfo TEXT", "repo_userinfo TEXT"},
 	{"layer_configs", "ingest_claim TEXT", "ingest_claim TEXT"},
+	{"layer_configs", "trust_mode TEXT NOT NULL DEFAULT ''", "trust_mode TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "trust_requirements TEXT NOT NULL DEFAULT ''", "trust_requirements TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "trust_layer_root TEXT NOT NULL DEFAULT ''", "trust_layer_root TEXT NOT NULL DEFAULT ''"},
 
 	// vector_pending
 	{"vector_pending", "attempts INTEGER NOT NULL DEFAULT 0", "attempts BIGINT NOT NULL DEFAULT 0"},

@@ -62,6 +62,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerRepoCredential", func(t *testing.T) { layerRepoCredential(t, factory(t)) })
+	t.Run("LayerTrustPolicy", func(t *testing.T) { layerTrustPolicy(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 	t.Run("LayerVisibilityEntries", func(t *testing.T) { layerVisibilityEntries(t, factory(t)) })
 	t.Run("DeprecatedAtStampedAndPurged", func(t *testing.T) { deprecatedAtStampedAndPurged(t, factory(t)) })
@@ -742,6 +743,60 @@ func layerConfigCRUD(t *testing.T, s store.Store) {
 	}
 	if len(list) != 1 || list[0].ID != "team-shared" {
 		t.Errorf("ListLayerConfigs = %+v", list)
+	}
+}
+
+// layerTrustView renders the trust policy of each config on one line, so a
+// step compares every read with one assertion.
+func layerTrustView(cfgs ...store.LayerConfig) string {
+	lines := make([]string, 0, len(cfgs))
+	for _, c := range cfgs {
+		lines = append(lines, fmt.Sprintf("%s mode=%q root=%q reqs=%+v", c.ID, c.TrustMode, c.TrustLayerRoot, c.TrustRequirements))
+	}
+	return strings.Join(lines, "\n")
+}
+
+// Spec: §4.7.11 (Layer trust policy), §7.3.1 (Layer trust policy) — the trust
+// policy survives a write and every layer read: get, list, the ingest claim,
+// and a soft-delete with its restore. A rewrite that carries no policy
+// stores none.
+func layerTrustPolicy(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	reqs := []store.TrustRequirement{{
+		PredicateType: "https://slsa.dev/provenance/v1",
+		Signers: []store.TrustSigner{{
+			Issuer: "https://token.actions.githubusercontent.com", Identity: "https://github.com/acme/x/.github/workflows/a.yml@refs/heads/main",
+			SourceRepository: "https://github.com/acme/x", SourceRepositoryOwner: "https://github.com/acme",
+			SourceRepositoryID: "1", SourceRepositoryOwnerID: "2", SourceRepositoryRef: "refs/heads/main", Instance: "github",
+		}, {Issuer: "https://accounts.google.com", Identity: "alice@acme.com", AnySource: true, AnyRef: true}},
+	}}
+	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x",
+		TrustMode: "require", TrustRequirements: reqs, TrustLayerRoot: "skills/finance"}
+	must(t, s.PutLayerConfig(ctx, cfg))
+	want := layerTrustView(cfg)
+	got, err := s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	list, err := s.ListLayerConfigs(ctx, "t")
+	must(t, err)
+	claimed, _, err := s.ClaimLayerIngest(ctx, "t", "L", "c1")
+	must(t, err)
+	must(t, s.DeleteLayerConfig(ctx, "t", "L"))
+	deleted, err := s.ListDeletedLayerConfigs(ctx, "t")
+	must(t, err)
+	must(t, s.RestoreLayerConfig(ctx, "t", "L"))
+	restored, err := s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	must(t, s.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x"}))
+	cleared, err := s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	reads := []store.LayerConfig{got, claimed, restored}
+	reads = append(reads, list...)
+	reads = append(reads, deleted...)
+	if view := layerTrustView(reads...); len(reads) != 5 || view != strings.Repeat(want+"\n", 4)+want ||
+		cleared.TrustMode != "" || cleared.TrustRequirements != nil || cleared.TrustLayerRoot != "" {
+		t.Errorf("reads:\n%s\nwant each:\n%s\ncleared: %s", view, want, layerTrustView(cleared))
 	}
 }
 
