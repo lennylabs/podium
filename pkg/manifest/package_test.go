@@ -118,10 +118,23 @@ func TestResolvePackage_Outcomes(t *testing.T) {
 }
 
 // Spec: §4.7.6 — a resolved value that is not valid UTF-8 leaves the package
-// unresolved. The YAML decoder yields no such value, so the branch is driven
-// through the constructor that every resolution passes.
+// unresolved. A !!binary scalar yields such a value in ARTIFACT.md, and the
+// constructor every resolution passes refuses each field.
 func TestResolvePackage_InvalidUTF8IsUnresolved(t *testing.T) {
 	t.Parallel()
+	for _, doc := range []string{
+		"---\ntype: rule\nsensitivity: !!binary /w==\n---\nBody.\n",
+		"---\ntype: rule\nreplaced_by: !!binary /w==\n---\nBody.\n",
+		"---\ntype: !!binary /w==\n---\nBody.\n",
+	} {
+		res := ResolvePackage(PackageDocuments{ArtifactMD: []byte(doc), HasArtifactMD: true})
+		if res.Resolved || !errors.Is(res.Err, ErrInvalidUTF8) {
+			t.Errorf("ResolvePackage(%q) = %+v, want unresolved with ErrInvalidUTF8", doc, res)
+		}
+	}
+	if res := ResolvePackage(PackageDocuments{ArtifactMD: []byte("---\ntype: rule\nsensitivity: !!binary aGlnaA==\n---\nBody.\n"), HasArtifactMD: true}); !res.Resolved || res.Fields.Sensitivity != SensitivityHigh {
+		t.Errorf("a !!binary value that decodes to UTF-8 = %+v, want the resolved high", res)
+	}
 	for _, a := range []*Artifact{
 		{Type: ArtifactType("ru\xffle")},
 		{Type: TypeRule, Sensitivity: Sensitivity("\xc3")},

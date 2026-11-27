@@ -925,7 +925,9 @@ func indexPercent(s, target string) int {
 // spec: §4.4, §4.7.6 — the bundled-resource set is every file under the
 // package root, dot-prefixed names included, other than the package root's
 // ARTIFACT.md, the package root's SKILL.md for a skill, and the files of a
-// nested package. The complete key set is asserted, rather than the absence
+// nested package that discovery finds. A directory below a dot-prefixed
+// directory is never discovered, so its files, an ARTIFACT.md included, stay
+// in the set. The complete key set is asserted, rather than the absence
 // of one prefix, so a hidden-name skip or a base-name SKILL.md skip added to
 // packageFiles fails here instead of silently moving every stored hash.
 func TestWalk_ResourceSetIsEveryFileUnderThePackageRoot(t *testing.T) {
@@ -977,6 +979,8 @@ func TestWalk_ResourceSetIsEveryFileUnderThePackageRoot(t *testing.T) {
 		".hidden-note":         hiddenNote,
 		".tooling/config.json": toolingConfig,
 		"references/SKILL.md":  referencesSkill,
+		".nested/ARTIFACT.md":  stringf(agentArtifact, "Nested", "nested"),
+		".nested/note.txt":     "nested note\n",
 	}
 	if len(outer.Resources) != len(want) {
 		t.Fatalf("outer resource keys = %v, want %v", resourceKeys(outer.Resources), resourceKeys(toBytes(want)))

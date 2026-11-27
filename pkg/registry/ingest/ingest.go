@@ -1361,8 +1361,10 @@ func packageFiles(fsys fs.FS, dir string) (map[string][]byte, error) {
 			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so
 			// a child artifact's files are not captured as the parent's
 			// bundled resources. Only a nested ARTIFACT.md is a boundary; a
-			// subdirectory holding SKILL.md alone stays a bundled resource.
-			if p == dir {
+			// subdirectory holding SKILL.md alone stays a bundled resource,
+			// and so does a directory below a dot-prefixed one, which
+			// discovery never visits, so no other package owns its files.
+			if p == dir || !filesystem.Discoverable(p) {
 				return nil
 			}
 			artifact, _, err := filesystem.PackageManifests(fsys, p)

@@ -145,3 +145,20 @@ func TestReservedAndSignedAtNames(t *testing.T) {
 		t.Errorf("CheckStatementSubjects(%q) = %v, want ErrSignedAtSubject", bad, err)
 	}
 }
+
+// Spec: §4.7.6 — a package file path that is not valid UTF-8 leaves its
+// package with no subject name; any valid UTF-8 path passes, white space
+// included, because the character rule applies to names alone.
+func TestCheckEntryPath(t *testing.T) {
+	t.Parallel()
+	for _, p := range []string{"a.txt", "dir/é.md", "with space.txt", "\U0001F600"} {
+		if err := CheckEntryPath(p); err != nil {
+			t.Errorf("CheckEntryPath(%q) = %v", p, err)
+		}
+	}
+	for _, p := range []string{"bad-\xff.txt", "dir/\xc3", "\xed\xa0\x80"} {
+		if err := CheckEntryPath(p); !errors.Is(err, ErrNoSubjectName) {
+			t.Errorf("CheckEntryPath(%q) = %v, want ErrNoSubjectName", p, err)
+		}
+	}
+}

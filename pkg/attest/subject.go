@@ -62,6 +62,20 @@ func CheckSubjectNameCharacters(s string) error {
 	return nil
 }
 
+// CheckEntryPath returns an error wrapping ErrNoSubjectName when p, the path
+// of a file relative to its package root, is not valid UTF-8. The package
+// digest frames such a path as raw bytes, which a consumer that holds paths
+// as Unicode strings, as every JSON reader does, cannot reproduce, so the
+// package it belongs to has no subject name.
+//
+// Spec: §4.7.6
+func CheckEntryPath(p string) error {
+	if !utf8.ValidString(p) {
+		return fmt.Errorf("%w: the file path %q is not valid UTF-8", ErrNoSubjectName, p)
+	}
+	return nil
+}
+
 // excludedRune reports whether r is a character the subject name rule
 // excludes.
 func excludedRune(r rune) bool {

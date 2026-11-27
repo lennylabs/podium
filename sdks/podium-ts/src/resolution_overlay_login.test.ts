@@ -212,8 +212,9 @@ describe("overlay merge", () => {
   // Spec: §4.4, §6.4 — the overlay carries the registry-side layers' format,
   // so the loader's resource set is every file under the package root,
   // dot-prefixed names included, other than the root ARTIFACT.md, a skill's
-  // root SKILL.md, and the files of a nested package; and discovery skips a
-  // dot-prefixed directory below the overlay root. The overlay root itself
+  // root SKILL.md, and the files of a nested package that discovery finds;
+  // and discovery skips a dot-prefixed directory below the overlay root, so
+  // an ARTIFACT.md below one is a resource of the enclosing package. The overlay root itself
   // sits under .podium/, so the root exemption is exercised here too.
   it("LocalOverlay.load matches the registry walk's resource set", async () => {
     const overlay = join(dir, ".podium", "overlay");
@@ -237,7 +238,14 @@ describe("overlay merge", () => {
 
     expect(new Set(index.artifacts.keys())).toEqual(new Set(["outer", "outer/inner"]));
     expect(new Set(Object.keys(index.get("outer")!.resources))).toEqual(
-      new Set(["notes.md", ".hidden-note", ".tooling/config.json", "references/SKILL.md"]),
+      new Set([
+        "notes.md",
+        ".hidden-note",
+        ".tooling/config.json",
+        "references/SKILL.md",
+        ".nested/ARTIFACT.md",
+        ".nested/note.txt",
+      ]),
     );
     expect(new Set(Object.keys(index.get("outer/inner")!.resources))).toEqual(new Set(["data.txt"]));
   });

@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path"
+	"sort"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/attest"
@@ -43,9 +44,11 @@ func NewPackageRecord(id string, l Layer, hasArtifact, hasSkill bool, files map[
 		HasSkillMD:    hasSkill,
 	})
 	digest := attest.PackageDigest(attest.NewPackage(res, fileSums(files)))
+	pathErr := entryPathError(files)
 	if !res.Resolved {
 		rec := UnparseableRecord(id, l, res.FailedFile, res.Err)
 		rec.PackageDigest = digest
+		rec.entryPathErr = pathErr
 		return rec
 	}
 	isSkill := res.Artifact.Type == manifest.TypeSkill
@@ -58,6 +61,7 @@ func NewPackageRecord(id string, l Layer, hasArtifact, hasSkill bool, files map[
 		VersionAssigned: isSkill && res.Artifact.Version == "",
 		AuthoredVersion: res.Artifact.Version,
 		PackageDigest:   digest,
+		entryPathErr:    pathErr,
 	}
 	for p, b := range files {
 		switch {
@@ -72,6 +76,23 @@ func NewPackageRecord(id string, l Layer, hasArtifact, hasSkill bool, files map[
 	return rec
 }
 
+// entryPathError returns the attest.CheckEntryPath error of the first path
+// of files, in byte order, that is not valid UTF-8, and nil when every path
+// is.
+func entryPathError(files map[string][]byte) error {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	for _, p := range paths {
+		if err := attest.CheckEntryPath(p); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // fileSums returns the SHA-256 digest of each file in files.
 func fileSums(files map[string][]byte) map[string]attest.Sum {
 	sums := make(map[string]attest.Sum, len(files))
@@ -84,11 +105,14 @@ func fileSums(files map[string][]byte) map[string]attest.Sum {
 // SubjectName returns the §4.7.6 subject name of the record: the canonical ID
 // with the authored version for a resolved package whose version is in
 // major.minor.patch form, and the bare ID otherwise. An ID that breaks the
-// subject name character rule returns an error wrapping
-// attest.ErrNoSubjectName.
+// subject name character rule, and a package with a file whose path is not
+// valid UTF-8, return an error wrapping attest.ErrNoSubjectName.
 //
 // Spec: §4.7.6
 func (r *ArtifactRecord) SubjectName() (string, error) {
+	if r.entryPathErr != nil {
+		return "", r.entryPathErr
+	}
 	return attest.SubjectName(r.ID, r.AuthoredVersion)
 }
 
@@ -185,9 +209,13 @@ func LayerDigestInput(records []ArtifactRecord, fsys fs.FS) (attest.Layer, error
 //
 // Spec: §4.7.6
 func LayerContent(l Layer) (attest.Layer, error) {
+	root, err := layerRoot(l)
+	if err != nil {
+		return attest.Layer{}, err
+	}
 	records, err := walkLayer(l)
 	if err != nil {
 		return attest.Layer{}, err
 	}
-	return LayerDigestInput(records, os.DirFS(l.Path))
+	return LayerDigestInput(records, os.DirFS(root))
 }

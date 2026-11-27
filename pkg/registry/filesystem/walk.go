@@ -47,6 +47,10 @@ type ArtifactRecord struct {
 	// sha256:<hex>. Both walks set it on every record, an unparseable one
 	// included, so the layer digest lists every package discovery finds.
 	PackageDigest string
+	// entryPathErr is the attest.CheckEntryPath error of a package that holds
+	// a file whose path is not valid UTF-8, which leaves it with no subject
+	// name. NewPackageRecord sets it.
+	entryPathErr error
 	// Unparseable is the §4.1 unparseable-manifest reason of an unresolved
 	// package: one whose ARTIFACT.md or SKILL.md frontmatter does not parse,
 	// or whose ARTIFACT.md declares type: skill beside no SKILL.md. It is
@@ -343,28 +347,35 @@ type WalkOptions struct {
 // directly holds SKILL.md and no directory between it and the layer root is a
 // package; the second form is a type: skill artifact with no ARTIFACT.md.
 // DOMAIN.md files are ignored at this stage; phase 8 adds domain composition.
+// The walk reads the layer through its resolved root (layerRoot), so a layer
+// path that is a symbolic link is walked as the directory it names, as the
+// fs.FS of the same path is.
 //
 // Spec: §4.2
 func walkLayer(layer Layer) ([]ArtifactRecord, error) {
-	fsys := os.DirFS(layer.Path)
+	root, err := layerRoot(layer)
+	if err != nil {
+		return nil, err
+	}
+	fsys := os.DirFS(root)
 	packages := map[string]bool{}
 	var records []ArtifactRecord
-	walkErr := filepath.WalkDir(layer.Path, func(path string, d os.DirEntry, walkErr error) error {
+	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if !d.IsDir() {
 			return nil
 		}
-		if strings.HasPrefix(d.Name(), ".") && path != layer.Path {
+		if strings.HasPrefix(d.Name(), ".") && path != root {
 			return filepath.SkipDir
 		}
-		rel, err := filepath.Rel(layer.Path, path)
+		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return err
 		}
 		rel = filepath.ToSlash(rel)
-		rec, found, err := loadPackage(layer, fsys, packages, rel, path)
+		rec, found, err := loadPackage(layer, root, fsys, packages, rel, path)
 		if err != nil || !found {
 			return err
 		}
@@ -379,14 +390,29 @@ func walkLayer(layer Layer) ([]ArtifactRecord, error) {
 	return records, nil
 }
 
+// layerRoot returns the layer's path with every symbolic link resolved. The
+// package walk and the layer file list both read the layer through it, so a
+// layer path that is a link gives the walk the same tree that os.DirFS of the
+// path gives the ingest walk.
+//
+// Spec: §4.7.6
+func layerRoot(l Layer) (string, error) {
+	root, err := filepath.EvalSymlinks(l.Path)
+	if err != nil {
+		return "", fmt.Errorf("filesystem: resolve layer %q root: %w", l.ID, err)
+	}
+	return root, nil
+}
+
 // loadPackage applies the §4.2 discovery rule to the directory dir, whose
-// slash path under the layer root is rel, and loads the package it holds.
+// slash path under the resolved layer root is rel, and loads the package it
+// holds.
 // found is false when dir is not a package. It reads every file of the
 // package once, the root manifests included, and resolves and digests the
 // package through NewPackageRecord, as registry ingest does.
 //
 // Spec: §4.1, §4.2, §4.7.6
-func loadPackage(layer Layer, fsys fs.FS, packages map[string]bool, rel, dir string) (rec ArtifactRecord, found bool, err error) {
+func loadPackage(layer Layer, root string, fsys fs.FS, packages map[string]bool, rel, dir string) (rec ArtifactRecord, found bool, err error) {
 	artifact, skill, err := PackageManifests(fsys, rel)
 	if err != nil {
 		return ArtifactRecord{}, false, err
@@ -394,11 +420,11 @@ func loadPackage(layer Layer, fsys fs.FS, packages map[string]bool, rel, dir str
 	if !artifact && (!skill || WithinPackage(packages, rel)) {
 		return ArtifactRecord{}, false, nil
 	}
-	id, err := canonicalID(layer.Path, dir)
+	id, err := canonicalID(root, dir)
 	if err != nil {
 		return ArtifactRecord{}, false, err
 	}
-	files, err := packageFiles(layer.Path, dir)
+	files, err := packageFiles(root, dir)
 	if err != nil {
 		return ArtifactRecord{}, false, err
 	}
@@ -487,17 +513,24 @@ func canonicalID(layerRoot, dir string) (string, error) {
 }
 
 // skipNestedPackage returns filepath.SkipDir when the subdirectory dir of a
-// package carries its own ARTIFACT.md. Directories are domain paths and the
-// leaves are artifact packages, so a nested package's files belong to that
-// artifact rather than to the enclosing one's bundled resources. A
-// subdirectory holding only SKILL.md stays inside the enclosing package, and
-// its SKILL.md is a bundled resource.
+// package is a nested package that discovery finds: it carries its own
+// ARTIFACT.md and its path from the layer root has no dot-prefixed segment.
+// Directories are domain paths and the leaves are artifact packages, so a
+// nested package's files belong to that artifact rather than to the
+// enclosing one's bundled resources. A subdirectory holding only SKILL.md
+// stays inside the enclosing package, and its SKILL.md is a bundled resource.
+// So does a directory below a dot-prefixed directory of the package, whatever
+// it holds, because discovery never visits it and no other package owns its
+// files.
 //
 // Spec: §4.2, §4.4
 func skipNestedPackage(fsys fs.FS, layerRoot, dir string) error {
 	rel, err := filepath.Rel(layerRoot, dir)
 	if err != nil {
 		return err
+	}
+	if !Discoverable(filepath.ToSlash(rel)) {
+		return nil
 	}
 	artifact, _, err := PackageManifests(fsys, filepath.ToSlash(rel))
 	if err != nil {

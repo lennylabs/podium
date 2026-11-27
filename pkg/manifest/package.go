@@ -13,9 +13,10 @@ import (
 // the refusal moved per artifact.
 var ErrSkillDocumentMissing = errors.New("manifest: type: skill missing SKILL.md")
 
-// ErrInvalidUTF8 reports a resolved field value that is not valid UTF-8. The
-// YAML decoder yields no such value; the check keeps the §4.7.6 resolution
-// total, so a value the package digest frames is always UTF-8.
+// ErrInvalidUTF8 reports a resolved field value that is not valid UTF-8, which
+// a !!binary scalar yields. The check keeps the §4.7.6 resolution total, so a
+// value the package digest frames is always UTF-8, and the package is refused
+// under the §4.1 unparseable-manifest rule.
 var ErrInvalidUTF8 = errors.New("manifest: resolved value is not valid UTF-8")
 
 // Root document names of an artifact package.

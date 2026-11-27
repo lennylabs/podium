@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -90,6 +91,34 @@ func TestLoadOne_NestedArtifactNotCaptured(t *testing.T) {
 		if strings.HasPrefix(k, "inner/") {
 			t.Errorf("outer captured nested-artifact file %q as a resource", k)
 		}
+	}
+}
+
+// TestLoadOne_DotDirectoryArtifactMDStaysInThePackage covers
+// spec: §4.2/§4.4 — a directory below a dot-prefixed directory of a package
+// is never discovered, so it is no nested-package boundary and its files,
+// an ARTIFACT.md included, are bundled resources of the enclosing package, as
+// the filesystem-source walk records them.
+func TestLoadOne_DotDirectoryArtifactMDStaysInThePackage(t *testing.T) {
+	t.Parallel()
+	fsys := fstest.MapFS{
+		"outer/ARTIFACT.md":            &fstest.MapFile{Data: []byte(ctxArtifactInternal)},
+		"outer/.claude/ARTIFACT.md":    &fstest.MapFile{Data: []byte("---\ntype: rule\n---\n")},
+		"outer/.claude/settings.json":  &fstest.MapFile{Data: []byte("{}\n")},
+		"outer/.cfg/inner/ARTIFACT.md": &fstest.MapFile{Data: []byte("x")},
+		"outer/.cfg/inner/data.txt":    &fstest.MapFile{Data: []byte("y")},
+		"outer/sub/ARTIFACT.md":        &fstest.MapFile{Data: []byte(ctxArtifactInternal)},
+		"outer/sub/x.txt":              &fstest.MapFile{Data: []byte("z")},
+	}
+	rec, err := loadOne(fsys, "outer/ARTIFACT.md", "layer")
+	if err != nil {
+		t.Fatalf("loadOne: %v", err)
+	}
+	want := []string{".cfg/inner/ARTIFACT.md", ".cfg/inner/data.txt", ".claude/ARTIFACT.md", ".claude/settings.json"}
+	got := mapKeys(rec.Resources)
+	sort.Strings(got)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("outer resources = %v, want %v", got, want)
 	}
 }
 
@@ -313,8 +342,9 @@ func walkParityCases() []walkParityCase {
 		{
 			// The tree mixes a CRLF body, a dot-prefixed file, a dot-prefixed
 			// directory with no manifest, a frontmatter-less SKILL.md below
-			// the package root, a nested package, and a dot-prefixed nested
-			// package.
+			// the package root, a nested package, and a dot-prefixed
+			// directory with an ARTIFACT.md, which discovery never visits, so
+			// its files stay in the enclosing package.
 			name: "ARTIFACT.md package with a nested frontmatter-less SKILL.md",
 			tree: resourceSetTree,
 			want: []walkParityPackage{
@@ -323,6 +353,8 @@ func walkParityCases() []walkParityCase {
 					".hidden-note":         "hidden note body\n",
 					".tooling/config.json": "{\"tool\":\"config\"}\n",
 					"references/SKILL.md":  "reference skill body\n",
+					".nested/ARTIFACT.md":  ctxArtifactInternal,
+					".nested/note.txt":     "nested note\n",
 				}},
 				{id: "outer/inner", version: "1.0.0", resources: map[string]string{"data.txt": "inner data\n"}},
 			},

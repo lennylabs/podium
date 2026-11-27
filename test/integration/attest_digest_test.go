@@ -84,6 +84,25 @@ var corpusPackages = []corpusPackage{
 	{id: "forms/yes", subject: "forms/yes@1.0.0", resolved: true,
 		fields: manifest.ResolvedFields{Type: manifest.TypeAgent, Deprecated: true},
 		digest: "sha256:21206286dc273073b206aff2f7937a0c1adc3f7f09d024fbe0f20b33fffd12cc"},
+	{id: "forms/binary", subject: "forms/binary",
+		digest: "sha256:ba90a346ae2c11b6abf2d1c899451915ba91395e10e78d81c2bdc680414d70f3"},
+	{id: "forms/binary-utf8", subject: "forms/binary-utf8@1.0.0", resolved: true,
+		fields: manifest.ResolvedFields{Type: manifest.TypeAgent, Sensitivity: manifest.SensitivityHigh},
+		digest: "sha256:87ff4f0c086b3afd4d0b94462443503acb731e082ce65725cb59bb6c2e888efb"},
+	{id: "forms/bool-on", subject: "forms/bool-on@1.0.0", resolved: true,
+		fields: manifest.ResolvedFields{Type: manifest.TypeAgent, Deprecated: true},
+		digest: "sha256:383434de34a249f41fbc5c15f99adc482148bae60494d458b4026f04ab59a6a5"},
+	{id: "forms/bool-y", subject: "forms/bool-y@1.0.0", resolved: true,
+		fields: manifest.ResolvedFields{Type: manifest.TypeAgent, Deprecated: true},
+		digest: "sha256:7454b14c921ac5079581f18860355d8d6ba58ecbc37500b69d7b65e7c94fb457"},
+	{id: "forms/bool-off", subject: "forms/bool-off@1.0.0", resolved: true,
+		fields: manifest.ResolvedFields{Type: manifest.TypeAgent, ReplacedBy: "forms/bool-on"},
+		digest: "sha256:24dea51169d0c80fa1b0a254a70872fa491d42afb246685418ece22b2d544ad7"},
+	{id: "skills/meta-binary", subject: "skills/meta-binary",
+		digest: "sha256:0651b240cd100585790ba0c4ab373c2b03a9b4924fad7536d296e9f88c0c751b"},
+	{id: "rules/dot-nested", subject: "rules/dot-nested@1.0.0", resolved: true,
+		fields: manifest.ResolvedFields{Type: manifest.TypeRule},
+		digest: "sha256:af731c168da0562bfd2d7baae8abb2c74088b96eb2c04cb2fa4e7fb64b18f71d"},
 	{id: "rules/broken", subject: "rules/broken",
 		digest: "sha256:f2a8ad5f7cd03ceea8737a76d774529b898a556545a74371a2e9c154e94968bf"},
 	{id: "rules/zero-skill", subject: "rules/zero-skill@1.0.0", resolved: true,
@@ -118,7 +137,7 @@ var corpusLayerFiles = []string{
 }
 
 // corpusLayerDigest pins the layer digest of the corpus.
-const corpusLayerDigest = "sha256:55ca184b2bbd11fcb21d132130627c997a04aae2f84d1f357d9c0d2584ce6bd5"
+const corpusLayerDigest = "sha256:fc40aa4b2a232d2df0ac80916d779443fbf32c54d8b141634d8f7f97c04ee25e"
 
 // packageEntries reads the entries of the package at dir independently of
 // the walks: every file below it, apart from the root files the case omits.
@@ -375,5 +394,36 @@ func TestAttestDigest_WalksAgreeOnEveryLayout(t *testing.T) {
 	}
 	if name, err := attest.LayerSubjectName("/attest-corpus/"); err != nil || name != ".podium/layer/attest-corpus" {
 		t.Errorf("LayerSubjectName = %q, %v, want .podium/layer/attest-corpus", name, err)
+	}
+}
+
+// Spec: §4.7.6, §11 (Package and layer digest tests) — a layer path that is
+// a symbolic link to the corpus is walked as the directory it names, so the
+// filesystem-source walk, the ingest walk over the same path, and Walk agree
+// with the corpus itself.
+func TestAttestDigest_SymlinkedLayerRoot(t *testing.T) {
+	t.Parallel()
+	link := filepath.Join(t.TempDir(), "corpus-link")
+	if err := os.Symlink(corpusDir(t), link); err != nil {
+		t.Fatalf("Symlink: %v", err)
+	}
+	fsLayer, err := filesystem.LayerContent(filesystem.Layer{ID: "corpus", Path: link})
+	if err != nil {
+		t.Fatalf("filesystem.LayerContent: %v", err)
+	}
+	ingLayer, err := ingest.LayerContent(os.DirFS(link))
+	if err != nil {
+		t.Fatalf("ingest.LayerContent: %v", err)
+	}
+	if got := attest.LayerDigest(fsLayer); got != corpusLayerDigest || attest.LayerDigest(ingLayer) != corpusLayerDigest {
+		t.Errorf("layer digest through the link = %s (filesystem), %s (ingest), want %s", got, attest.LayerDigest(ingLayer), corpusLayerDigest)
+	}
+	reg := &filesystem.Registry{Layers: []filesystem.Layer{{ID: "corpus", Path: link}}}
+	records, err := reg.Walk(filesystem.WalkOptions{OnDrop: func(layer.Drop) {}})
+	if err != nil || len(records) == 0 {
+		t.Errorf("Walk through the link = %d records, %v, want the corpus records", len(records), err)
+	}
+	if _, err := filesystem.LayerContent(filesystem.Layer{ID: "gone", Path: filepath.Join(t.TempDir(), "absent")}); err == nil {
+		t.Errorf("LayerContent of an absent path = nil, want the resolve error")
 	}
 }

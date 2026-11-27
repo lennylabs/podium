@@ -186,3 +186,78 @@ func TestWalk_UnreadablePackageFileFails(t *testing.T) {
 		t.Errorf("LayerContent over an unreadable file of an unparseable package = nil, want the read error")
 	}
 }
+
+// Spec: §4.2, §4.4, §4.7.6 — a directory below a dot-prefixed directory of a
+// package is no package, because discovery never visits it, so its files are
+// bundled resources of the enclosing package even when it carries an
+// ARTIFACT.md. A nested directory that discovery finds stays a package of its
+// own and keeps its files.
+func TestWalk_DotDirectoryWithArtifactMDStaysInThePackage(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: "team/pkg/ARTIFACT.md", Content: "---\ntype: rule\nversion: 1.0.0\ndescription: d\nrule_mode: always\n---\n\nBody.\n"},
+		testharness.WriteTreeOption{Path: "team/pkg/.claude/ARTIFACT.md", Content: "---\ntype: rule\n---\n"},
+		testharness.WriteTreeOption{Path: "team/pkg/.claude/settings.json", Content: "{}\n"},
+		testharness.WriteTreeOption{Path: "team/pkg/.cfg/inner/ARTIFACT.md", Content: "x"},
+		testharness.WriteTreeOption{Path: "team/pkg/.cfg/inner/data.txt", Content: "y"},
+		testharness.WriteTreeOption{Path: "team/pkg/sub/ARTIFACT.md", Content: "---\ntype: rule\nversion: 1.0.0\ndescription: d\nrule_mode: always\n---\n\nBody.\n"},
+		testharness.WriteTreeOption{Path: "team/pkg/sub/x.txt", Content: "z"},
+	)
+	reg := &filesystem.Registry{Layers: []filesystem.Layer{{ID: "L", Path: root}}}
+	records, err := reg.Walk(filesystem.WalkOptions{})
+	if err != nil {
+		t.Fatalf("Walk: %v", err)
+	}
+	byID := map[string]filesystem.ArtifactRecord{}
+	for _, r := range records {
+		byID[r.ID] = r
+	}
+	outer, inner := byID["team/pkg"], byID["team/pkg/sub"]
+	for _, p := range []string{".claude/ARTIFACT.md", ".claude/settings.json", ".cfg/inner/ARTIFACT.md", ".cfg/inner/data.txt"} {
+		if _, ok := outer.Resources[p]; !ok {
+			t.Errorf("team/pkg resources %v lack %s", keysOfBytes(outer.Resources), p)
+		}
+	}
+	if _, ok := outer.Resources["sub/x.txt"]; ok {
+		t.Errorf("team/pkg bundles the file of its nested package team/pkg/sub")
+	}
+	if _, ok := inner.Resources["x.txt"]; !ok {
+		t.Errorf("team/pkg/sub resources = %v, want x.txt", keysOfBytes(inner.Resources))
+	}
+}
+
+func keysOfBytes(m map[string][]byte) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+// Spec: §4.7.6 — a package that holds a file whose path is not valid UTF-8
+// has no subject name, whether it resolves or not, because no Unicode reader
+// reproduces the framing of the path. Its package digest is still recorded.
+func TestNewPackageRecord_NonUTF8PathHasNoSubjectName(t *testing.T) {
+	t.Parallel()
+	for _, manifestMD := range []string{"---\ntype: rule\nversion: 1.0.0\n---\nBody.\n", "---\ntype: [rule\n---\n"} {
+		rec := filesystem.NewPackageRecord("ops/a", filesystem.Layer{ID: "L"}, true, false, map[string][]byte{
+			"ARTIFACT.md":  []byte(manifestMD),
+			"ok.txt":       []byte("x"),
+			"bad-\xff.txt": []byte("y"),
+		})
+		if _, err := rec.SubjectName(); !errors.Is(err, attest.ErrNoSubjectName) {
+			t.Errorf("SubjectName of %q = %v, want ErrNoSubjectName", manifestMD, err)
+		}
+		if rec.PackageDigest == "" {
+			t.Errorf("no package digest recorded for %q", manifestMD)
+		}
+	}
+	rec := filesystem.NewPackageRecord("ops/a", filesystem.Layer{ID: "L"}, true, false, map[string][]byte{
+		"ARTIFACT.md": []byte("---\ntype: rule\nversion: 1.0.0\n---\nBody.\n"),
+		"é.txt":       []byte("y"),
+	})
+	if name, err := rec.SubjectName(); err != nil || name != "ops/a@1.0.0" {
+		t.Errorf("SubjectName with a UTF-8 path = %q, %v", name, err)
+	}
+}
