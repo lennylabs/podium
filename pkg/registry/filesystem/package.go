@@ -209,13 +209,29 @@ func LayerDigestInput(records []ArtifactRecord, fsys fs.FS) (attest.Layer, error
 //
 // Spec: §4.7.6
 func LayerContent(l Layer) (attest.Layer, error) {
-	root, err := layerRoot(l)
+	records, fsys, err := LayerRecords(l)
 	if err != nil {
 		return attest.Layer{}, err
+	}
+	return LayerDigestInput(records, fsys)
+}
+
+// LayerRecords walks the layer l with the filesystem-source walk and returns
+// every package discovery finds, before the §4.1 and §4.6 refusals that Walk
+// applies, with the layer's tree read through its resolved root. A caller
+// that needs more of each package than its subject, such as `podium attest`,
+// which warns on names that are not portable, reads the records and passes
+// both to LayerDigestInput.
+//
+// Spec: §4.2, §4.7.6
+func LayerRecords(l Layer) ([]ArtifactRecord, fs.FS, error) {
+	root, err := layerRoot(l)
+	if err != nil {
+		return nil, nil, err
 	}
 	records, err := walkLayer(l)
 	if err != nil {
-		return attest.Layer{}, err
+		return nil, nil, err
 	}
-	return LayerDigestInput(records, os.DirFS(root))
+	return records, os.DirFS(root), nil
 }
