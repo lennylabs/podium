@@ -56,6 +56,9 @@ func TestCheckLogEntryForm(t *testing.T) {
 			t.Errorf("%s: err = %v", name, err)
 		}
 	}
+	if err := checkLogKeyWindow(v1, map[string]*root.TransparencyLog{}, nil); !errors.Is(err, errLogEntryForm) {
+		t.Errorf("window lookup of a log outside the root: err = %v", err)
+	}
 	noProof, _ := attestationLogEntry(t, h)
 	noProof.TransparencyLogEntry().InclusionProof = nil
 	if err := checkLogEntryForm(noProof, logs); !errors.Is(err, errLogEntryForm) {

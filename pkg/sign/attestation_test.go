@@ -250,6 +250,8 @@ func TestVerifyAttestation_BundleAcceptance(t *testing.T) {
 			sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(sh.WithRekorV2Body(), sh.WithCheckpointOrigin("log.acme.test - 1"))), sign.ReasonLogEntry},
 		{"v2 body that names another kind", pg, h.DSSEBundle(statement(t), sh.WithSCT(),
 			sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(sh.WithRekorV2Body(), sh.WithV2BodyKind("dsse"))), sign.ReasonLogEntry},
+		{"log entry from a log the root does not list", publicGood(t, h, sh.WithoutTLogs()), h.DSSEBundle(statement(t), sh.WithSCT(),
+			sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(sh.WithoutSET())), sign.ReasonLogEntry},
 		{"v1 body under a v2 checkpoint", pg, h.DSSEBundle(statement(t), sh.WithSCT(),
 			sh.WithRekorV1Entry(sh.WithV2Checkpoint())), sign.ReasonLogEntry},
 		{"version 0.3 log entry without a proof", pg, h.DSSEBundle(statement(t), sh.WithSCT(),
@@ -391,4 +393,57 @@ func duplicateMediaType(t testing.TB, raw []byte) []byte {
 	i := bytes.IndexByte(raw, '{')
 	return append(append(append([]byte(nil), raw[:i+1]...),
 		[]byte(`"media_type":"`+sh.BundleMediaTypeV03+`",`)...), raw[i+1:]...)
+}
+
+// TestVerifyAttestation_LogKeyWindow covers the §4.7.11 log key validity
+// window: a log whose window excludes a verified time verifies no entry,
+// whether the entry carries a signed entry timestamp or the time comes
+// from an RFC 3161 timestamp, and the last listing of a log ID decides.
+//
+// Spec: §4.7.11
+func TestVerifyAttestation_LogKeyWindow(t *testing.T) {
+	t.Parallel()
+	h := sh.New(t)
+	clock := h.Clock()
+	at := func(from, to time.Duration) sh.Window {
+		start, end := clock.Add(from), clock.Add(to)
+		return sh.Window{Start: &start, End: &end}
+	}
+	expired, notYet, inside := at(-48*time.Hour, -24*time.Hour), at(24*time.Hour, 48*time.Hour), at(-time.Hour, time.Hour)
+	v1NoSET := func() []byte {
+		return h.DSSEBundle(statement(t), sh.WithSCT(), sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(sh.WithoutSET()))
+	}
+	v2 := func() []byte {
+		return h.DSSEBundle(statement(t), sh.WithSCT(), sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(sh.WithRekorV2Body()))
+	}
+	v1SET := func() []byte { return pgBundle(t, h) }
+	for _, tc := range []struct {
+		name    string
+		windows []sh.Window
+		raw     []byte
+		want    sign.AttestationReason
+	}{
+		{"v1 entry with no promise, expired key", []sh.Window{expired}, v1NoSET(), sign.ReasonTime},
+		{"v1 entry with no promise, key not yet valid", []sh.Window{notYet}, v1NoSET(), sign.ReasonTime},
+		{"v2 entry, expired key", []sh.Window{expired}, v2(), sign.ReasonTime},
+		{"v2 entry, key not yet valid", []sh.Window{notYet}, v2(), sign.ReasonTime},
+		{"v1 entry with a promise, expired key", []sh.Window{expired}, v1SET(), sign.ReasonTime},
+		{"v1 entry with a promise, key not yet valid", []sh.Window{notYet}, v1SET(), sign.ReasonTime},
+		{"v1 entry with no promise inside the window", []sh.Window{inside}, v1NoSET(), ""},
+		{"v2 entry inside the window", []sh.Window{inside}, v2(), ""},
+		{"v1 entry with a promise inside the window", []sh.Window{inside}, v1SET(), ""},
+		{"listed twice, last listing inside", []sh.Window{expired, inside}, v1NoSET(), ""},
+		{"listed twice, last listing expired", []sh.Window{inside, expired}, v1NoSET(), sign.ReasonTime},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := verify(t, publicGood(t, h, sh.WithLogValidFor(tc.windows...)), tc.raw, emailSigner())
+			if tc.want == "" {
+				if err != nil {
+					t.Fatalf("verify: %v", err)
+				}
+				return
+			}
+			wantReason(t, err, tc.want)
+		})
+	}
 }

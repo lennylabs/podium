@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -249,6 +250,15 @@ func (v *bundleVerification) checkLog() error {
 	// bundle, so the body and checkpoint forms are fixed first.
 	if err := checkLogEntryForm(entries[0], v.root.RekorLogs()); err != nil {
 		return refuse(ReasonLogEntry, "the log entry is in no accepted form", err)
+	}
+	// A log key window that excludes a verified time is reported as time,
+	// as a signed entry timestamp outside the window is; an entry whose log
+	// the root does not list is a log_entry refusal.
+	if err := checkLogKeyWindow(entries[0], v.root.RekorLogs(), v.times); err != nil {
+		if errors.Is(err, errLogKeyWindow) {
+			return refuse(ReasonTime, "a verified time falls outside the log key's validity window", err)
+		}
+		return refuse(ReasonLogEntry, "the entry names no log of the trusted root", err)
 	}
 	if _, err := verify.VerifyTlogEntry(v.bundle, v.root, 1, true); err != nil {
 		return refuse(ReasonLogEntry, "the log entry does not verify", err)
