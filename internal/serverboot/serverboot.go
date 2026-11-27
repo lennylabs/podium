@@ -2336,6 +2336,10 @@ type Config struct {
 	// snapshot (§7.3.1), from the environment or the registry.yaml
 	// git_fetch_timeout key.
 	gitFetch gitFetchConfig
+	// gitFetchDepth is the §13.12 PODIUM_GIT_FETCH_DEPTH starting depth of
+	// each call of the Git source (§7.3.1 Git fetch), from the environment or
+	// the registry.yaml git_fetch_depth key.
+	gitFetchDepth gitFetchDepthConfig
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -2533,6 +2537,7 @@ func (c *Config) Settings() []Setting {
 		{"sandbox_profile.host_sandboxes", strings.Join(c.hostSandboxes, ","), envOrSrc("PODIUM_HOST_SANDBOXES", defaultSrc)},
 		{"layers.path", c.layerPath, envOrSrc("PODIUM_LAYER_PATH", yamlSrc)},
 		{gitFetchTimeoutKey, c.gitFetch.display(), c.gitFetch.source},
+		{gitFetchDepthKey, c.gitFetchDepth.display(), c.gitFetchDepth.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
 		{"read_only.probe_interval_seconds", intStr(c.readOnlyProbeInterval), envOrSrc("PODIUM_READONLY_PROBE_INTERVAL", defaultSrc)},
@@ -2707,16 +2712,18 @@ func LoadConfig() *Config {
 	// cannot be read or does not decode is carried to validate, which refuses
 	// the start: starting on the defaults would drop the configured identity
 	// provider, layers, and store settings (§13.12).
-	fileGitFetchTimeout := ""
+	fileGitFetchTimeout, fileGitFetchDepth := "", ""
 	if y, err := readYAMLConfig(); err != nil {
 		c.configFileErr = err
 	} else {
 		applyYAML(c, y)
 		if y != nil {
 			fileGitFetchTimeout = y.GitFetchTimeout
+			fileGitFetchDepth = y.GitFetchDepth
 		}
 	}
 	c.gitFetch = resolveGitFetchTimeout(os.Getenv(source.FetchTimeoutSetting), fileGitFetchTimeout)
+	c.gitFetchDepth = resolveGitFetchDepth(os.Getenv(source.FetchDepthSetting), fileGitFetchDepth)
 	// §13.12: the Pinecone namespace prefix defaults to "default"
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
@@ -2840,15 +2847,19 @@ func (c *Config) ConfigFileError() error { return c.configFileErr }
 
 // SettingErrors reports the refusals validate returns for settings that
 // Settings shows, such as a PODIUM_GIT_FETCH_TIMEOUT that is not a duration
-// above zero. `podium config show --server` prints them, because Settings
-// marks such a value invalid and the registry refuses to start with it.
+// above zero or a PODIUM_GIT_FETCH_DEPTH outside its range. `podium config
+// show --server` prints them, because Settings marks such a value invalid and
+// the registry refuses to start with it.
 //
 // Spec: §13.12
 func (c *Config) SettingErrors() []error {
-	if c.gitFetch.err != nil {
-		return []error{c.gitFetch.err}
+	var errs []error
+	for _, err := range []error{c.gitFetch.err, c.gitFetchDepth.err} {
+		if err != nil {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errs
 }
 
 func (c *Config) validate() error {
@@ -2927,6 +2938,9 @@ func (c *Config) validate() error {
 	}
 	if c.gitFetch.err != nil {
 		return c.gitFetch.err
+	}
+	if c.gitFetchDepth.err != nil {
+		return c.gitFetchDepth.err
 	}
 	return c.semanticOverlapGuard()
 }

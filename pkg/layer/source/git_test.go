@@ -286,12 +286,14 @@ func TestGit_SnapshotMergeOfThePriorNotRewritten(t *testing.T) {
 	}
 }
 
-// Spec: §7.3.1 (Force-push detected) — when the remote is itself a shallow
-// clone, its boundary commit names a parent the remote does not hold. A prior
-// reference that is that missing parent is in the history and is not a
-// rewrite. A prior beyond the boundary cannot be shown reachable, so the
-// snapshot reports a rewrite.
-func TestGit_SnapshotShallowRemoteBoundaryParentNotRewritten(t *testing.T) {
+// Spec: §7.3.1 (Force-push detected, Git fetch: Termination) — when the
+// remote is itself a shallow clone, its boundary commit names a parent the
+// remote does not hold. A prior reference that is that missing parent is in
+// the history and is not a rewrite. A prior beyond the boundary leaves the
+// answer undecided, and a remote that serves no deeper history fails the
+// snapshot as ingest.source_unreachable rather than report a rewrite, which
+// the strict policy would refuse.
+func TestGit_SnapshotShallowRemoteBoundary(t *testing.T) {
 	t.Parallel()
 	srcDir := t.TempDir()
 	repo, err := git.PlainInit(srcDir, false)
@@ -337,18 +339,25 @@ func TestGit_SnapshotShallowRemoteBoundaryParentNotRewritten(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name      string
-		prior     plumbing.Hash
-		rewritten bool
+		name        string
+		prior       plumbing.Hash
+		rewritten   bool
+		unreachable bool
 	}{
 		{name: "prior held by the remote", prior: c3, rewritten: false},
 		{name: "prior is the absent parent of the shallow boundary", prior: c2, rewritten: false},
-		{name: "prior beyond the shallow boundary", prior: c1, rewritten: true},
+		{name: "prior beyond the shallow boundary", prior: c1, unreachable: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			snap, err := source.Git{}.Snapshot(context.Background(), source.LayerConfig{
 				Repo: "file://" + remoteDir, Ref: "master", PriorRef: tc.prior.String(),
 			})
+			if tc.unreachable {
+				if !errors.Is(err, source.ErrSourceUnreachable) {
+					t.Fatalf("Snapshot = %+v, %v; want ErrSourceUnreachable", snap, err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("Snapshot: %v", err)
 			}

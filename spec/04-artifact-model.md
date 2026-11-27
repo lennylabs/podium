@@ -658,7 +658,15 @@ Source types are pluggable via the `LayerSourceProvider` SPI (§9.1). The built-
 
 The directory `.podium/attestations/` at the layer root, which for a `git` layer that sets `root` is below that subpath, is reserved for author attestations. It belongs to no package, because package discovery does not descend into a directory whose name begins with a dot (§4.2), and no content hash, package digest, or layer digest covers its files (§4.7.6).
 
-Custom source types register through `LayerSourceProvider`. Common targets include S3 (versioned bucket), OCI registries (content-addressed), and HTTP-served archives. Each implementation is responsible for fetch semantics, integrity verification (signature, checksum, etag), snapshotting at a stable reference, and declaring its trigger model: webhook, polling, or push notification (§7.3.1 *Ingestion triggers*).
+Custom source types register through `LayerSourceProvider`. Common targets include S3 (versioned bucket), OCI registries (content-addressed), and HTTP-served archives. Each implementation is responsible for fetch semantics, snapshotting at a stable reference, and declaring its trigger model: webhook, polling, or push notification (§7.3.1 *Ingestion triggers*).
+
+The checks the registry applies to a snapshot's content run in the registry core and are one procedure for every source type, and a provider takes no part in them. The remote source is the party those checks examine, so a check supplied per source would let the examined party take part in it. A provider delivers bytes, and the source contract states what the registry needs from it:
+
+- **Snapshot tree.** The registry reads, digests, and stores the file tree that the provider's snapshot exposes, as it does for the built-in sources. A provider needs no digest logic.
+- **Consistency.** The files of one snapshot come from one state of the source. A provider that reads parts of the tree at different moments can pair the content of one state with files of another.
+- **Lineage, optional.** A provider declares whether it answers lineage queries (§9.1 *Lineage query*), and the declaration is a constant of the provider, as its trigger model is. The `git` provider answers them, and the `local` provider does not. A provider gains from answering them only when the commits a query names identify states of its own source, as the commits of a Git history do. A source that a CI job publishes from a Git repository, such as a bucket or an archive, has no such history of its own, and its layers do without the query.
+
+The `git` provider clones a bounded depth of history and deepens it while an answer it needs is undecided (§7.3.1 *Git fetch*).
 
 ### Visibility
 
