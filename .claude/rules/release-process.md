@@ -22,6 +22,10 @@ Podium follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html) (`MAJO
 
 Re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` before the prep PR of a MINOR or MAJOR release. Check each listed product's name, availability, and stated capabilities against its current public documentation, and look for new products in the categories the comparison covers. §1.5 is spec text, so a correction goes through the proposal pipeline and merges before the prep PR, and it updates the "current as of" date on the Why Podium page. A check that finds nothing stale is recorded in the prep PR description. A PATCH release skips this step.
 
+## Before every release
+
+Check the embedded public-good Sigstore trusted root (spec §4.7.11) with `go run ./tools/sigstoreroot -check`. A release binary counts the age of that root from its build date, so the root must be the current target of the Sigstore TUF repository when the tag is built. When the check reports that `pkg/sign/embedded/public-good.trusted_root.json` differs, run `go run ./tools/sigstoreroot` and land the changed file in its own PR before the prep PR. The prep PR does not carry it. The `sigstore-root` workflow runs the same check on each prep PR whose head branch is `release/*` and weekly against `main`, and the release workflow runs it again on the tag, retrying a failed fetch twice.
+
 ## Preparing the release PR
 
 1. Branch from `main`: `git checkout -b release/X.Y.Z`.
@@ -81,6 +85,8 @@ git push origin release/X.Y.x
 
 Merge the fix back into `main` when it is not already there.
 
+The branch carries the embedded Sigstore trusted root of the old tag, which the release workflow refuses once it is not current. Run `go run ./tools/sigstoreroot -check` on `release/X.Y.x`, and when it fails, cherry-pick the commit that refreshed `pkg/sign/embedded/public-good.trusted_root.json` on `main` onto `release/X.Y.x` before the prep commit, or run `go run ./tools/sigstoreroot` there and commit the result on its own. The `sigstore-root` workflow checks each pull request into a `release/*` branch.
+
 ## Before tagging a signing-path release
 
 When the release diff touches `pkg/sign` or the `SignatureProvider` contract, run the Sigstore live smoke against the staging instance first. The release gate does not run it. The procedure is in `RELEASING.md`.
@@ -88,6 +94,7 @@ When the release diff touches `pkg/sign` or the `SignatureProvider` contract, ru
 ## Where these rules apply
 
 - The prep PR of a MINOR or MAJOR release, for the comparison re-check.
+- Every release, for the check of the embedded Sigstore trusted root.
 - A change to the `Version` constant in `internal/buildinfo/buildinfo.go`, to the version fields of `deploy/helm/podium/Chart.yaml`, or to the release series in the status lines of `README.md` and `docs/about/status.md`.
 - A new `CHANGELOG.md` release section.
 - A documentation page or redirect that names the release being prepared as unreleased.

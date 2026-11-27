@@ -3,7 +3,38 @@ package buildinfo
 import (
 	"strings"
 	"testing"
+	"time"
 )
+
+// Spec: §4.7.11 — the age of the embedded public-good root counts from the
+// release date. A source build sets none, and a value that does not parse
+// counts as none, so the age is unknown rather than a time.
+func TestReleaseTime(t *testing.T) {
+	prev := ReleaseDate
+	t.Cleanup(func() { ReleaseDate = prev })
+	for _, tc := range []struct {
+		value string
+		ok    bool
+	}{
+		{"", false},
+		{"not-a-date", false},
+		{"2026-11-27T10:00:00Z", true},
+		{"2026-11-27T11:00:00+01:00", true},
+	} {
+		ReleaseDate = tc.value
+		got, ok := ReleaseTime()
+		if ok != tc.ok {
+			t.Errorf("ReleaseTime(%q) ok = %v, want %v", tc.value, ok, tc.ok)
+			continue
+		}
+		if ok && !got.Equal(time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)) {
+			t.Errorf("ReleaseTime(%q) = %v, want 2026-11-27T10:00:00Z", tc.value, got)
+		}
+		if !ok && !got.IsZero() {
+			t.Errorf("ReleaseTime(%q) = %v, want the zero time", tc.value, got)
+		}
+	}
+}
 
 func TestString_DefaultOnlyVersion(t *testing.T) {
 	withGlobals(t, "0.0.0-dev", "unknown", "unknown")

@@ -67,6 +67,6 @@ The following notes apply to the procedure:
 Step 5 with other providers behaves as follows:
 
 - `--provider noop` is refused for every envelope.
-- A Sigstore envelope passed with `--signature` takes `--provider sigstore-keyless`. `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` names a Sigstore `trusted_root.json` that holds the certificate authorities, the transparency-log keys, and the timestamp authorities. `PODIUM_SIGSTORE_CERT_IDENTITY` and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` name the expected signer.
+- A Sigstore keyless bundle passed with `--signature` takes `--provider sigstore-keyless`. `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` names a Sigstore `trusted_root.json` that holds the certificate authorities, the transparency logs, and the timestamp authorities. `PODIUM_SIGSTORE_CERT_IDENTITY` and `PODIUM_SIGSTORE_CERT_OIDC_ISSUER` name the expected signer.
 - Verification fails with `no trust root configured` when the trust root is absent, and with a message naming the variable when either policy variable is unset.
-- The delivery signature itself is never a Sigstore envelope, so a restore drill verifies it with `registry-managed`.
+- The delivery signature itself is never a Sigstore bundle, so a restore drill verifies it with `registry-managed`.

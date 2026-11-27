@@ -115,11 +115,17 @@ func (h *Harness) fulcioHandler(cfg serverConfig) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		chain := []string{pemChain([]*x509.Certificate{leaf}), pemChain([]*x509.Certificate{h.fulcioInter.cert}), pemChain([]*x509.Certificate{h.fulcioRoot.cert})}
+		chain := []string{pemCert(leaf), pemCert(h.fulcioInter.cert), pemCert(h.fulcioRoot.cert)}
 		writeJSON(w, map[string]any{
 			"signedCertificateEmbeddedSct": map[string]any{"chain": map[string]any{"certificates": chain}},
 		})
 	}
+}
+
+// pemCert encodes one certificate as PEM, as Fulcio writes each element
+// of its chain.
+func pemCert(c *x509.Certificate) string {
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw}))
 }
 
 // fulcioLeaf issues a default leaf for a PEM public key.
@@ -221,9 +227,13 @@ func (h *Harness) rekorEntry(cfg serverConfig, req rekorRequest) (transparencyLo
 	if cfg.logIndexOmitted {
 		idx = ""
 	}
+	logID, err := LogID(h.logKey.Public())
+	if err != nil {
+		return transparencyLogEntry{}, err
+	}
 	out := transparencyLogEntry{
 		LogIndex:          idx,
-		LogID:             logIDDoc{KeyID: []byte(checkpointOrigin)},
+		LogID:             logIDDoc{KeyID: logID},
 		KindVersion:       map[string]string{"kind": defaultEntryKind, "version": defaultEntryAPIVersion},
 		CanonicalizedBody: body,
 		InclusionProof: &inclusionProofMessage{

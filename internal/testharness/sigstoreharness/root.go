@@ -99,6 +99,39 @@ type rootConfig struct {
 	foreignCA              bool
 	caWindow, tsaWindow    Window
 	logWindows             []Window
+	// ctLogKey lists the harness CT log key; extraTSAs lists further
+	// timestamp authorities after the primary; caFirstTSA writes the
+	// primary's chain root first.
+	ctLogKey       bool
+	extraTSAs      []TSA
+	caFirstTSA     bool
+	garbageTSACert bool
+}
+
+// WithGarbageTSACert replaces the primary timestamp authority's first
+// certificate with bytes that are not DER.
+func WithGarbageTSACert() RootOpt { return func(c *rootConfig) { c.garbageTSACert = true } }
+
+// WithCTLogKey lists the harness certificate-transparency log key, whose
+// SCTs WithSCT embeds.
+func WithCTLogKey() RootOpt { return func(c *rootConfig) { c.ctLogKey = true } }
+
+// WithTimestampAuthorities lists further timestamp authorities after the
+// primary, in order.
+func WithTimestampAuthorities(names ...TSA) RootOpt {
+	return func(c *rootConfig) { c.extraTSAs = append(c.extraTSAs, names...) }
+}
+
+// WithCAFirstTSA writes the primary timestamp authority's chain with its
+// root first, so the entry begins with a CA certificate.
+func WithCAFirstTSA() RootOpt { return func(c *rootConfig) { c.caFirstTSA = true } }
+
+// GitHubStyleRoot returns the options of a trusted root like the one
+// GitHub's instance publishes: certificate authorities and timestamp
+// authorities, among them one whose certificates have expired, and no
+// transparency or certificate-transparency log.
+func GitHubStyleRoot() []RootOpt {
+	return []RootOpt{WithoutTLogs(), WithTimestampAuthorities(TSAExpired)}
 }
 
 // WithoutCAs omits every certificate authority.
@@ -114,8 +147,8 @@ func WithoutTLogs() RootOpt { return func(c *rootConfig) { c.noTLogs = true } }
 // WithEd25519LogKey adds the Ed25519 log key beside the P-256 key.
 func WithEd25519LogKey() RootOpt { return func(c *rootConfig) { c.edKey = true } }
 
-// WithUnsupportedLogKey adds an RSA log key with an RSA keyDetails value,
-// which the §4.7.9 verifier skips.
+// WithUnsupportedLogKey adds an RSA log key with an RSA keyDetails value.
+// sigstore-go loads it, and no generated entry names it.
 func WithUnsupportedLogKey() RootOpt { return func(c *rootConfig) { c.unsupported = true } }
 
 // WithExtraTLog adds an unrelated P-256 log key.
@@ -148,7 +181,7 @@ func WithMalformedJSON() RootOpt { return func(c *rootConfig) { c.malformed = tr
 
 // WithForeignCA replaces the certificate authorities with an unrelated
 // root and intermediate. The timestamp authority and log key stay, so a
-// default envelope fails only at the leaf's chain check.
+// default bundle fails only at the leaf's chain check.
 func WithForeignCA() RootOpt { return func(c *rootConfig) { c.foreignCA = true } }
 
 // TrustedRootJSON returns a Sigstore trusted_root.json with one
@@ -192,8 +225,30 @@ func (h *Harness) trustedRoot(cfg rootConfig, open Window) (trustedRootDoc, erro
 		doc.CertificateAuthorities = []authorityDoc{ca}
 	}
 	if !cfg.noTSAs {
+		primary := []*x509.Certificate{h.tsaLeaf.cert, h.tsaRoot.cert}
+		if cfg.caFirstTSA {
+			primary = []*x509.Certificate{h.tsaRoot.cert, h.tsaLeaf.cert}
+		}
 		doc.TimestampAuthorities = []authorityDoc{authorityEntry(
-			"acme-tsa", "https://tsa.acme.test", cfg.tsaWindow, h.tsaLeaf.cert, h.tsaRoot.cert)}
+			"acme-tsa", "https://tsa.acme.test", cfg.tsaWindow, primary...)}
+		if cfg.garbageTSACert {
+			doc.TimestampAuthorities[0].CertChain.Certificates[0].RawBytes = []byte("acme garbage, not a certificate")
+		}
+	}
+	for _, name := range cfg.extraTSAs {
+		a, err := h.timestampAuthority(name)
+		if err != nil {
+			return doc, err
+		}
+		doc.TimestampAuthorities = append(doc.TimestampAuthorities, a.entry())
+	}
+	if cfg.ctLogKey {
+		entry, err := tlogEntry(h.ctKey.Public(), keyDetailsP256, open)
+		if err != nil {
+			return doc, err
+		}
+		entry.BaseURL = "https://ctlog.acme.test"
+		doc.CTLogs = append(doc.CTLogs, entry)
 	}
 	if cfg.ctlogs {
 		doc.CTLogs = []tlogDoc{{

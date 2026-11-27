@@ -71,15 +71,15 @@ func (f keylessFixture) env(overrides map[string]string) []string {
 	return out
 }
 
-// Spec: §4.7.9, §6.2 — podium verify --provider sigstore-keyless accepts an
-// envelope whose timestamp, inclusion proof, entry binding, chain, and leaf
-// identity hold against the trusted_root.json at
-// PODIUM_SIGSTORE_TRUSTED_ROOT_FILE and the identity policy in
-// PODIUM_SIGSTORE_CERT_IDENTITY and PODIUM_SIGSTORE_CERT_OIDC_ISSUER, and
-// refuses otherwise. The harness clock is 2026-01-15, so every accepted leaf
-// has expired on the wall clock: acceptance shows the chain check runs at the
-// attested time. Verification is offline, so the counting server sees no
-// request in any case.
+// Spec: §4.7.9, §6.2 — podium verify --provider sigstore-keyless accepts a
+// keyless bundle whose timestamp, log entry, chain, and leaf identity hold
+// against the trusted_root.json at PODIUM_SIGSTORE_TRUSTED_ROOT_FILE and
+// the identity policy in PODIUM_SIGSTORE_CERT_IDENTITY and
+// PODIUM_SIGSTORE_CERT_OIDC_ISSUER, and refuses otherwise, including a
+// keyless envelope in the 0.7.0 format. The harness clock is 2026-01-15, so
+// every accepted leaf has expired on the wall clock: acceptance shows the
+// chain check runs at the verified time. Verification is offline, so the
+// counting server sees no request in any case.
 func TestPodiumVerify_SigstoreKeyless(t *testing.T) {
 	t.Parallel()
 	f := newKeylessFixture(t)
@@ -125,10 +125,10 @@ func TestPodiumVerify_SigstoreKeyless(t *testing.T) {
 			want:      []string{"verify failed", "PODIUM_SIGSTORE_CERT_OIDC_ISSUER"},
 		},
 		{
-			name:     "pre-change envelope",
+			name:     "0.7.0 envelope",
 			envelope: sigstoreharness.EnvelopeLegacy,
 			wantExit: 1,
-			want:     []string{"verify failed", "no transparency-log entry"},
+			want:     []string{"verify failed", "keyless envelope from 0.7.0 or earlier"},
 		},
 		{
 			name:     "only the removed PEM variable",

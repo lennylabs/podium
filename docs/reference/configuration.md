@@ -226,7 +226,8 @@ A value of `0` in an integer key leaves the default in force.
 | Key | Variable | Type | Default | Description |
 |:--|:--|:--|:--|:--|
 | `freeze_windows` | (none) | list | (none) | Windows during which ingest is refused with `ingest.frozen`. See the table below. |
-| `git_fetch_timeout` | `PODIUM_GIT_FETCH_TIMEOUT` | duration | `10m` | Deadline of one `git` layer snapshot: the clone and the read of the tree at the layer's ref. A snapshot that does not finish within it fails that ingest with `ingest.source_unreachable` and a message that names the variable, and the artifacts served before it stay in place. A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`. [Keeping layers current](../deployment/content/layer-sources#keeping-layers-current) describes it. |
+| `git_fetch_depth` | `PODIUM_GIT_FETCH_DEPTH` | integer | `16` | Depth, in commits, of the clone each ingest of a `git` layer starts with. The ingest deepens the clone by a factor of four while the force-push check cannot decide from the history it holds. A value that is not an integer from 1 to 2147483646, such as `0`, refuses startup with `config.invalid`. A depth greater than the length of the history clones the complete history, which holds every past version of the content in memory. [Keeping layers current](../deployment/content/layer-sources#keeping-layers-current) describes it. |
+| `git_fetch_timeout` | `PODIUM_GIT_FETCH_TIMEOUT` | duration | `10m` | Deadline of one `git` layer snapshot: the clone, every deepening fetch, and the read of the tree at the layer's ref. A snapshot that does not finish within it fails that ingest with `ingest.source_unreachable`, a message that names the variable, and `details.constraint: "fetch_deadline"`, and the artifacts served before it stay in place. A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`. [Keeping layers current](../deployment/content/layer-sources#keeping-layers-current) describes it. |
 | (none) | `PODIUM_INGEST_OFFLINE` | boolean | `false` | `true` skips the HEAD request that checks each URL in artifact prose at ingest. |
 | (none) | `PODIUM_ENFORCE_SANDBOX_PROFILE` | boolean | `false` | `true` rejects at ingest an artifact whose `sandbox_profile` the host cannot honor, with `ingest.sandbox_profile_unenforceable`. |
 | (none) | `PODIUM_HOST_SANDBOXES` | string | `unrestricted` | Comma-separated sandbox profiles the host can enforce. |
@@ -312,6 +313,45 @@ These settings are environment variables only. [Signing keys](../deployment/oper
 |:--|:--|:--|:--|
 | `PODIUM_SIGN` | string | `registry-key` | Ingest signing mode: `registry-key` or `none`. Any other value refuses startup with `config.invalid_sign_mode`. Flag `--sign`. |
 | `PODIUM_SIGN_KEY_PATH` | string | `~/.podium/standalone/registry-signing.key` | Registry signing key file. The registry generates it on first run. A registry on Postgres, or on a SQLite file outside `~/.podium/standalone/`, refuses to start with signing on and this variable unset. Client processes read the same file, as the [CLI reference](cli#signing-and-verification) lists. |
+
+## Author attestation
+
+These settings name the Sigstore instances and the trusted roots that author attestations are verified against (spec §4.7.11). The registry reads them at its start and reports the digest and root time of each root in its log. No ingest step verifies attestations yet, so a layer's served content does not depend on them.
+
+| Key | Variable | Type | Default | Description |
+|:--|:--|:--|:--|:--|
+| `sigstore.instances` | (none) | list | `public-good` only | Sigstore instances besides `public-good`. See the table below. |
+| (none) | `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` | string | (unset) | Trusted root of the `public-good` instance for an air-gapped registry. When it is set, the registry makes no refresh and the root has no age limit. The file holds one trusted root that lists a transparency log and a certificate transparency log. |
+| (none) | `PODIUM_SIGSTORE_ROOT_REFRESH` | duration | `24h` | Interval between refreshes of the `public-good` trusted root through the Sigstore TUF repository, at least `1m` and at least `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`. Each interval after a successful refresh is multiplied by a random factor between 0.9 and 1.1. |
+| (none) | `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT` | duration | `30s` | Deadline of one refresh, covering all of its requests. A failed refresh is retried after 1 minute, then after 2, 4, and so on up to the refresh interval, each delay multiplied by a random factor between 0.5 and 1.5. |
+| (none) | `PODIUM_SIGSTORE_ROOT_MAX_AGE` | duration | `2160h` (90 days) | Age past which the `public-good` root in use is refused. `0` removes the limit. |
+
+Each entry of `sigstore.instances` takes these keys:
+
+| Key | Type | Description |
+|:--|:--|:--|
+| `name` | string | Instance name, 1 to 64 characters from `a` to `z`, `0` to `9`, `.`, `_`, and `-`, beginning with a letter or a digit. `github` is GitHub's instance for private repositories. `public-good` is built in and cannot be listed. |
+| `trusted_root` | string | Path to the instance's trusted root, a `trusted_root.json` document. A relative path resolves against the directory of `registry.yaml`. |
+| `transparency_log` | boolean | Whether the instance requires a transparency log entry. Required for an operator-defined instance, and `true` requires a root that lists a transparency log. The `github` instance has none, so the key is omitted or `false`. |
+| `certificate_transparency` | boolean | Whether the instance requires a signed certificate timestamp. Defaults to `false`, and `true` requires a root that lists a certificate transparency log. A root that lists certificate transparency logs requires a timestamp whatever the key states. |
+
+```yaml
+registry:
+  sigstore:
+    instances:
+      - name: github
+        trusted_root: /etc/podium/github-trusted-root.json
+```
+
+`gh attestation trusted-root` writes one trusted root per line, one for the Sigstore public-good instance and one for GitHub's instance. The registry refuses a file that holds more than one root, so keep only the line for GitHub's instance in the file of the `github` instance. That line lists `fulcio.githubapp.com` among its certificate authorities and no transparency logs.
+
+The registry refreshes the `public-good` root through the Sigstore TUF repository only when it can verify on the `public-good` instance, which is when a trust default, a tenant floor, or a layer trust policy above `none` names a signer of that instance. Ingest verification starts the refresh then, and runs it every `PODIUM_SIGSTORE_ROOT_REFRESH` in the background, so a start does not wait for the network. No release verifies attestations at ingest yet, so no registry makes the request or creates the directory today. The refresh keeps the TUF metadata and the last verified copy in `sigstore/public-good/` beside the SQLite store file, by default `~/.podium/standalone/sigstore/public-good/`, creates the directory on its first run, and uses the copy when a refresh fails. Each binary embeds the `public-good` root that was current when it was built. Until a refresh completes, the registry uses the copy on disk or the embedded root, whichever has the later root time. A release binary counts the age of its embedded root from its build date. A binary built from source records no build date, so its embedded root counts as older than any limit, and verification on `public-good` waits for a refresh unless `PODIUM_SIGSTORE_ROOT_MAX_AGE` is `0`.
+
+`PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` is a separate setting of `podium sign` and `podium verify` for the signature envelope, and author attestation verification does not read it.
+
+The Helm chart runs the registry with a read-only root filesystem, so the home directory and the default `sigstore/public-good/` path cannot be written, and a refresh then keeps the copy in memory and refetches it after each restart. To keep the copy across restarts, mount a writable volume, such as an `emptyDir` or a persistent volume claim, and set `PODIUM_SQLITE_PATH` through `extraEnv` to a file path on it; the chart has no value that mounts such a volume today.
+
+A start refuses with `config.invalid` when a trusted root file cannot be read or parsed, holds several roots, or has a timestamp authority entry that begins with a CA certificate, when the `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` root lists no transparency log or no certificate transparency log, when a `sigstore.instances` entry breaks a rule above, and when one of the three durations is not a Go duration in its range. `podium config show --server` lists the instances and these settings and prints each refusal as a warning.
 
 ## Audit
 

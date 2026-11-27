@@ -282,6 +282,25 @@ func (s *Memory) RehashManifest(_ context.Context, tenantID, artifactID, version
 	return nil
 }
 
+// SetPackageDigest stores one row's package digest under the content-hash
+// condition the Store interface documents. It reaches a soft-deleted row,
+// because the §13.4 fill covers the rows a restore would bring back.
+func (s *Memory) SetPackageDigest(_ context.Context, tenantID, artifactID, version, contentHash, digest string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := mkey(tenantID, artifactID, version)
+	rec, ok := s.manifests[key]
+	if !ok {
+		return ErrNotFound
+	}
+	if rec.ContentHash != contentHash {
+		return ErrImmutableViolation
+	}
+	rec.PackageDigest = digest
+	s.manifests[key] = rec
+	return nil
+}
+
 // ListManifests returns every manifest for the tenant in stable order.
 func (s *Memory) ListManifests(_ context.Context, tenantID string) ([]ManifestRecord, error) {
 	return s.listManifests(tenantID, false)

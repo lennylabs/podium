@@ -1,14 +1,17 @@
-// Package sigstoreharness generates Sigstore-keyless trust material,
-// envelopes, tamper variants, and fake Fulcio, Rekor v2, and
-// timestamp-authority services in-process for the §4.7.9 tests.
+// Package sigstoreharness generates Sigstore trust material, signed
+// bundles, tamper variants, and fake Fulcio, Rekor v2, and
+// timestamp-authority services in-process: version 0.3 message-signature
+// bundles with Rekor v2 entries for the §4.7.9 keyless tests, and version
+// 0.3 DSSE bundles with Rekor v1 entries, RFC 3161 timestamps, embedded
+// SCTs, and Fulcio source extensions for the §4.7.11 tests.
 //
 // The package imports the standard library and internal/testharness
 // only. It never imports pkg/sign: the package-sign tests import this
 // harness, so the reverse import would be a cycle, and building the
-// envelope from independent types catches format drift between
-// sign.SigstoreKeyless and the generator.
+// bundles from independent types catches format drift between the
+// generator and the verifier.
 //
-// Spec: §4.7.9, §6.2.
+// Spec: §4.7.9, §4.7.11, §6.2.
 package sigstoreharness
 
 import (
@@ -31,7 +34,7 @@ const (
 	checkpointOrigin = "log.acme.test"
 )
 
-// Harness holds the trust material one test generates envelopes from.
+// Harness holds the trust material one test generates bundles from.
 // The keys are fresh per Harness, so two harnesses never trust each
 // other's output.
 type Harness struct {
@@ -43,12 +46,19 @@ type Harness struct {
 	tsaLeaf     authority
 	logKey      *ecdsa.PrivateKey
 	edLogKey    ed25519.PrivateKey
+	// ctKey is the certificate-transparency log key that signs the
+	// embedded SCT of an attestation leaf.
+	ctKey *ecdsa.PrivateKey
+	// tsas caches the timestamp authorities other than TSAPrimary, which
+	// timestampAuthority builds on first use.
+	tsas map[TSA]tsaAuthority
 }
 
 // New builds a Fulcio root and code-signing intermediate, a
 // timestamp-authority root and a signer with the critical time-stamping
-// usage, an ECDSA P-256 and an Ed25519 transparency-log key, and a fixed
-// clock at 2026-01-15T12:00:00Z.
+// usage, an ECDSA P-256 and an Ed25519 transparency-log key, an ECDSA
+// P-256 certificate-transparency log key, and a fixed clock at
+// 2026-01-15T12:00:00Z.
 func New(t testing.TB) *Harness {
 	t.Helper()
 	clock := time.Date(2026, 1, 15, 12, 0, 0, 0, time.UTC)
@@ -60,11 +70,13 @@ func New(t testing.TB) *Harness {
 	must(t, err)
 	_, edLogKey, err := ed25519.GenerateKey(rand.Reader)
 	must(t, err)
+	ctKey, err := newECKey()
+	must(t, err)
 	return &Harness{
 		tb: t, clock: clock,
 		fulcioRoot: fRoot, fulcioInter: fInter,
 		tsaRoot: tRoot, tsaLeaf: tLeaf,
-		logKey: logKey, edLogKey: edLogKey,
+		logKey: logKey, edLogKey: edLogKey, ctKey: ctKey,
 	}
 }
 

@@ -78,7 +78,7 @@ pip install 'podium-sdk[verify]'  # Python; imports as `from podium import ...`
 npm install @lennylabs/podium-sdk  # TypeScript
 ```
 
-**From source** (Go 1.26+ required):
+**From source** (Go 1.27.4+ required):
 
 ```bash
 git clone https://github.com/lennylabs/podium.git
@@ -336,7 +336,7 @@ came from, which is the basename of the registry directory.
 
 Building from source requires:
 
-- Go 1.26 or later for the registry, CLI, and MCP server.
+- Go 1.27.4 or later for the registry, CLI, and MCP server.
 - Python 3.10 or later for the `podium-py` SDK.
 - Node.js 22 or later to build and test the `@lennylabs/podium-sdk` TypeScript SDK. The published SDK runs on Node.js 20 or later.
 
