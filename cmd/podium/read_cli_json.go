@@ -145,6 +145,31 @@ type readArtifactShow struct {
 	Deprecated         bool   `json:"deprecated,omitempty"`
 	ReplacedBy         string `json:"replaced_by,omitempty"`
 	DeprecationWarning string `json:"deprecation_warning,omitempty"`
+	// PackageDigest is the §7.2 package_digest member, the §4.7.6 package
+	// digest the registry stores for the served version, omitted when the
+	// registry omits it (§7.6.1).
+	PackageDigest string `json:"package_digest,omitempty"`
+}
+
+// packageDigestMember is the §7.2 package_digest member of a load_artifact
+// response.
+type packageDigestMember struct {
+	PackageDigest string `json:"package_digest"`
+}
+
+// printPackageDigest prints the package digest a load_artifact response
+// carries to w, which is standard error in the default output, so standard
+// output keeps the manifest document alone. Under --json the envelope carries
+// the member and nothing is printed. A response without one prints nothing. The
+// registry asserts the value, and the read CLI runs no check on it.
+//
+// Spec: §7.6.1, §7.2
+func printPackageDigest(w io.Writer, body []byte) {
+	var m packageDigestMember
+	if err := json.Unmarshal(body, &m); err != nil || m.PackageDigest == "" {
+		return
+	}
+	_, _ = fmt.Fprintf(w, "package_digest: %s\n", m.PackageDigest)
 }
 
 // deprecationMembers are the §7.2 deprecation members of a load_artifact
@@ -179,6 +204,7 @@ func emitArtifactShowJSON(body []byte) {
 		ManifestBody string `json:"manifest_body"`
 		Frontmatter  string `json:"frontmatter"`
 		deprecationMembers
+		packageDigestMember
 	}
 	if err := json.Unmarshal(body, &wire); err != nil {
 		fmt.Println(string(body))
@@ -193,6 +219,7 @@ func emitArtifactShowJSON(body []byte) {
 		Deprecated:         wire.Deprecated,
 		ReplacedBy:         wire.ReplacedBy,
 		DeprecationWarning: wire.DeprecationWarning,
+		PackageDigest:      wire.PackageDigest,
 	}
 	printReadJSON(out, body)
 }

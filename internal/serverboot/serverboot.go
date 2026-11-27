@@ -1237,6 +1237,16 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
+	// §13.4: store the §4.7.6 package digest of every row stored without
+	// one, once per store, before the bootstrap ingest and before anything
+	// is served. Like the rewrite above, a start whose listener never bound
+	// leaves the store to the process that holds it.
+	if bindErr == nil {
+		if err := fillPackageDigests(ctx, st); err != nil {
+			return err
+		}
+	}
+
 	// §4.7.2: route ingest embedding through the transactional outbox when the
 	// configured vector backend is an external managed service and the store
 	// supports the outbox. Computed from config (the backend is opened later),
