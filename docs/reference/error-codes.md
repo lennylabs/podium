@@ -160,8 +160,8 @@ The registry also refuses to start with `config.invalid` on the author attestati
 - A trusted root file of a `sigstore.instances` entry, or the file `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` names, cannot be read or parsed, or holds more than one trusted root, as the output of `gh attestation trusted-root` does.
 - A trusted root has a timestamp authority entry that begins with a CA certificate.
 - The `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` root lists no transparency log or no certificate transparency log.
-- A `sigstore.instances` entry has no name, an invalid or repeated name, the name `public-good`, or no `trusted_root`, a `github` entry sets `transparency_log` or `certificate_transparency` to `true`, or an operator-defined entry omits `transparency_log`.
-- `PODIUM_SIGSTORE_ROOT_REFRESH` or `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT` is not a duration above zero, or `PODIUM_SIGSTORE_ROOT_MAX_AGE` is not a duration of zero or more.
+- A `sigstore.instances` entry has no name, an invalid or repeated name, the name `public-good`, or no `trusted_root`, a `github` entry sets `transparency_log` or `certificate_transparency` to `true`, or an operator-defined entry omits `transparency_log` or sets either key to `true` while its trusted root lists no log of that kind.
+- `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT` is not a duration above zero, `PODIUM_SIGSTORE_ROOT_REFRESH` is not a duration of at least `1m` and at least the refresh deadline, or `PODIUM_SIGSTORE_ROOT_MAX_AGE` is not a duration of zero or more.
 
 #### config.signature_provider_unavailable causes
 
