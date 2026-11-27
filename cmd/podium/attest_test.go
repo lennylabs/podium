@@ -68,7 +68,6 @@ func wantLayerSubjects(t *testing.T, dir, root string) string {
 // an unknown format, a bound below 2, a --root with an empty, ".", or ".."
 // segment or an excluded character, and an unknown flag. --help exits 0.
 func TestAttest_UsageErrors(t *testing.T) {
-	t.Parallel()
 	out := filepath.Join(t.TempDir(), "out")
 	for _, args := range [][]string{
 		{"a", "b"},
@@ -98,7 +97,6 @@ func TestAttest_UsageErrors(t *testing.T) {
 // files of an earlier run and no other file, prints each path it wrote, and
 // gives the subjects of the filesystem walk.
 func TestAttest_WritesChecksums(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	writeAttestLayer(t, dir, map[string]string{
 		"skills/team/b/ARTIFACT.md": attestRuleMD,
@@ -144,7 +142,6 @@ func TestAttest_WritesChecksums(t *testing.T) {
 // Spec: §7.3.5 — the statement format splits the layer over files of at most
 // --max-subjects subjects, each beginning with the layer subject.
 func TestAttest_StatementFiles(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	writeAttestLayer(t, dir, map[string]string{
 		"a/ARTIFACT.md": attestRuleMD,
@@ -175,7 +172,6 @@ func TestAttest_StatementFiles(t *testing.T) {
 // has no subject name. The command exits 1, names the path with the line
 // feed escaped, and neither writes nor removes a file.
 func TestAttest_RefusesALayerWithNoSubjectName(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	writeAttestLayer(t, dir, map[string]string{
 		"team/ok/ARTIFACT.md":   attestRuleMD,
@@ -198,7 +194,6 @@ func TestAttest_RefusesALayerWithNoSubjectName(t *testing.T) {
 // Spec: §7.3.5 — a layer root that does not exist or is not a directory, and
 // an --out that cannot be created, exit 1.
 func TestAttest_LayerRootAndOutFailures(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	writeAttestLayer(t, dir, map[string]string{"a/ARTIFACT.md": attestRuleMD, "file": "x"})
 	for _, args := range [][]string{
@@ -217,7 +212,6 @@ func TestAttest_LayerRootAndOutFailures(t *testing.T) {
 // for a package whose ID or resource path holds a segment that is not
 // portable, and the warning changes no exit status.
 func TestAttest_PortableNameWarnings(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	writeAttestLayer(t, dir, map[string]string{
 		"team/aux/ARTIFACT.md":    attestRuleMD,
@@ -269,7 +263,6 @@ func commitAttestRepo(t *testing.T, dir string, files map[string]string) {
 // and without --commit in a working tree it reads the files and warns that
 // it does. A revision that names no commit exits 1.
 func TestAttest_CommitAndWorkingTree(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	commitAttestRepo(t, dir, map[string]string{"skills/team/a/ARTIFACT.md": attestRuleMD})
 	committed := wantLayerSubjects(t, dir, "skills")
@@ -319,7 +312,6 @@ func TestAttest_CommitAndWorkingTree(t *testing.T) {
 // Spec: §7.3.5 — a failed walk of the commit, here a gitlink-free tree whose
 // package has a manifest at the layer root, exits 1 and names the commit.
 func TestAttest_CommitWalkFailure(t *testing.T) {
-	t.Parallel()
 	dir := t.TempDir()
 	commitAttestRepo(t, dir, map[string]string{"skills/ARTIFACT.md": attestRuleMD})
 	code, _, stderr := runAttestT(t, dir, "--root", "skills", "--commit", "HEAD", "--out", t.TempDir())
@@ -331,7 +323,6 @@ func TestAttest_CommitWalkFailure(t *testing.T) {
 // Spec: §7.3.5 — oneLine escapes each character that would break an output
 // line and leaves every other character as it is.
 func TestOneLine(t *testing.T) {
-	t.Parallel()
 	cases := map[string]string{
 		"plain path": "plain path",
 		"a\nb":       `a\u000ab`,
