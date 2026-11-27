@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -32,6 +33,12 @@ const (
 	DefaultMaxBundleBytes = 1 << 20
 	// DefaultMaxBundles is the default of PODIUM_ATTESTATION_MAX_BUNDLES.
 	DefaultMaxBundles = 64
+	// MaxBundleBytesLimit is the largest PODIUM_ATTESTATION_MAX_BYTES, 1
+	// GiB. A bundle file is read into memory whole, and the bound also keeps
+	// the read limit, one byte above the setting, from overflowing.
+	MaxBundleBytesLimit = 1 << 30
+	// MaxBundlesLimit is the largest PODIUM_ATTESTATION_MAX_BUNDLES.
+	MaxBundlesLimit = 4096
 )
 
 // The §13.12 settings of the attestation directory limits.
@@ -49,32 +56,36 @@ type Limits struct {
 
 // ReadLimits reads PODIUM_ATTESTATION_MAX_BYTES and
 // PODIUM_ATTESTATION_MAX_BUNDLES through getenv. An unset or blank value
-// takes the default, and a value that is not a decimal integer of at least 1
-// is an error that names the setting.
+// takes the default, and a value that is not plain decimal digits in the
+// setting's range is an error that names the setting.
 //
 // Spec: §13.12
 func ReadLimits(getenv func(string) string) (Limits, error) {
-	maxBytes, err := positiveSetting(getenv, MaxBytesSetting, DefaultMaxBundleBytes)
+	maxBytes, err := boundedSetting(getenv, MaxBytesSetting, DefaultMaxBundleBytes, MaxBundleBytesLimit)
 	if err != nil {
 		return Limits{}, err
 	}
-	maxBundles, err := positiveSetting(getenv, MaxBundlesSetting, DefaultMaxBundles)
+	maxBundles, err := boundedSetting(getenv, MaxBundlesSetting, DefaultMaxBundles, MaxBundlesLimit)
 	if err != nil {
 		return Limits{}, err
 	}
 	return Limits{MaxBytes: maxBytes, MaxBundles: int(maxBundles)}, nil
 }
 
-// positiveSetting parses the setting name as a decimal integer of at least
-// 1 that fits an int, or returns def when it is unset or blank.
-func positiveSetting(getenv func(string) string, name string, def int64) (int64, error) {
+// plainDecimal is a decimal integer of at least 1 written in digits alone,
+// with no sign and no leading zero.
+var plainDecimal = regexp.MustCompile(`\A[1-9][0-9]*\z`)
+
+// boundedSetting parses the setting name as a decimal integer from 1 to
+// most, or returns def when it is unset or blank.
+func boundedSetting(getenv func(string) string, name string, def, most int64) (int64, error) {
 	raw := strings.TrimSpace(getenv(name))
 	if raw == "" {
 		return def, nil
 	}
-	n, err := strconv.ParseInt(raw, 10, strconv.IntSize)
-	if err != nil || n < 1 {
-		return 0, fmt.Errorf("%s must be a decimal integer of at least 1, got %q", name, raw)
+	n, err := strconv.ParseInt(raw, 10, 64)
+	if !plainDecimal.MatchString(raw) || err != nil || n > most {
+		return 0, fmt.Errorf("%s must be a decimal integer from 1 to %d, written in digits with no sign or leading zero, got %q", name, most, raw)
 	}
 	return n, nil
 }

@@ -314,7 +314,7 @@ podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-s
 | Flag | Effect |
 |:--|:--|
 | `<dir>` | Directory the layer root is resolved from. Default: the current directory. |
-| `--root <subpath>` | The layer's registered `root` below `<dir>`. Leading and trailing `/` characters are removed. A value with an empty, `.`, or `..` segment, a white space character, a control character, or a backslash is a usage error. |
+| `--root <subpath>` | The layer's registered `root` below `<dir>`. Leading and trailing `/` characters are removed. A value with an empty, `.`, or `..` segment, a white space character, a control character, or a backslash is a usage error. Where the command reads the layer root on disk, a segment below `<dir>` that is a symbolic link or no directory exits 1, because a `git` layer's tree holds such a link as a link entry. `<dir>` and its ancestors are not checked. `podium attest import` and `podium attest check` apply the same rule. |
 | `--commit <rev>` | Read the layer from the tree of this commit in the Git object database, such as `HEAD`, a branch name, or a commit hash. |
 | `--out <dir>` | Directory the files are written to, created when absent. Default: the current directory. |
 | `--max-subjects <n>` | Most subjects in one file, the layer subject included. At least 2. Default: 1024, the limit of GitHub's attestation action. |
@@ -385,7 +385,7 @@ A package whose ID holds a control character, a white space character, or a back
 
 ### `podium attest import`
 
-Copies signed bundles into the attestation directory of one layer and removes the bundles there that the import supersedes. The attestation directory is `.podium/attestations/` at the layer root, and the command creates it when it is absent.
+Copies signed bundles into the attestation directory of one layer and removes the bundles there that the import supersedes. The attestation directory is `.podium/attestations/` at the layer root, and the command creates `.podium` and `.podium/attestations` when they are absent. A symbolic link or an entry other than a directory at either path is refused, so the command never writes or removes a file outside the layer root.
 
 ```
 podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]
@@ -399,7 +399,7 @@ podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit
 | `--commit <rev>` | Read the layer's packages from the tree of this commit, as `podium attest --commit` does. The bundles are written to the directory on disk in either case. |
 | `--no-prune` | Write the bundles and remove nothing. The command then does not read the layer. |
 
-The command writes each bundle to `<hex>.sigstore.json`, where `<hex>` is the 64 lowercase hexadecimal digits of the SHA-256 digest of the bytes it writes. Before it writes, it removes the certificates that each RFC 3161 timestamp of the bundle embeds. Those certificates lie outside the timestamp's signature and outside the signed statement, and a verifier takes the authority's certificates from the trusted root, so the bundle verifies as before. The Python Sigstore library refuses a timestamp whose embedded certificates are not in DER order, and the removal keeps the bundle valid for every consumer. The command changes no other member, so the envelope, its signature, the certificate, and the log entry are the ones the signing tool wrote. A bundle whose timestamps embed no certificate keeps its bytes, and a bundle the command changed has another digest than the copy the signing tool stored, such as the copy in GitHub's attestation store.
+Each imported bundle carries a leaf certificate, and its DSSE signature verifies under that certificate's public key; the command refuses any other bundle and then writes nothing. It does not verify the certificate against a trusted root, so the check stops a corrupted or substituted signature and does not establish the signer. The command writes each bundle to `<hex>.sigstore.json`, where `<hex>` is the 64 lowercase hexadecimal digits of the SHA-256 digest of the bytes it writes. Before it writes, it removes the certificates that each RFC 3161 timestamp of the bundle embeds. Those certificates lie outside the timestamp's signature and outside the signed statement, and a verifier takes the authority's certificates from the trusted root, so the bundle verifies as before. The Python Sigstore library refuses a timestamp whose embedded certificates are not in DER order, and the removal keeps the bundle valid for every consumer. The command changes no other member, so the envelope, its signature, the certificate, and the log entry are the ones the signing tool wrote. A bundle whose timestamps embed no certificate keeps its bytes, and a bundle the command changed has another digest than the copy the signing tool stored, such as the copy in GitHub's attestation store.
 
 After it writes, the command removes each `*.sigstore.json` file of the directory that it did not write in this run and that one of these cases describes:
 
@@ -407,7 +407,7 @@ After it writes, the command removes each `*.sigstore.json` file of the director
 - None of the bundle's subjects names a package of the layer with its current package digest, or the layer subject with the current layer digest.
 - The bundles this run wrote with the same predicate type and the same certificate issuer and identity together list every subject of the bundle that matches the layer.
 
-The command reads the issuer and the identity from each bundle's certificate without verifying the bundle, and it cannot read the Sigstore instance of a bundle that way. It therefore treats bundles of two instances whose certificates carry one issuer and identity as bundles of one signer, and an import of one can remove a bundle of the other. A bundle of another signer, such as a scanner's, and a bundle of another predicate type stay while one of their subjects matches the layer. An entry that is not a regular file stays, and the command writes a warning that names it. When the directory holds more than `PODIUM_ATTESTATION_MAX_BUNDLES` bundle files after the run, the command writes a warning.
+The command reads the issuer and the identity from each bundle's certificate without verifying the bundle, and it cannot read the Sigstore instance of a bundle that way. It therefore treats bundles of two instances whose certificates carry one issuer and identity as bundles of one signer, and an import of one can remove a bundle of the other. A bundle of another signer, such as a scanner's, and a bundle of another predicate type stay while one of their subjects matches the layer. An entry that is not a regular file stays, and the command writes a warning that names it. When the directory holds more than `PODIUM_ATTESTATION_MAX_BUNDLES` bundle files after the run, the command writes a warning. It also writes a warning for each bundle it writes that lists no subject of the layer.
 
 ```
 $ podium attest import attestation.jsonl --root skills --commit HEAD
@@ -420,8 +420,8 @@ The command prints `wrote <path>` for each file it writes, `unchanged <path>` fo
 | Exit code | Meaning |
 |:--|:--|
 | `0` | The bundles were written and the directory was pruned. |
-| `1` | An input cannot be read, holds no bundle, holds a bundle that does not parse, whose timestamp does not parse, or that exceeds `PODIUM_ATTESTATION_MAX_BYTES`, or the layer cannot be read or holds a package with no subject name. The command then writes and removes no file. The command also exits 1 when it cannot create the directory or write or remove a file. |
-| `2` | Usage error: no `<bundle-file>`, a `--root` that `podium attest` refuses, or a `PODIUM_ATTESTATION_MAX_BYTES` or `PODIUM_ATTESTATION_MAX_BUNDLES` value that is not an integer of at least 1. |
+| `1` | An input cannot be read, holds no bundle, holds a bundle that does not parse, that has no leaf certificate, whose signature does not verify under its leaf's key, whose timestamp does not parse, or that exceeds `PODIUM_ATTESTATION_MAX_BYTES`, `.podium` or `.podium/attestations` is a symbolic link or no directory, or the layer cannot be read or holds a package with no subject name. The command then writes and removes no file. The command also exits 1 when it cannot create the directory or write or remove a file. |
+| `2` | Usage error: no `<bundle-file>`, a `--root` that `podium attest` refuses, or a `PODIUM_ATTESTATION_MAX_BYTES` or `PODIUM_ATTESTATION_MAX_BUNDLES` value outside its form or range. |
 
 ### `podium attest check`
 
@@ -439,7 +439,7 @@ podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements 
 | `--requirements <file>` | Verify each bundle against the requirement of a requirements file, which `podium layer show <id> --requirements` writes. |
 | `--trusted-root <instance>=<file>` | The trusted root of a Sigstore instance that a signer of the requirements file names. Repeatable. |
 
-The command reads the bundles from the attestation directory on disk in every case, because a signing workflow imports its bundles before it commits them. It passes when a bundle lists the layer subject with the current layer digest and each package of the layer has a subject with its name and package digest. For each package without one, it prints the subject name, the package digest, whether the package resolved, the `type`, `sensitivity`, `deprecated`, and `replaced_by` values that the package digest frames, and each digest under which a bundle lists that name. A reviewer reads those values to see what a signature over the package would attest:
+The command reads the bundles from the attestation directory on disk in every case, because a signing workflow imports its bundles before it commits them. It refuses a symbolic link or an entry other than a directory at `.podium` or `.podium/attestations`. It passes when a bundle lists the layer subject with the current layer digest and each package of the layer has a subject with its name and package digest. For each package without one, it prints the subject name, the package digest, whether the package resolved, the `type`, `sensitivity`, `deprecated`, and `replaced_by` values that the package digest frames, and each digest under which a bundle lists that name. A reviewer reads those values to see what a signature over the package would attest:
 
 ```
 $ podium attest check --root skills
@@ -468,7 +468,7 @@ The command writes the `lint.non_portable_name` warnings of `podium attest`, whi
 | Exit code | Meaning |
 |:--|:--|
 | `0` | The check passed. |
-| `1` | A package or the layer subject has no subject in a counted bundle, a bundle file or the directory exceeds a limit, a package has no subject name, or the layer, the requirements file, or a trusted root cannot be read or is refused, including a `public-good` root past its maximum age. |
+| `1` | A package or the layer subject has no subject in a counted bundle, a bundle file or the directory exceeds a limit, `.podium` or `.podium/attestations` is a symbolic link or no directory, a package has no subject name, or the layer, the requirements file, or a trusted root cannot be read or is refused, including a `public-good` root past its maximum age. |
 | `2` | Usage error: more than one `<dir>`, a `--root` that `podium attest` refuses, a `--trusted-root` value that is not `<instance>=<file>` or that names an instance twice, or a setting value that is out of its range. |
 
 ---

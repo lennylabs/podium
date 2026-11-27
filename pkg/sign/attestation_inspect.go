@@ -1,5 +1,7 @@
 package sign
 
+import "github.com/sigstore/sigstore-go/pkg/verify"
+
 // BundleSummary is what an author attestation bundle states before any of
 // its signatures, chains, or times are verified: the signed statement and the
 // issuer and identity its leaf certificate names. `podium attest import`
@@ -46,4 +48,42 @@ func InspectAttestationBundle(raw []byte) (BundleSummary, error) {
 		out.Issuer, out.Identity = fields.Issuer.Value, fields.Identity.Value
 	}
 	return out, nil
+}
+
+// CheckAttestationSelfSignature parses raw as InspectAttestationBundle does
+// and verifies its DSSE signature under the public key of its own leaf
+// certificate. It checks no chain, time, log entry, or trusted root, so it
+// proves only that the holder of that certificate's key signed the
+// statement. `podium attest import` applies it before it groups an imported
+// bundle by the signer the certificate names, so a bundle with a corrupted
+// or substituted signature cannot remove another bundle of that signer. A
+// bundle without a leaf certificate, or whose signature does not verify,
+// returns an *AttestationRefusal.
+//
+// Spec: §7.3.5.
+func CheckAttestationSelfSignature(raw []byte) error {
+	b, _, err := parseAttestationBundle(raw)
+	if err != nil {
+		return err
+	}
+	// parseAttestationBundle admitted the bundle through the library's
+	// parse, which builds its verification and signature content; the
+	// checks keep a library change from passing a nil value on.
+	vc, err := b.VerificationContent()
+	if err != nil {
+		return refuse(ReasonParse, "the leaf certificate does not parse", err)
+	}
+	if vc.Certificate() == nil {
+		return refuse(ReasonChain, "the bundle carries no leaf certificate", nil)
+	}
+	sc, err := b.SignatureContent()
+	if err != nil {
+		return refuse(ReasonPayload, "the DSSE envelope does not parse", err)
+	}
+	// With a certificate, the library takes the verifier from the leaf's
+	// key and reads no trusted material.
+	if err := verify.VerifySignature(sc, vc, nil); err != nil {
+		return refuse(ReasonSignature, "the signature does not verify under the leaf's key", err)
+	}
+	return nil
 }

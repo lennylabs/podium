@@ -137,6 +137,38 @@ func parseLayerRoot(root string) (trimmed, layerName string, err error) {
 	return trimmed, layerName, err
 }
 
+// errRootSegmentEntry reports a --root segment that is a symbolic link or
+// an entry other than a directory.
+var errRootSegmentEntry = errors.New("is a symbolic link or no directory; each segment of --root must be a directory below <dir>")
+
+// checkRootSegments refuses a segment of root below dir that is a symbolic
+// link or an entry other than a directory. A git layer's tree holds such a
+// link as a link entry, so following it would read or write another layer.
+// dir and its ancestors are not checked: a checkout can lie below a linked
+// directory, such as /tmp on macOS. A missing segment is left to the
+// caller, which reports a missing layer root.
+//
+// Spec: §7.3.5
+func checkRootSegments(dir, root string) error {
+	if root == "" {
+		return nil
+	}
+	p := dir
+	for _, seg := range strings.Split(root, "/") {
+		p = filepath.Join(p, seg)
+		info, err := os.Lstat(p)
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
+			return nil
+		case err != nil:
+			return fmt.Errorf("read %s: %w", p, err)
+		case !info.IsDir():
+			return fmt.Errorf("%s %w", p, errRootSegmentEntry)
+		}
+	}
+	return nil
+}
+
 // parsePredicateType sets the predicate type of the statement format. It
 // returns -1 when the value is usable, and 2, having written the reason, for a
 // value that is not an absolute URI or one given with the checksums format,
@@ -176,6 +208,9 @@ func readAttestLayer(ctx context.Context, opts attestOptions, stderr io.Writer) 
 			return nil, nil, fmt.Errorf("walk commit %s: %w", tree.Commit, err)
 		}
 		return records, tree.Files, nil
+	}
+	if err := checkRootSegments(opts.dir, opts.root); err != nil {
+		return nil, nil, err
 	}
 	layerPath, err := filepath.Abs(filepath.Join(opts.dir, filepath.FromSlash(opts.root)))
 	if err != nil {

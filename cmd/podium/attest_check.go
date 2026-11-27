@@ -142,6 +142,9 @@ func loadCheckRequirements(path string, insts *checkInstances) ([]store.TrustReq
 //
 // Spec: §7.3.5
 func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequirement, insts *checkInstances, r *checkReport, stderr io.Writer) error {
+	if err := checkRootSegments(opts.layer.dir, opts.layer.root); err != nil {
+		return err
+	}
 	records, files, err := readAttestLayer(ctx, opts.layer, stderr)
 	if err != nil {
 		return err
@@ -155,9 +158,15 @@ func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequir
 			return err
 		}
 	}
-	bundles, err := readBundleDir(attestationDir(opts.layer.dir, opts.layer.root), opts.limits)
+	attDir, exists, err := attestationDir(opts.layer.dir, opts.layer.root, false)
 	if err != nil {
 		return err
+	}
+	var bundles []dirBundle
+	if exists {
+		if bundles, err = readBundleDir(attDir, opts.limits); err != nil {
+			return err
+		}
 	}
 	counted, err := countBundles(ctx, bundles, reqs, insts, opts.limits, r, stderr)
 	if err != nil {

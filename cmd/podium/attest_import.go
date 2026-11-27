@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -44,31 +46,65 @@ func runAttestImport(ctx context.Context, args []string, stdout, stderr io.Write
 	if code >= 0 {
 		return code
 	}
-	imported, err := readImportInputs(opts)
-	if err != nil {
+	if err := importBundles(ctx, opts, stdout, stderr); err != nil {
 		_, _ = fmt.Fprintf(stderr, "error: %s\n", oneLine(err.Error()))
 		return 1
+	}
+	return 0
+}
+
+// importBundles reads the inputs and, unless --no-prune, the layer, then
+// writes the bundles and prunes the directory. The attestation directory is
+// checked, and created, only after every refusal that writes nothing, and
+// checked again before the pruning reads it.
+//
+// Spec: §4.7.11, §7.3.5
+func importBundles(ctx context.Context, opts importOptions, stdout, stderr io.Writer) error {
+	// The layer root is checked before the layer is read from a commit,
+	// because the bundles are written below it on disk.
+	if err := checkRootSegments(opts.layer.dir, opts.layer.root); err != nil {
+		return err
+	}
+	imported, err := readImportInputs(opts)
+	if err != nil {
+		return err
 	}
 	var cur attest.CurrentSubjects
 	if !opts.noPrune {
 		if cur, err = currentSubjects(ctx, opts.layer, stderr); err != nil {
-			_, _ = fmt.Fprintf(stderr, "error: %s\n", oneLine(err.Error()))
-			return 1
+			return err
 		}
+		warnUnmatchedImports(imported, cur, stderr)
 	}
-	dir := attestationDir(opts.layer.dir, opts.layer.root)
+	dir, _, err := attestationDir(opts.layer.dir, opts.layer.root, true)
+	if err != nil {
+		return err
+	}
 	if err := writeImported(dir, imported, stdout); err != nil {
-		_, _ = fmt.Fprintf(stderr, "error: %s\n", oneLine(err.Error()))
-		return 1
+		return err
 	}
 	if !opts.noPrune {
+		if _, _, err := attestationDir(opts.layer.dir, opts.layer.root, false); err != nil {
+			return err
+		}
 		if err := pruneBundleDir(dir, imported, cur, opts.limits, stdout, stderr); err != nil {
-			_, _ = fmt.Fprintf(stderr, "error: %s\n", oneLine(err.Error()))
-			return 1
+			return err
 		}
 	}
 	warnBundleCount(dir, opts.limits, stderr)
-	return 0
+	return nil
+}
+
+// warnUnmatchedImports warns for each imported bundle none of whose subjects
+// matches the layer, which the import writes and a later import prunes.
+//
+// Spec: §7.3.5
+func warnUnmatchedImports(imported []importedBundle, cur attest.CurrentSubjects, stderr io.Writer) {
+	for _, b := range imported {
+		if len(cur.Matching(b.summary.Statement)) == 0 {
+			_, _ = fmt.Fprintf(stderr, "warning: the bundle %s from %s lists no subject of the layer\n", b.name, oneLine(b.source))
+		}
+	}
 }
 
 // parseImportArgs parses args. It returns code -1 with the options when the
@@ -141,6 +177,12 @@ func prepareBundle(v []byte, limits attestLimits) (importedBundle, error) {
 	if _, err := sign.InspectAttestationBundle(v); err != nil {
 		return importedBundle{}, err
 	}
+	// The import groups the bundle by the signer its certificate names, so
+	// a bundle whose signature that certificate's key did not make could
+	// remove a valid bundle of that signer.
+	if err := sign.CheckAttestationSelfSignature(v); err != nil {
+		return importedBundle{}, err
+	}
 	out, _, err := attest.RemoveTimestampCertificates(v)
 	if err != nil {
 		return importedBundle{}, err
@@ -173,16 +215,14 @@ func currentSubjects(ctx context.Context, opts attestOptions, stderr io.Writer) 
 	return attest.NewCurrentSubjects(layer, content.Subjects), nil
 }
 
-// writeImported creates dir and writes each bundle to its name. A regular
+// writeImported writes each bundle to its name in dir, which
+// attestationDir has checked or created. A regular
 // file of that name that holds the same bytes is left as it is. Each file is
 // written to a temporary file in dir and renamed over its name, so an entry
 // of that name that is a link is replaced rather than followed.
 //
 // Spec: §7.3.5
 func writeImported(dir string, imported []importedBundle, stdout io.Writer) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", dir, err)
-	}
 	for _, b := range imported {
 		p := filepath.Join(dir, b.name)
 		if sameRegularFile(p, b.raw) {
@@ -208,27 +248,41 @@ func sameRegularFile(p string, b []byte) bool {
 }
 
 // writeFileReplacing writes b to name in dir through a temporary file and a
-// rename.
+// rename. The temporary file is created with mode 0644 under the process
+// umask, as os.WriteFile would create it, and with O_EXCL, so it replaces
+// no entry and follows no link.
 func writeFileReplacing(dir, name string, b []byte) error {
-	tmp, err := os.CreateTemp(dir, ".import-*")
+	target := filepath.Join(dir, name)
+	tmp, err := createImportTemp(dir)
 	if err != nil {
-		return fmt.Errorf("write %s: %w", filepath.Join(dir, name), err)
+		return fmt.Errorf("write %s: %w", target, err)
 	}
 	_, werr := tmp.Write(b)
 	if cerr := tmp.Close(); werr == nil {
 		werr = cerr
 	}
 	if werr == nil {
-		werr = os.Chmod(tmp.Name(), 0o644)
-	}
-	if werr == nil {
-		werr = os.Rename(tmp.Name(), filepath.Join(dir, name))
+		werr = os.Rename(tmp.Name(), target)
 	}
 	if werr != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("write %s: %w", filepath.Join(dir, name), werr)
+		return fmt.Errorf("write %s: %w", target, werr)
 	}
 	return nil
+}
+
+// createImportTemp creates a new file .import-<random> in dir.
+func createImportTemp(dir string) (*os.File, error) {
+	for {
+		var r [8]byte
+		// crypto/rand.Read does not fail on the supported platforms.
+		_, _ = rand.Read(r[:])
+		f, err := os.OpenFile(filepath.Join(dir, ".import-"+hex.EncodeToString(r[:])), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		return f, err
+	}
 }
 
 // pruneBundleDir removes each bundle file of dir that the run did not write
