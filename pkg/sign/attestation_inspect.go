@@ -16,6 +16,22 @@ type BundleSummary struct {
 	// or the field is malformed.
 	Issuer   string
 	Identity string
+	// Certificate holds every §4.7.11 field of the leaf, read as
+	// VerifyAttestationBundle reads it, without a check of the chain.
+	Certificate CertificateFields
+}
+
+// MatchesSigner applies the §4.7.11 identity comparison and the source and
+// ref bindings of s to the leaf certificate, with no check of the chain, the
+// time, or the signature. A process that is behind a §4.7.11 root record
+// applies it to a bundle the registry verified when it stored the bundle, to
+// downgrade a link whose signer left the policy whatever its root. It
+// returns nil when the certificate matches, and an *AttestationRefusal
+// otherwise.
+//
+// Spec: §4.7.11 (Re-evaluation)
+func (b BundleSummary) MatchesSigner(s AttestationSigner) error {
+	return matchSigner(b.Certificate, s)
 }
 
 // InspectAttestationBundle parses raw under the §4.7.11 bundle format, with
@@ -45,7 +61,7 @@ func InspectAttestationBundle(raw []byte) (BundleSummary, error) {
 	}
 	if leaf := vc.Certificate(); leaf != nil {
 		fields, _ := readCertificateFields(leaf)
-		out.Issuer, out.Identity = fields.Issuer.Value, fields.Identity.Value
+		out.Issuer, out.Identity, out.Certificate = fields.Issuer.Value, fields.Identity.Value, fields
 	}
 	return out, nil
 }
