@@ -288,7 +288,7 @@ The target database needs the `vector` extension installed (`CREATE EXTENSION ve
 | `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`   | Path to the Sigstore `trusted_root.json` for the chosen instance.            | `/path/to/sigstage-trusted_root.json` |
 | `PODIUM_SIGSTORE_CERT_IDENTITY`       | Email or URI subject alternative name the token's identity receives in the Fulcio certificate. | `<email or URI SAN>` |
 | `PODIUM_SIGSTORE_CERT_OIDC_ISSUER`    | Issuer URL of the OIDC token.                                                 | `<issuer URL>`                 |
-| `PODIUM_SIGSTORE_RECORD_DIR`          | Optional. Absolute path of the fixture directory the smoke writes `envelope.json`, `trusted_root.json`, and `meta.json` into after `Verify` passes. The path is absolute because `go test` runs the test in `pkg/sign`. | `$PWD/pkg/sign/testdata/sigstore-staging`, run from the repository root |
+| `PODIUM_SIGSTORE_RECORD_DIR`          | Optional. Absolute path of a directory the smoke writes `bundle.json`, `trusted_root.json`, and `meta.json` into after `Verify` passes. The path is absolute because `go test` runs the test in `pkg/sign`. | `/tmp/sigstore-staging-record` |
 
 ### What's not gated by env vars today
 

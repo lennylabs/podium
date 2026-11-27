@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, and the Sigstore keyless signature as a Sigstore bundle, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -59,6 +59,16 @@ From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that co
 - A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
 - White space around an entry is kept and matched as written, as in 0.7.0.
 - A rollback to 0.7.0 needs no step.
+
+### Sigstore keyless signatures as Sigstore bundles
+
+From 0.8.0, `podium sign --provider sigstore-keyless` prints a Sigstore bundle of version 0.3, and `podium verify --provider sigstore-keyless` verifies the bundle with `sigstore-go`. 0.7.0 printed a keyless envelope with `cert`, `signature`, `tlog`, and `timestamp` members. 0.8.0 refuses such an envelope with `materialize.signature_invalid`, and the message states that a keyless envelope from 0.7.0 or earlier is not accepted. 0.8.0 converts no envelope.
+
+- The registry stores no keyless signature. It signs at ingest under its registry-managed key, `podium admin sign-stored-rows` re-signs stored rows under that key, and every delivery signature is registry-managed, so stored rows, delivery signatures, `podium-mcp`, server-source `podium sync`, and the language SDKs need no step.
+- Sign again, with `podium sign --provider sigstore-keyless` under 0.8.0, each content hash whose 0.7.0 keyless envelope is kept outside Podium, and replace the envelope with the bundle.
+- `podium verify` reads `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` with `sigstore-go`. When the file lists a certificate transparency log, the certificate must carry a signed certificate timestamp, which certificates from the public-good and staging Fulcio instances carry. A file whose `tlogs` entry has no `validFor.start`, or whose `tlogs` or `ctlogs` entry carries a key type the library does not read, no longer loads. The `trusted_root.json` that the Sigstore TUF repository publishes loads.
+- The certificate checks are narrower. The subject alternative name holds exactly one email address or URI, which `PODIUM_SIGSTORE_CERT_IDENTITY` lists; the issuer comes from the Issuer (V2) extension alone; and the key is an ECDSA P-256 key. The certificates Fulcio issues to `podium sign` meet these rules.
+- A rollback to 0.7.0 needs a step for each bundle that 0.8.0 printed and 0.7.0 must verify: 0.7.0 refuses the bundle, so sign the content hash again under 0.7.0.
 
 ## 0.7.0
 

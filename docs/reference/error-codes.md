@@ -256,7 +256,7 @@ A filesystem-source `podium sync` reports the same code for an artifact whose `A
 #### materialize.signature_invalid causes
 
 - The content was tampered with, or the signer is unknown.
-- A Sigstore-keyless envelope does not verify or match: its certificate identity, OIDC issuer, timestamp, inclusion proof, checkpoint signature, or log entry fails, or its certificate was not valid at the timestamp's time.
+- A Sigstore-keyless bundle does not verify or match: its certificate identity, OIDC issuer, timestamp, inclusion proof, checkpoint signature, or log entry fails, or its certificate was not valid at the timestamp's time. A keyless envelope in the format of 0.7.0 and earlier is refused as well.
 - `podium-mcp`, server-source `podium sync`, or a language SDK, under any policy above `never`, received a signature that does not verify under the key set it resolved.
 - The same consumers, under any policy above `never`, received a malformed `delivery_signature` envelope. An envelope is malformed when it is not a JSON object, has no string `signature`, has a non-string `key_id`, or has a `signature` that is not the canonical base64 encoding of 64 bytes.
 - The registry's [stored-row admission check](#stored-row-admission-refusals) refused the row.
