@@ -6,6 +6,7 @@ import (
 	"crypto/ed25519"
 	"crypto/sha256"
 	"crypto/x509"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -208,6 +209,37 @@ func TestEnvelope_RejectsMalformedContentHash(t *testing.T) {
 	cfg.leaf.uris = []string{"://bad"}
 	if _, _, err := h.buildKeyless(hash, cfg); err == nil || !strings.Contains(err.Error(), "uri SAN") {
 		t.Fatalf("bad URI SAN: err = %v", err)
+	}
+}
+
+// Spec: §4.7.9. A keyless bundle whose leaf, timestamps, or log ID cannot
+// be built is reported as a harness setup failure for every leaf kind and
+// every timestamp source.
+func TestKeylessBundle_ReportsSetupFailures(t *testing.T) {
+	t.Parallel()
+	h := New(t)
+	hash, _ := testContentHash("setup")
+	badURI := func(c *envConfig) { c.leaf.uris = []string{"://bad"} }
+	cases := map[string][]EnvOpt{
+		"Ed25519 leaf":            {badURI, WithEd25519Leaf()},
+		"leaf from the TSA root":  {badURI, WithLeafIssuedByTSARoot()},
+		"P-384 leaf":              {badURI, WithP384Leaf()},
+		"unknown extra authority": {WithExtraTimestamp(TSA(99))},
+		"timestamp adjustment": {tsMod(func(*Harness, *tsConfig) error {
+			return errors.New("acme timestamp adjustment failed")
+		})},
+	}
+	for name, opts := range cases {
+		cfg := defaultEnvConfig()
+		for _, o := range opts {
+			o(&cfg)
+		}
+		if _, _, err := h.buildKeyless(hash, cfg); err == nil {
+			t.Errorf("%s: buildKeyless succeeded", name)
+		}
+	}
+	if _, err := LogID(struct{}{}); err == nil || !strings.Contains(err.Error(), "log key") {
+		t.Fatalf("LogID of an unsupported key: err = %v", err)
 	}
 }
 

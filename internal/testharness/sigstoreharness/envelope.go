@@ -13,6 +13,13 @@ import (
 	"testing"
 )
 
+// The builders below return the errors of key generation, certificate and
+// token encoding, and JSON marshalling, which depend on crypto/rand and the
+// encoders rather than on the configuration, so no test input reaches
+// those returns; KeylessBundle reports them through must. The errors a
+// configuration causes are covered by TestKeylessBundle_ReportsSetupFailures
+// and TestEnvelope_RejectsMalformedContentHash.
+
 // envConfig collects the EnvOpt adjustments of one keyless bundle.
 type envConfig struct {
 	leaf          leafConfig
