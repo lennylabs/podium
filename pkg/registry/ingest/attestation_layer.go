@@ -81,7 +81,9 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 	}
 	v := layerBundle.accepted[coveringRequirement]
 	res := &layerStepResult{time: v.AttestedTime, bundles: bundles}
-	if c := v.Certificate.SourceRepositoryDigest; c.Present {
+	// A value longer than any commit name is no commit, and recording it
+	// would make every later lineage query of the layer invalid.
+	if c := v.Certificate.SourceRepositoryDigest; c.Present && len(c.Value) <= source.MaxLineageStringBytes {
 		res.commit = c.Value
 	}
 	return res, nil, nil
