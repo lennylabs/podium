@@ -122,8 +122,9 @@ func (f *bootFixture) bootWith(t *testing.T, serving func()) (string, error) {
 		}
 		// healthOK's own readiness rule: the listener is open long
 		// before the boot finishes, so readiness is /healthz answering
-		// rather than a dial succeeding.
-		if healthOK(f.addr, 200*time.Millisecond) {
+		// rather than a dial succeeding. The answer counts only once this
+		// run has logged its own listener (ownsListener).
+		if ownsListener(logs, f.addr) && healthOK(f.addr, 200*time.Millisecond) {
 			if serving != nil {
 				serving()
 			}

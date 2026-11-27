@@ -2,6 +2,7 @@ package serverboot
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -137,6 +138,18 @@ func dialOK(addr string, within time.Duration) bool {
 // deadline. run opens its listener early, so a raw dial lands in the backlog
 // long before the boot finishes; /healthz answers only once the serve loop is
 // running, which is after the §13.4 rehash pass and the bootstrap ingest.
+// ownsListener reports whether the run writing to logs bound addr itself.
+//
+// freeAddr releases its port before run binds it, so another process can
+// take the port in between. run does not stop on a failed bind until just
+// before it serves, so a /healthz answer from that other process would read
+// as this registry being ready, and a caller that then cancels the context
+// interrupts this run in the middle of its start. run logs the listening
+// line only after its own bind succeeded, immediately before it serves.
+func ownsListener(logs *syncBuffer, addr string) bool {
+	return strings.Contains(logs.String(), "podium-server listening on "+addr+" ")
+}
+
 func healthOK(addr string, within time.Duration) bool {
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	deadline := time.Now().Add(within)
@@ -168,11 +181,29 @@ func TestRun_StandaloneGracefulShutdown(t *testing.T) {
 	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "86400")
 	t.Setenv("PODIUM_READONLY_PROBE_FAILURES", "3")
 
+	logs := &syncBuffer{}
+	prev := log.Writer()
+	log.SetOutput(logs)
+	defer log.SetOutput(prev)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() { errc <- run(ctx, func() {}) }()
 
-	if !healthOK(addr, 20*time.Second) {
+	ready := false
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && !ready; {
+		select {
+		case err := <-errc:
+			cancel()
+			t.Fatalf("run returned before serving: %v", err)
+		default:
+		}
+		ready = ownsListener(logs, addr) && healthOK(addr, 200*time.Millisecond)
+		if !ready {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if !ready {
 		cancel()
 		t.Fatal("standalone server did not become ready")
 	}
