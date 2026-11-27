@@ -11,7 +11,7 @@ func TestSCIMResolvesGroups_ProviderAllowlist(t *testing.T) {
 		"injected-session-token": true,
 		"trusted-headers":        false,
 		"":                       false,
-		"oidc":                   false,
+		"external":               false,
 		"oauth-device-code":      false,
 		"not-a-provider":         false,
 	}

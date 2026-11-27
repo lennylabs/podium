@@ -254,7 +254,7 @@ func TestLayerCallerResolver(t *testing.T) {
 	}
 
 	// A nil verifier: the anonymous-public caller and no error, which is the
-	// no-provider, public-mode, and free-form-label deployment.
+	// no-provider, public-mode, and external deployment.
 	id, err = layerCallerResolver(nil)(req)
 	if err != nil {
 		t.Fatalf("nil verifier: got err %v, want nil", err)
