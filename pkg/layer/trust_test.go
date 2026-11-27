@@ -58,6 +58,11 @@ func TestDeriveSourceBinding_URLForms(t *testing.T) {
 		{"https://github.com:/acme/finance", ""},
 		{"https://github.com/acme/fin%2Dance", ""},
 		{"https://github.com./acme/finance", ""},
+		{"https://github.com/acme/fin ance", ""},
+		{"https://github.com/acme/finance.GIT", ""},
+		{"https://github.com/acme/finance.Git", ""},
+		{"https://git_hub.com/acme/finance", ""},
+		{"https://github.com/ac+me/finance", ""},
 	} {
 		reqs := []store.TrustRequirement{{Signers: []store.TrustSigner{signer()}}}
 		got := layer.DeriveSourceBinding("git", tc.repo, reqs)[0].Signers[0]
@@ -74,6 +79,17 @@ func TestDeriveSourceBinding_URLForms(t *testing.T) {
 		if reqs[0].Signers[0].SourceRepository != "" {
 			t.Fatalf("%s: the input requirement was modified", tc.repo)
 		}
+	}
+}
+
+// Spec: §4.7.11 (Derived source binding) — the host and segment characters
+// of the stated form derive, with their letter case kept.
+func TestDeriveSourceBinding_CharacterSet(t *testing.T) {
+	t.Parallel()
+	const repo = "https://GitHub.com/Acme/Fin_ance-2.x"
+	reqs := []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: ghIssuer, Identity: repo + "/.github/workflows/a.yml@refs/heads/main"}}}}
+	if got := layer.DeriveSourceBinding("git", repo, reqs)[0].Signers[0]; got.SourceRepository != repo {
+		t.Errorf("source_repository = %q, want %q", got.SourceRepository, repo)
 	}
 }
 

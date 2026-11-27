@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -273,22 +274,34 @@ func derivableRepository(sourceType, repo string) (string, bool) {
 		u.Opaque != "" || u.Host == "" || strings.HasSuffix(u.Host, ".") {
 		return "", false
 	}
+	if !hostChars.MatchString(u.Host) {
+		return "", false
+	}
 	path := u.Path
 	if trimmed, ok := strings.CutSuffix(path, ".git"); ok {
 		path = trimmed
 	} else {
 		path = strings.TrimSuffix(path, "/")
 	}
-	if strings.HasSuffix(path, ".git") {
-		// .git followed by / is neither form.
+	if strings.HasSuffix(strings.ToLower(path), ".git") {
+		// .git followed by /, and a .git suffix in another letter case, are
+		// neither form; the rule stays a byte comparison.
 		return "", false
 	}
 	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if !strings.HasPrefix(path, "/") || len(segs) != 2 || segs[0] == "" || segs[1] == "" {
+	if !strings.HasPrefix(path, "/") || len(segs) != 2 || !segmentChars.MatchString(segs[0]) || !segmentChars.MatchString(segs[1]) {
 		return "", false
 	}
 	return "https://" + u.Host + path, true
 }
+
+// hostChars and segmentChars are the characters a derivable repository URL
+// holds in its host and in its owner and repository segments. A space or any
+// other character derives nothing.
+var (
+	hostChars    = regexp.MustCompile(`\A[A-Za-z0-9.-]+\z`)
+	segmentChars = regexp.MustCompile(`\A[A-Za-z0-9._-]+\z`)
+)
 
 // TrustPolicyEqual reports whether a and b hold the same trust policy. A nil
 // and an empty requirement list are equal, because both store no
