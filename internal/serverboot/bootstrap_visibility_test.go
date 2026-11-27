@@ -20,11 +20,12 @@ func TestDefaultBootstrapVisibility_ByMode(t *testing.T) {
 		want layer.Visibility
 	}{
 		{"no idp standalone", &Config{identityProvider: ""}, layer.Visibility{Public: true}},
-		{"public mode overrides idp", &Config{publicMode: true, identityProvider: "oidc"}, layer.Visibility{Public: true}},
-		{"idp + private default", &Config{identityProvider: "oidc", defaultLayerVisibility: "private"}, layer.Visibility{}},
-		{"idp + unset default", &Config{identityProvider: "oidc", defaultLayerVisibility: ""}, layer.Visibility{}},
-		{"idp + organization default", &Config{identityProvider: "oidc", defaultLayerVisibility: "organization"}, layer.Visibility{Organization: true}},
-		{"idp + public default", &Config{identityProvider: "oidc", defaultLayerVisibility: "public"}, layer.Visibility{Public: true}},
+		{"public mode overrides idp", &Config{publicMode: true, identityProvider: "oidc-jwt"}, layer.Visibility{Public: true}},
+		{"idp + private default", &Config{identityProvider: "oidc-jwt", defaultLayerVisibility: "private"}, layer.Visibility{}},
+		{"idp + unset default", &Config{identityProvider: "oidc-jwt", defaultLayerVisibility: ""}, layer.Visibility{}},
+		{"external + unset default", &Config{identityProvider: "external", defaultLayerVisibility: ""}, layer.Visibility{}},
+		{"idp + organization default", &Config{identityProvider: "oidc-jwt", defaultLayerVisibility: "organization"}, layer.Visibility{Organization: true}},
+		{"idp + public default", &Config{identityProvider: "oidc-jwt", defaultLayerVisibility: "public"}, layer.Visibility{Public: true}},
 	}
 	for _, c := range cases {
 		c := c
@@ -47,7 +48,7 @@ func TestBootstrapLayerPath_IdPDeploymentNotPublic(t *testing.T) {
 	root := t.TempDir()
 	testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: artifactBody})
 
-	cfg := &Config{identityProvider: "oidc", defaultLayerVisibility: "private"}
+	cfg := &Config{identityProvider: "oidc-jwt", defaultLayerVisibility: "private"}
 	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
