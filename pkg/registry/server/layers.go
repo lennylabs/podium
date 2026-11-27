@@ -1662,11 +1662,15 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if trustP.carried() {
 		// spec: §7.3.1 (Layer trust policy) — a declared layer's policy is
 		// set in registry.yaml, which the next start re-applies.
+		// A patch that restates the stored policy changes nothing and is
+		// admitted, so a client that returns a layer object it read is.
+		patched := trustP.applyTo(cfg)
 		if e.isDeclared(cfg.TenantID, cfg.ID) {
-			writeError(w, http.StatusBadRequest, "registry.invalid_argument", declaredTrustRefusal(cfg.ID))
-			return
-		}
-		if msg := e.trustPolicyError(trustP.applyTo(cfg)); msg != "" {
+			if !layer.TrustPolicyEqual(patched, cfg) {
+				writeError(w, http.StatusBadRequest, "registry.invalid_argument", declaredTrustRefusal(cfg.ID))
+				return
+			}
+		} else if msg := e.trustPolicyError(patched); msg != "" {
 			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 			return
 		}
@@ -1833,14 +1837,9 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 (Layer trust policy) — the policy the request carries, with
 	// the source binding derived from the request's repo, is checked with the
 	// request's own fields, before the stored layer is read.
-	// A declared layer's policy is set in registry.yaml: a trust member is
-	// refused, and a registration without one keeps the declared policy
-	// below, which the declaration already passed at start.
+	// A declared layer's policy is set in registry.yaml, and its stored
+	// policy decides the registration below (declaredRegistrationError).
 	declared := e.isDeclared(tenantID, req.ID)
-	if declared && trustP.carried() {
-		writeError(w, http.StatusBadRequest, "registry.invalid_argument", declaredTrustRefusal(req.ID))
-		return
-	}
 	trust := trustP.applyTo(store.LayerConfig{SourceType: req.SourceType, Repo: req.Repo})
 	if !declared {
 		if msg := e.trustPolicyError(trust); msg != "" {
@@ -2000,7 +1999,11 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	case exists && keepsStoredRemote(stored, req, cfg):
 		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(stored.CloneRepo(), sql.NullString{})
 	}
-	if declared && exists {
+	if declared {
+		if msg := e.declaredRegistrationError(stored, exists, trustP, trust, cfg); msg != "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+			return
+		}
 		cfg.TrustMode, cfg.TrustRequirements, cfg.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
 	}
 

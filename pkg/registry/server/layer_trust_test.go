@@ -506,3 +506,51 @@ func TestLayerTrust_DefaultRequiresAPolicy(t *testing.T) {
 		t.Errorf("a policy with a requirement: %d %s", resp.StatusCode, out)
 	}
 }
+
+// Spec: §7.3.1 (Layer trust policy) — for a declared layer the endpoints
+// refuse only a trust change: an update or a registration that restates the
+// stored policy, such as an echoed layer object with its derived members or
+// a signer that spells out public-good, is admitted. A registration that
+// changes the source while a requirement is declared is refused, and the kept
+// policy is checked against the registration's source type.
+func TestLayerTrust_DeclaredLayerAdmitsARestatedPolicy(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, func(e *server.LayerEndpoint) *server.LayerEndpoint {
+		return e.WithDeclaredLayers(func(_, id string) bool { return id == "finance" || id == "local" })
+	})
+	derived := store.TrustSigner{Issuer: trustIssuer, Identity: trustWorkflow, SourceRepository: trustRepo, SourceRepositoryRef: "refs/heads/main"}
+	declared := store.LayerConfig{TenantID: "t", ID: "finance", SourceType: "git", Repo: trustRepo, Ref: "main", TrustMode: "require",
+		TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{derived}}}}
+	local := store.LayerConfig{TenantID: "t", ID: "local", SourceType: "local", LocalPath: t.TempDir(), TrustMode: "none", TrustLayerRoot: "skills"}
+	for _, cfg := range []store.LayerConfig{declared, local} {
+		if err := h.st.PutLayerConfig(context.Background(), cfg); err != nil {
+			t.Fatal(err)
+		}
+	}
+	restated := map[string]any{"trust_mode": "require", "ref": "release",
+		"trust_requirements": requirement(map[string]any{"issuer": trustIssuer, "identity": trustWorkflow, "instance": "public-good"})}
+	if resp, out := mustPut(t, h.base, "/v1/layers/update?id=finance", restated); resp.StatusCode != http.StatusOK {
+		t.Fatalf("a restated policy on update: %d %s", resp.StatusCode, out)
+	}
+	if got := h.stored(t, "finance"); got.Ref != "release" || !layer.TrustPolicyEqual(got, declared) {
+		t.Errorf("after the restating update: ref %q policy %+v", got.Ref, got.TrustRequirements)
+	}
+	if resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"trust_mode": "require", "trust_requirements": requirement(ownSigner())})); resp.StatusCode != http.StatusCreated {
+		t.Errorf("a restated policy on registration: %d %s", resp.StatusCode, out)
+	}
+	if resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"trust_mode": "warn", "trust_requirements": requirement(ownSigner())})); resp.StatusCode != http.StatusBadRequest ||
+		!strings.Contains(refusalEnvelope(t, out).Message, "is declared in registry.yaml") {
+		t.Errorf("a changed policy on registration: %d %s", resp.StatusCode, out)
+	}
+	resp, out := mustPost(t, h.base, "/v1/layers", map[string]any{"id": "finance", "source_type": "local", "local_path": t.TempDir()})
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(refusalEnvelope(t, out).Message, "change its source in the declaration") {
+		t.Errorf("a source change under a declared requirement: %d %s", resp.StatusCode, out)
+	}
+	resp, out = mustPost(t, h.base, "/v1/layers", map[string]any{"id": "local", "source_type": "git", "repo": trustRepo, "ref": "main"})
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(refusalEnvelope(t, out).Message, "trust_layer_root applies to a local layer") {
+		t.Errorf("a kept root on a git re-registration: %d %s", resp.StatusCode, out)
+	}
+	if got := h.stored(t, "local"); got.SourceType != "local" {
+		t.Errorf("a refused re-registration wrote source type %q", got.SourceType)
+	}
+}

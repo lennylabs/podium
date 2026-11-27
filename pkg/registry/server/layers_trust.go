@@ -53,6 +53,33 @@ func declaredTrustRefusal(id string) string {
 	return fmt.Sprintf("the trust policy of layer %s is declared in registry.yaml; change it in the declaration, which the registry applies at its next start", id)
 }
 
+// declaredRegistrationError reports why a registration under the ID of a
+// declared layer is refused, or the empty string. stored is the stored layer
+// (zero when exists is false), requested the policy the request carries, and
+// cfg the layer the registration writes, which keeps the stored policy. A
+// request policy that differs from the stored one is refused, because the
+// next start re-applies the declaration. A source change is refused while a
+// requirement is declared, because a binding the registry derived from the
+// declared repository reads as one the declaration named. The kept policy is
+// checked against the new source type with no default, as at start.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) declaredRegistrationError(stored store.LayerConfig, exists bool, p trustPatch, requested, cfg store.LayerConfig) string {
+	if p.carried() && !layer.TrustPolicyEqual(requested, stored) {
+		return declaredTrustRefusal(cfg.ID)
+	}
+	if exists && len(stored.TrustRequirements) > 0 &&
+		(cfg.SourceType != stored.SourceType || reportedRepo(cfg) != reportedRepo(stored)) {
+		return fmt.Sprintf("layer %s is declared in registry.yaml with a trust requirement, which was checked against its declared source; change its source in the declaration", cfg.ID)
+	}
+	kept := cfg
+	kept.TrustMode, kept.TrustRequirements, kept.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
+	if err := layer.CheckTrustPolicy(kept, e.trustInstances, ""); err != nil {
+		return err.Error()
+	}
+	return ""
+}
+
 // trustPatch is the §7.3.1 trust policy half of a register or update body,
 // resolved by presence: a member the body carries is applied, and a member it
 // omits keeps the stored value. Presence is what lets "trust_mode": "" return
