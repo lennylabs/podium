@@ -74,6 +74,8 @@ func CheckRequirements(reqs []store.TrustRequirement, instances TrustInstances) 
 // Spec: §4.7.11 (Requirements file), §7.3.1
 func MarshalRequirementsFile(reqs []store.TrustRequirement) ([]byte, error) {
 	b, err := json.MarshalIndent(RequirementsFile{TrustRequirements: reqs}, "", "  ")
+	// The file holds strings and booleans alone, which always encode; the
+	// guard keeps a later member that can fail visible.
 	if err != nil {
 		return nil, fmt.Errorf("layer: encode the requirements file: %w", err)
 	}

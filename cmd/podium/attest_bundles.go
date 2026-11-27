@@ -130,6 +130,8 @@ func readBundleDir(dir string, limits attestLimits) ([]dirBundle, error) {
 func readDirBundle(p string, limits attestLimits) (dirBundle, error) {
 	b := dirBundle{path: p}
 	before, err := os.Lstat(p)
+	// The entry was listed a moment ago; this branch runs only when it is
+	// removed between the listing and the Lstat.
 	if err != nil {
 		return b, fmt.Errorf("read %s: %w", p, err)
 	}

@@ -153,6 +153,8 @@ func (c *checkInstances) build(name string) (sign.AttestationInstance, error) {
 // applies when the bundle is verified.
 func (c *checkInstances) refreshedPublicGood() (sign.AttestationInstance, error) {
 	home, err := os.UserHomeDir()
+	// os.UserHomeDir fails only when HOME, or USERPROFILE on Windows, is
+	// unset, which no test of this package arranges.
 	if err != nil {
 		return sign.AttestationInstance{}, fmt.Errorf("the Sigstore instance %q: the home directory: %w", sign.PublicGoodInstance, err)
 	}
