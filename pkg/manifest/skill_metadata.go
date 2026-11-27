@@ -267,48 +267,38 @@ func ResolveSkillFields(a *Artifact, stated map[string]bool, s *Skill) []string 
 	return filled
 }
 
-// ResolveStoredSkill resolves a stored skill row from its two byte strings.
-// With empty artifactMD and a SKILL.md that parses, the base artifact is a
-// plain skill carrying the SKILL.md description and no key is stated, which
-// matches how the registry reads a plain-skill row. With an ARTIFACT.md that
-// parses as type: skill and a SKILL.md that parses, the stated keys come from
-// the ARTIFACT.md frontmatter. Every other input returns ok false.
+// ResolveStoredSkill resolves a stored skill row from its two byte strings
+// through ResolvePackage, reading an empty manifest as an absent ARTIFACT.md
+// (StoredDocuments). With empty artifactMD and a SKILL.md that parses, the
+// base artifact is a plain skill carrying the SKILL.md description and no key
+// is stated, which matches how the registry reads a plain-skill row. With an
+// ARTIFACT.md that parses as type: skill and a SKILL.md that parses, the
+// stated keys come from the ARTIFACT.md frontmatter. Every other input
+// returns ok false.
 //
 // Spec: §4.3.4, §13.4
 func ResolveStoredSkill(artifactMD, skillMD []byte) (a *Artifact, s *Skill, filled []string, ok bool) {
-	s, err := ParseSkill(skillMD)
-	if err != nil {
+	res := ResolvePackage(StoredDocuments(artifactMD, skillMD))
+	if !res.Resolved || res.Artifact.Type != TypeSkill {
 		return nil, nil, nil, false
 	}
-	if len(artifactMD) == 0 {
-		a = &Artifact{Type: TypeSkill, Description: s.Description}
-		return a, s, ResolveSkillFields(a, nil, s), true
-	}
-	a, err = ParseArtifact(artifactMD)
-	if err != nil || a.Type != TypeSkill {
-		return nil, nil, nil, false
-	}
-	stated, err := StatedKeys(artifactMD)
-	if err != nil {
-		// ParseArtifact decoded the same frontmatter, so this branch runs
-		// only if the two decoders ever disagree; refuse rather than resolve
-		// with no stated keys, which would let metadata override ARTIFACT.md.
-		return nil, nil, nil, false
-	}
-	return a, s, ResolveSkillFields(a, stated, s), true
+	return res.Artifact, res.Skill, res.Filled, true
 }
 
-// ResolveArtifact resolves the artifact a reader acts on from a stored or
-// served pair of manifests. A skill resolves through ResolveStoredSkill, so
-// a SKILL.md metadata value such as invocation counts. Every other input,
-// including a skill whose SKILL.md does not parse, falls back to ARTIFACT.md
-// alone. Admission, the adapters, and the §6.9 guard sites share it so they
-// read one value for the same bytes.
+// ResolveArtifact resolves the artifact a reader acts on from a served or
+// materialized pair of manifests. It delegates to ResolvePackage for every
+// package that resolves, which is every row ingest can store, so a skill's
+// SKILL.md metadata value such as invocation counts. For a pair that does not
+// resolve, such as a served legacy row whose SKILL.md does not parse, it
+// falls back to ARTIFACT.md alone, so the adapters and the §6.9 guard sites
+// read the manifest's own values. §13.4 stored-row admission does not take
+// the fallback: it reads ResolvePackage, so a row it serves from its bytes is
+// a resolved package and the §4.7.6 package digest frames what it serves.
 //
-// Spec: §4.3.4, §6.9, §13.4
+// Spec: §4.3.4, §4.7.6, §6.9
 func ResolveArtifact(artifactMD, skillMD []byte) (*Artifact, error) {
-	if a, _, _, ok := ResolveStoredSkill(artifactMD, skillMD); ok {
-		return a, nil
+	if res := ResolvePackage(StoredDocuments(artifactMD, skillMD)); res.Resolved {
+		return res.Artifact, nil
 	}
 	return ParseArtifact(artifactMD)
 }
