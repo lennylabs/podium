@@ -2,6 +2,7 @@ package ingest
 
 import (
 	"errors"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -90,6 +91,13 @@ func TestLoadOne_NestedArtifactNotCaptured(t *testing.T) {
 			t.Errorf("outer captured nested-artifact file %q as a resource", k)
 		}
 	}
+}
+
+// loadOne loads the package whose ARTIFACT.md is at artifactPath through
+// loadPackage, the walk's per-directory loader.
+func loadOne(fsys fs.FS, artifactPath, layerID string) (filesystem.ArtifactRecord, error) {
+	rec, _, err := loadPackage(fsys, map[string]bool{}, dirOf(artifactPath), layerID)
+	return rec, err
 }
 
 func mapKeys(m map[string][]byte) []string {

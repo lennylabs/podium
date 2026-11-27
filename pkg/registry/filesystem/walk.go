@@ -37,11 +37,23 @@ type ArtifactRecord struct {
 	// VersionAssigned reports that the skill declares no usable version
 	// (§4.3.4), so the version is assigned.
 	VersionAssigned bool
-	// Unparseable is the §4.1 unparseable-manifest reason of a package whose
-	// ARTIFACT.md or SKILL.md frontmatter does not parse, and is empty for
-	// every other record. A record that carries it holds only ID and Layer.
-	// Walk and registry ingest refuse it through Refusal before any rule that
-	// reads the parsed fields, so Walk never returns one.
+	// AuthoredVersion is the version the package's documents declare, which
+	// the §4.7.6 subject name carries when it is in major.minor.patch form:
+	// the ARTIFACT.md version, or for a skill the version §4.3.4 resolves. It
+	// is empty for an unresolved package and for a skill that declares no
+	// version, and unlike Artifact.Version it never holds an assigned version.
+	AuthoredVersion string
+	// PackageDigest is the §4.7.6 package digest of the package, written
+	// sha256:<hex>. Both walks set it on every record, an unparseable one
+	// included, so the layer digest lists every package discovery finds.
+	PackageDigest string
+	// Unparseable is the §4.1 unparseable-manifest reason of an unresolved
+	// package: one whose ARTIFACT.md or SKILL.md frontmatter does not parse,
+	// or whose ARTIFACT.md declares type: skill beside no SKILL.md. It is
+	// empty for every other record. A record that carries it holds only ID,
+	// Layer, and PackageDigest. Walk and registry ingest refuse it through
+	// Refusal before any rule that reads the parsed fields, so Walk never
+	// returns one.
 	Unparseable string
 }
 
@@ -77,29 +89,6 @@ func (r *ArtifactRecord) Refusal() (constraint, reason string, ok bool) {
 		return layer.ManifestUnparseableConstraint, r.Unparseable, true
 	}
 	return layer.RemovedFeature(r.AuthoredBytes, r.Type())
-}
-
-// ResolveSkillFields resolves a skill record's fields by the §4.3.4
-// precedence through manifest.ResolveSkillFields: the version from the
-// ARTIFACT.md version and then a major.minor.patch SKILL.md metadata.version,
-// and each metadata-eligible field from SKILL.md metadata when ARTIFACT.md
-// does not state its key. It sets VersionAssigned when neither file declares a
-// version. A record of any other type is unchanged.
-//
-// After this call r.Artifact holds the §4.3.4 resolved values; the authored
-// ARTIFACT.md values remain only in r.AuthoredBytes.
-//
-// Spec: §4.3.4
-func (r *ArtifactRecord) ResolveSkillFields() {
-	if r.Artifact == nil || r.Artifact.Type != manifest.TypeSkill {
-		return
-	}
-	// The error is unreachable: every caller has already parsed
-	// AuthoredBytes with manifest.ParseArtifact, which decodes the same
-	// frontmatter, and a plain skill's nil AuthoredBytes states nothing.
-	stated, _ := manifest.StatedKeys(r.AuthoredBytes)
-	manifest.ResolveSkillFields(r.Artifact, stated, r.Skill)
-	r.VersionAssigned = r.Artifact.Version == ""
 }
 
 // CanonicalID is the path under the layer root, separated by "/".
@@ -392,117 +381,30 @@ func walkLayer(layer Layer) ([]ArtifactRecord, error) {
 
 // loadPackage applies the §4.2 discovery rule to the directory dir, whose
 // slash path under the layer root is rel, and loads the package it holds.
-// found is false when dir is not a package.
+// found is false when dir is not a package. It reads every file of the
+// package once, the root manifests included, and resolves and digests the
+// package through NewPackageRecord, as registry ingest does.
 //
-// Spec: §4.2
+// Spec: §4.1, §4.2, §4.7.6
 func loadPackage(layer Layer, fsys fs.FS, packages map[string]bool, rel, dir string) (rec ArtifactRecord, found bool, err error) {
 	artifact, skill, err := PackageManifests(fsys, rel)
 	if err != nil {
 		return ArtifactRecord{}, false, err
 	}
-	switch {
-	case artifact:
-		rec, err = loadArtifactRecord(layer, filepath.Join(dir, "ARTIFACT.md"))
-	case skill && !WithinPackage(packages, rel):
-		rec, err = loadPlainSkillRecord(layer, dir)
-	default:
+	if !artifact && (!skill || WithinPackage(packages, rel)) {
 		return ArtifactRecord{}, false, nil
 	}
+	id, err := canonicalID(layer.Path, dir)
 	if err != nil {
 		return ArtifactRecord{}, false, err
 	}
+	files, err := packageFiles(layer.Path, dir)
+	if err != nil {
+		return ArtifactRecord{}, false, err
+	}
+	rec = NewPackageRecord(id, layer, artifact, skill, files)
+	assignSourceSkillFields(&rec)
 	return rec, true, nil
-}
-
-// loadArtifactRecord reads ARTIFACT.md and (for skills) SKILL.md from the
-// containing directory, parses both, captures every other file in the
-// directory tree as a bundled resource, and returns the assembled record. A
-// manifest that does not parse yields an UnparseableRecord rather than an
-// error, so the refusal stops only this artifact (§4.1).
-//
-// Spec: §4.1, §4.2
-func loadArtifactRecord(layer Layer, artifactPath string) (ArtifactRecord, error) {
-	dir := filepath.Dir(artifactPath)
-	id, err := canonicalID(layer.Path, dir)
-	if err != nil {
-		return ArtifactRecord{}, err
-	}
-	artifactBytes, err := os.ReadFile(artifactPath)
-	if err != nil {
-		return ArtifactRecord{}, err
-	}
-	a, err := manifest.ParseArtifact(artifactBytes)
-	if err != nil {
-		return UnparseableRecord(id, layer, "ARTIFACT.md", err), nil
-	}
-	rec := ArtifactRecord{
-		ID:            id,
-		Layer:         layer,
-		Artifact:      a,
-		ArtifactBytes: artifactBytes,
-		AuthoredBytes: artifactBytes,
-		Resources:     map[string][]byte{},
-	}
-
-	if a.Type == manifest.TypeSkill {
-		skillPath := filepath.Join(dir, "SKILL.md")
-		skillBytes, serr := os.ReadFile(skillPath)
-		if errors.Is(serr, os.ErrNotExist) {
-			return ArtifactRecord{}, fmt.Errorf("%s: type: skill missing SKILL.md", id)
-		}
-		if serr != nil {
-			return ArtifactRecord{}, serr
-		}
-		s, err := manifest.ParseSkill(skillBytes)
-		if err != nil {
-			return UnparseableRecord(id, layer, "SKILL.md", err), nil
-		}
-		rec.Skill = s
-		rec.SkillBytes = skillBytes
-	}
-
-	if err := captureResources(&rec, layer.Path, dir); err != nil {
-		return ArtifactRecord{}, err
-	}
-	rec.ResolveSkillFields()
-	assignSourceSkillFields(&rec)
-	return rec, nil
-}
-
-// loadPlainSkillRecord loads a package that holds SKILL.md and no
-// ARTIFACT.md as a type: skill artifact. ArtifactBytes and AuthoredBytes stay
-// nil, so the §4.7.6 digest frames a zero-length first value. A SKILL.md that
-// does not parse yields an UnparseableRecord, as an unparseable ARTIFACT.md
-// does.
-//
-// Spec: §4.1, §4.2, §4.3.4
-func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
-	id, err := canonicalID(layer.Path, dir)
-	if err != nil {
-		return ArtifactRecord{}, err
-	}
-	skillBytes, err := os.ReadFile(filepath.Join(dir, "SKILL.md"))
-	if err != nil {
-		return ArtifactRecord{}, err
-	}
-	s, err := manifest.ParseSkill(skillBytes)
-	if err != nil {
-		return UnparseableRecord(id, layer, "SKILL.md", err), nil
-	}
-	rec := ArtifactRecord{
-		ID:         id,
-		Layer:      layer,
-		Artifact:   &manifest.Artifact{Type: manifest.TypeSkill},
-		Skill:      s,
-		SkillBytes: skillBytes,
-		Resources:  map[string][]byte{},
-	}
-	if err := captureResources(&rec, layer.Path, dir); err != nil {
-		return ArtifactRecord{}, err
-	}
-	rec.ResolveSkillFields()
-	assignSourceSkillFields(&rec)
-	return rec, nil
 }
 
 // VersionControlName is the name of the version-control data a package can
@@ -522,12 +424,17 @@ func SkipVersionControl(name string) bool {
 	return name == VersionControlName
 }
 
-// captureResources records every file under dir, the package directory
-// below layerRoot, as a bundled resource of rec, except the package root's
-// manifests, the files of a nested package, and version-control data.
-func captureResources(rec *ArtifactRecord, layerRoot, dir string) error {
+// packageFiles returns every file under dir, the package directory below
+// layerRoot, keyed by slash path relative to dir: the root manifests and the
+// §4.4 bundled resources, without the files of a nested package and without
+// version-control data. NewPackageRecord separates the manifests from the
+// resources.
+//
+// Spec: §4.4, §4.7.6
+func packageFiles(layerRoot, dir string) (map[string][]byte, error) {
 	fsys := os.DirFS(layerRoot)
-	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
+	files := map[string][]byte{}
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -543,12 +450,6 @@ func captureResources(rec *ArtifactRecord, layerRoot, dir string) error {
 			}
 			return skipNestedPackage(fsys, layerRoot, path)
 		}
-		if path == filepath.Join(dir, "ARTIFACT.md") {
-			return nil
-		}
-		if rec.Artifact.Type == manifest.TypeSkill && path == filepath.Join(dir, "SKILL.md") {
-			return nil
-		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
@@ -557,9 +458,13 @@ func captureResources(rec *ArtifactRecord, layerRoot, dir string) error {
 		if err != nil {
 			return err
 		}
-		rec.Resources[filepath.ToSlash(rel)] = data
+		files[filepath.ToSlash(rel)] = data
 		return nil
 	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
 }
 
 // canonicalID converts a filesystem directory path under a layer root to

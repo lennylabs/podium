@@ -927,7 +927,7 @@ func indexPercent(s, target string) int {
 // ARTIFACT.md, the package root's SKILL.md for a skill, and the files of a
 // nested package. The complete key set is asserted, rather than the absence
 // of one prefix, so a hidden-name skip or a base-name SKILL.md skip added to
-// captureResources fails here instead of silently moving every stored hash.
+// packageFiles fails here instead of silently moving every stored hash.
 func TestWalk_ResourceSetIsEveryFileUnderThePackageRoot(t *testing.T) {
 	t.Parallel()
 	const crlfNotes = "line one\r\nline two\r\n"
