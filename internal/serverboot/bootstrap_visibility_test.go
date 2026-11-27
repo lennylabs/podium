@@ -49,7 +49,7 @@ func TestBootstrapLayerPath_IdPDeploymentNotPublic(t *testing.T) {
 	testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: artifactBody})
 
 	cfg := &Config{identityProvider: "oidc-jwt", defaultLayerVisibility: "private"}
-	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestBootstrapLayerPath_ZeroConfigStandaloneStaysPublic(t *testing.T) {
 	// Mirror LoadConfig's resolution: a no-IdP standalone with no override
 	// resolves the default visibility to "public".
 	cfg := &Config{identityProvider: "", defaultLayerVisibility: "public"}
-	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+	layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 	if err != nil {
 		t.Fatalf("bootstrapLayerPath: %v", err)
 	}
@@ -116,7 +116,7 @@ func TestBootstrapLayerPath_StandaloneHonorsVisibilityOverride(t *testing.T) {
 			testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "x/ARTIFACT.md", Content: artifactBody})
 
 			cfg := &Config{identityProvider: "", defaultLayerVisibility: c.defaultVis}
-			layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil)
+			layers, err := bootstrapLayerPath(st, "default", root, defaultBootstrapVisibility(cfg), 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil, bootstrapTrust{})
 			if err != nil {
 				t.Fatalf("bootstrapLayerPath: %v", err)
 			}

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
@@ -84,6 +85,10 @@ type attestationConfig struct {
 	files []fileInstance
 	// errs holds every refusal, in the order of the settings.
 	errs []error
+	// limits are PODIUM_ATTESTATION_MAX_BYTES and
+	// PODIUM_ATTESTATION_MAX_BUNDLES, which bound the attestation directory
+	// a cycle reads.
+	limits attest.Limits
 
 	// instances is filled by loadAttestationRoots: every configured
 	// instance by name, public-good included.
@@ -113,6 +118,12 @@ func resolveAttestation(getenv func(string) string, y yamlSigstore, configDir st
 	if err := a.refreshFloor(); err != nil {
 		a.errs = append(a.errs, err)
 	}
+	limits, err := attest.ReadLimits(getenv)
+	if err != nil {
+		a.errs = append(a.errs, fmt.Errorf("config.invalid: %w", err))
+		limits = attest.Limits{MaxBytes: attest.DefaultMaxBundleBytes, MaxBundles: attest.DefaultMaxBundles}
+	}
+	a.limits = limits
 	if a.rootFile != "" {
 		a.addPublicGoodFile(now)
 	}
@@ -409,6 +420,8 @@ func (c *Config) attestationSettings(envOrSrc func(env, src string) string) []Se
 		Setting{"sigstore.root_refresh", a.refresh.display(), a.refresh.source},
 		Setting{"sigstore.root_refresh_timeout", a.timeout.display(), a.timeout.source},
 		Setting{"sigstore.root_max_age", a.maxAge.display(), a.maxAge.source},
+		Setting{"attestation.max_bytes", fmt.Sprint(a.limits.MaxBytes), envOrSrc(attest.MaxBytesSetting, "")},
+		Setting{"attestation.max_bundles", fmt.Sprint(a.limits.MaxBundles), envOrSrc(attest.MaxBundlesSetting, "")},
 	)
 }
 

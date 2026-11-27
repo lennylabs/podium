@@ -97,6 +97,10 @@ func buildReingestRunner(
 			// managed, where the outbox write computes it.
 			SemanticOverlap: collocatedVec.SemanticOverlap,
 			CycleLocks:      cycleLocks,
+			// §4.7.11: ingest verification, and the mark reset a manual
+			// reingest carries.
+			Attestation: cfg.ingestAttest,
+			MarkReset:   server.MarkResetFromContext(ctx),
 		}
 		if auditSink != nil {
 			opts.AuditEmit = ingestAuditEmitter(ctx, auditSink, scrubber, caller, lc.TenantID)

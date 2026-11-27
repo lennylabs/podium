@@ -79,6 +79,33 @@ var errorCodeRegistry = map[string]errorCodeMeta{
 	"ingest.lint_failed": {
 		suggestedAction: "Correct the artifact the message names in the layer's source, then reingest; the same source fails identically until it is fixed.",
 	},
+	// spec §4.7.11 (Ingest verification): the attestation steps refuse a
+	// cycle whose layer content no accepted bundle covers. The condition is
+	// in the layer's source or its policy, so a retry of the same source
+	// fails the same way; `podium layer show` prints the next step for each
+	// constraint.
+	"ingest.attestation_missing": {
+		suggestedAction: "Run the signing workflow on the tracked ref and check that the layer's signers match the bundles' certificates; `podium layer show <id>` prints the next step for the constraint.",
+	},
+	"ingest.attestation_mismatch": {
+		suggestedAction: "The tracked ref holds content no bundle covers; run the signing workflow on it, and compare the listed subjects with `podium attest check`.",
+	},
+	"ingest.attestation_stale": {
+		suggestedAction: "Run the signing workflow on the current tip of the main branch; after a rewrite or a change of the layer's source, reset the mark with `podium layer reingest <id> --reset-attestation-mark`.",
+	},
+	"ingest.attestation_invalid": {
+		suggestedAction: "Rebuild the attestation directory within the limits, or rename the package directories the details list.",
+	},
+	"ingest.attestation_policy_invalid": {
+		suggestedAction: "Update the layer's trust policy with `podium layer update` so that it holds a requirement and names only configured Sigstore instances.",
+	},
+	// The public-good root is stale until a refresh succeeds, which the
+	// registry retries on its own, so a later reingest can succeed without
+	// operator action.
+	"ingest.attestation_root_stale": {
+		retryable:       true,
+		suggestedAction: "Check the registry's access to the Sigstore TUF repository, or set PODIUM_ATTESTATION_TRUSTED_ROOT_FILE.",
+	},
 	// Hard caps: retrying without operator action does not succeed.
 	"quota.layer_count_exceeded": {
 		suggestedAction: "Remove an existing user-defined layer or raise the tenant's layer quota.",

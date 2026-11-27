@@ -162,6 +162,11 @@ func layerShow(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	if !*requirements {
+		// The layer object holds the layer, so the read above found it.
+		raw, _ := findLayerObject(out, id)
+		writeAttestationNotes(os.Stderr, raw)
+	}
 	return 0
 }
 
@@ -179,7 +184,7 @@ func writeLayerObject(w io.Writer, body []byte, id string) error {
 		return fmt.Errorf("format layer %s: %w", id, err)
 	}
 	buf.WriteByte('\n')
-	_, err = w.Write(buf.Bytes())
+	_, err = w.Write(escapeControls(buf.Bytes()))
 	return err
 }
 
