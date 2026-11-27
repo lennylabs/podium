@@ -117,6 +117,31 @@ func TestAttestImportCheck_FixtureLayer(t *testing.T) {
 	}
 }
 
+// Spec: §4.2, §7.3.5 — a package directory named `CON .txt` draws the
+// portable-name warning from `podium attest import` and `podium attest
+// check`, and each exits 1 as it would without the warning, because the
+// space leaves the package with no subject name; the import writes nothing.
+func TestAttestImportCheck_CONPackage(t *testing.T) {
+	t.Parallel()
+	layer := t.TempDir()
+	writeTree(t, layer, map[string]string{
+		"team/a/ARTIFACT.md":        attestRuleArtifact,
+		"team/CON .txt/ARTIFACT.md": attestRuleArtifact,
+	})
+	h := sh.New(t)
+	bundle := writeFileE2E(t, "b.json", h.DSSEBundle(sh.Statement(t, "https://slsa.dev/provenance/v1",
+		sh.Subject{Name: "team/a@1.0.0", SHA256: strings.Repeat("0", 64)}), sh.WithTimestamp(sh.TSAPrimary)))
+	for _, args := range [][]string{{"attest", "import", bundle, "--dir", layer}, {"attest", "check", layer}} {
+		res := runPodium(t, "", nil, args...)
+		cliWantExit(t, res, 1, strings.Join(args[:2], " ")+" with a package named CON .txt")
+		cliContains(t, res.Stderr, `warning: team/CON .txt: the canonical ID has the segment "CON .txt"`, "portable-name warning")
+		cliContains(t, res.Stderr, `error: the package at "team/CON .txt" has no subject name`, "refusal")
+	}
+	if _, err := os.Stat(filepath.Join(layer, ".podium")); !os.IsNotExist(err) {
+		t.Errorf("a refused import created the attestation directory: %v", err)
+	}
+}
+
 // assertPortableWarnings checks the two portable-name warnings of the
 // fixture layer.
 func assertPortableWarnings(t *testing.T, stderr, what string) {
