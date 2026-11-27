@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"unicode"
 
 	"github.com/lennylabs/podium/pkg/attest"
@@ -212,64 +213,108 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 }
 
 // writeAttestFiles creates --out, removes the subject files an earlier run
-// left there for the same layer subject, writes each rendered file under the
-// lowest file number no remaining entry takes, and prints each path it wrote.
+// left there for the same layer subject, creates each rendered file under the
+// lowest file number no entry holds, and prints each path it wrote.
 //
 // Spec: §7.3.5
 func writeAttestFiles(opts attestOptions, rendered [][]byte, stdout io.Writer) error {
 	if err := os.MkdirAll(opts.out, 0o755); err != nil {
 		return fmt.Errorf("create %s: %w", opts.out, err)
 	}
-	taken, err := removeEarlierAttestFiles(opts.out, opts.layerName)
-	if err != nil {
+	if err := removeEarlierAttestFiles(opts.out, opts.layerName); err != nil {
 		return err
 	}
 	n := 0
 	for _, b := range rendered {
-		name := ""
-		for name == "" || taken[name] {
-			n++
-			name = opts.output.Format.FileName(n)
-		}
-		p := filepath.Join(opts.out, name)
-		if err := os.WriteFile(p, b, 0o644); err != nil {
-			return fmt.Errorf("write %s: %w", p, err)
+		p, err := createAttestFile(opts.out, opts.output.Format, &n, b)
+		if err != nil {
+			return err
 		}
 		_, _ = fmt.Fprintln(stdout, p)
 	}
 	return nil
 }
 
-// removeEarlierAttestFiles removes each subject file in out whose first
-// subject is layerName, which an earlier run for the same layer wrote, and
-// returns the names of the subject-file entries it leaves. A file for another
-// layer subject, such as the files of another layer root that shares out,
-// stays, and so does an entry it cannot read or attribute, because removing it
-// could drop another run's subjects.
+// createAttestFile writes b to a new file of format f in out, under the
+// lowest number above *n whose name no entry holds, and advances *n to it. It
+// creates the file exclusively, so a name that another run, a link, or any
+// other entry holds is skipped rather than overwritten, and two runs that
+// share out never write one file.
 //
 // Spec: §7.3.5
-func removeEarlierAttestFiles(out, layerName string) (map[string]bool, error) {
+func createAttestFile(out string, f attest.Format, n *int, b []byte) (string, error) {
+	for {
+		*n++
+		p := filepath.Join(out, f.FileName(*n))
+		file, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+		if errors.Is(err, fs.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return "", fmt.Errorf("create %s: %w", p, err)
+		}
+		_, werr := file.Write(b)
+		if cerr := file.Close(); werr == nil {
+			werr = cerr
+		}
+		if werr != nil {
+			return "", fmt.Errorf("write %s: %w", p, werr)
+		}
+		return p, nil
+	}
+}
+
+// removeEarlierAttestFiles removes each regular subject file in out whose
+// first subject is layerName, which an earlier run for the same layer wrote.
+// A file for another layer subject, such as the files of another layer root
+// that shares out, stays, and so does an entry it cannot read or attribute,
+// because removing it could drop another run's subjects. An entry that is not
+// a regular file stays unread: a named pipe would block the read, and a link
+// to a device would feed it without end.
+//
+// Spec: §7.3.5
+func removeEarlierAttestFiles(out, layerName string) error {
 	entries, err := os.ReadDir(out)
 	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", out, err)
+		return fmt.Errorf("read %s: %w", out, err)
 	}
-	taken := map[string]bool{}
 	for _, e := range entries {
 		f, ok := attest.OutputFileFormat(e.Name())
 		if !ok {
 			continue
 		}
 		p := filepath.Join(out, e.Name())
-		b, readErr := os.ReadFile(p)
-		if name, ok := attest.FirstSubjectName(f, b); readErr != nil || !ok || name != layerName {
-			taken[e.Name()] = true
+		if name, ok := readFirstSubject(p, f); !ok || name != layerName {
 			continue
 		}
 		if err := os.Remove(p); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return nil, fmt.Errorf("remove an earlier subject file: %w", err)
+			return fmt.Errorf("remove an earlier subject file: %w", err)
 		}
 	}
-	return taken, nil
+	return nil
+}
+
+// readFirstSubject returns the first subject name of the subject file at p,
+// reading at most attest.FirstSubjectReadLimit bytes, and false when p is not
+// a regular file or does not read as a subject file. It checks the entry with
+// Lstat before it opens it, opens it without blocking, and checks that the
+// open file is the same regular file, so an entry swapped for a pipe or a link
+// between the two steps is not read either.
+func readFirstSubject(p string, f attest.Format) (string, bool) {
+	before, err := os.Lstat(p)
+	if err != nil || !before.Mode().IsRegular() {
+		return "", false
+	}
+	file, err := os.OpenFile(p, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return "", false
+	}
+	defer func() { _ = file.Close() }()
+	after, err := file.Stat()
+	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
+		return "", false
+	}
+	return attest.FirstSubjectName(f, file)
 }
 
 // oneLine writes each control character and line or paragraph separator of s

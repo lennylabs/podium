@@ -270,3 +270,63 @@ func TestAttest_PortableNameAtIngest(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §7.3.5 — the statement format carries the Podium predicate type with
+// an empty predicate by default, and --predicate-type sets another type for
+// the statement format alone. Runs for two layer roots that share --out keep
+// both roots' files, each run prints the paths it wrote, and a rerun for one
+// root replaces that root's file alone.
+func TestAttest_PredicateTypeAndSharedOut(t *testing.T) {
+	t.Parallel()
+	layer := t.TempDir()
+	writeTree(t, layer, map[string]string{
+		"a/team/x/ARTIFACT.md": attestRuleArtifact,
+		"b/team/y/ARTIFACT.md": attestRuleArtifact,
+	})
+	out := t.TempDir()
+
+	res := runPodium(t, "", nil, "attest", layer, "--root", "a", "--out", out, "--format", "statement")
+	cliWantExit(t, res, 0, "attest --format statement")
+	first := strings.TrimSpace(res.Stdout)
+	b, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatalf("read the printed path %q: %v", first, err)
+	}
+	cliContains(t, string(b), `"predicateType":"https://lennylabs.github.io/podium/attestation/subjects/v1","predicate":{}}`, "default predicate type")
+	cliContains(t, string(b), `"subject":[{"name":".podium/layer/a",`, "layer subject first")
+
+	res = runPodium(t, "", nil, "attest", layer, "--root", "b", "--out", out, "--format", "statement",
+		"--predicate-type", "https://slsa.dev/provenance/v1")
+	cliWantExit(t, res, 0, "attest --predicate-type")
+	second := strings.TrimSpace(res.Stdout)
+	if second == first {
+		t.Fatalf("the second root's run printed the first root's path %q", first)
+	}
+	b, err = os.ReadFile(second)
+	if err != nil {
+		t.Fatalf("read %q: %v", second, err)
+	}
+	cliContains(t, string(b), `"predicateType":"https://slsa.dev/provenance/v1","predicate":{}}`, "explicit predicate type")
+	cliContains(t, string(b), `"subject":[{"name":".podium/layer/b",`, "second root's layer subject")
+	if _, err := os.Stat(first); err != nil {
+		t.Errorf("the second root's run removed the first root's file: %v", err)
+	}
+
+	res = runPodium(t, "", nil, "attest", layer, "--root", "a", "--out", out, "--format", "statement")
+	cliWantExit(t, res, 0, "rerun for the first root")
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 2 {
+		t.Errorf("out holds %d files after a rerun, want one per root", len(entries))
+	}
+	if _, err := os.Stat(second); err != nil {
+		t.Errorf("the rerun for root a removed root b's file: %v", err)
+	}
+
+	res = runPodium(t, "", nil, "attest", layer, "--root", "a", "--out", out, "--predicate-type", "https://slsa.dev/provenance/v1")
+	cliWantExit(t, res, 2, "--predicate-type with the checksums format")
+	res = runPodium(t, "", nil, "attest", layer, "--root", "a", "--out", out, "--format", "statement", "--predicate-type", "subjects/v1")
+	cliWantExit(t, res, 2, "a relative --predicate-type")
+}

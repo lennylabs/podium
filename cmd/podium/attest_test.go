@@ -148,6 +148,69 @@ func TestAttest_WritesChecksums(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.5 — a subject file larger than the read bound whose first line
+// does not end within it is left in place, and the run writes its own file
+// under a free number.
+func TestAttest_OversizedOutFileStays(t *testing.T) {
+	dir := t.TempDir()
+	writeAttestLayer(t, dir, map[string]string{"team/a/ARTIFACT.md": attestRuleMD})
+	out := t.TempDir()
+	big := strings.Repeat("x", 2*attest.FirstSubjectReadLimit) + "  .podium/layer\n"
+	writeAttestLayer(t, out, map[string]string{"podium-subjects-1.sha256": big})
+	code, stdout, stderr := runAttestT(t, dir, "--out", out)
+	if code != 0 || stdout != filepath.Join(out, "podium-subjects-2.sha256")+"\n" {
+		t.Fatalf("run = %d, stdout %q, stderr %s, want file 2", code, stdout, stderr)
+	}
+	if b, err := os.ReadFile(filepath.Join(out, "podium-subjects-1.sha256")); err != nil || string(b) != big {
+		t.Errorf("the oversized file changed: %v", err)
+	}
+}
+
+// Spec: §7.3.5 — concurrent runs into one --out create their files
+// exclusively, so each run's file survives under its own number and no run
+// overwrites another's.
+func TestAttest_ConcurrentRunsShareOut(t *testing.T) {
+	dir := t.TempDir()
+	roots := []string{"r0", "r1", "r2", "r3", "r4", "r5", "r6", "r7"}
+	files := map[string]string{}
+	for _, r := range roots {
+		files[r+"/team/x/ARTIFACT.md"] = attestRuleMD
+	}
+	writeAttestLayer(t, dir, files)
+	out := t.TempDir()
+	codes := make(chan int, len(roots))
+	for _, r := range roots {
+		go func(root string) {
+			var so, se bytes.Buffer
+			codes <- runAttest(context.Background(), []string{dir, "--root", root, "--out", out}, &so, &se)
+		}(r)
+	}
+	for range roots {
+		if code := <-codes; code != 0 {
+			t.Errorf("a concurrent run exited %d", code)
+		}
+	}
+	entries, err := os.ReadDir(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, e := range entries {
+		b, err := os.ReadFile(filepath.Join(out, e.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		name, ok := attest.FirstSubjectName(attest.FormatChecksums, bytes.NewReader(b))
+		if !ok || seen[name] {
+			t.Errorf("%s names %q (ok %v), want a distinct layer subject", e.Name(), name, ok)
+		}
+		seen[name] = true
+	}
+	if len(seen) != len(roots) {
+		t.Errorf("out holds files for %d layers, want %d: %v", len(seen), len(roots), seen)
+	}
+}
+
 // Spec: §7.3.5 — runs for two layer roots that share --out keep each other's
 // files: the second run takes the next free number, and a rerun for the first
 // root replaces its own file alone.
@@ -168,7 +231,7 @@ func TestAttest_LayerRootsShareOut(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
-		if first, _ := attest.FirstSubjectName(attest.FormatChecksums, b); first != layer {
+		if first, _ := attest.FirstSubjectName(attest.FormatChecksums, bytes.NewReader(b)); first != layer {
 			t.Errorf("%s names %q, want %q", name, first, layer)
 		}
 	}

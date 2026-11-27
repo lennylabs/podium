@@ -189,21 +189,62 @@ func TestFirstSubjectName(t *testing.T) {
 		if err := (Output{Format: f}).Write(&b, subjects); err != nil {
 			t.Fatal(err)
 		}
-		if name, ok := FirstSubjectName(f, b.Bytes()); !ok || name != ".podium/layer/a" {
+		if name, ok := FirstSubjectName(f, bytes.NewReader(b.Bytes())); !ok || name != ".podium/layer/a" {
 			t.Errorf("%s: FirstSubjectName = %q, %v", f, name, ok)
 		}
 	}
-	for f, b := range map[Format]string{
-		FormatChecksums: "stale\n",
-		FormatStatement: `{"subject":[]}`,
+	for _, c := range []struct {
+		f Format
+		b string
+	}{
+		{FormatChecksums, "stale\n"},
+		{FormatChecksums, hexOf('a') + "  .podium/layer"},
+		{FormatStatement, `{"subject":[]}`},
+		{FormatStatement, `{"subject":[{"digest":{}}]}`},
+		{FormatStatement, `{"subject":{}}`},
+		{FormatStatement, `{"_type":"x"}`},
+		{FormatStatement, `{"_type":`},
+		{FormatStatement, `[]`},
+		{FormatStatement, "not json"},
 	} {
-		if name, ok := FirstSubjectName(f, []byte(b)); ok {
-			t.Errorf("%s: FirstSubjectName(%q) = %q, want none", f, b, name)
+		if name, ok := FirstSubjectName(c.f, strings.NewReader(c.b)); ok {
+			t.Errorf("%s: FirstSubjectName(%q) = %q, want none", c.f, c.b, name)
 		}
 	}
-	if _, ok := FirstSubjectName(FormatStatement, []byte("not json")); ok {
-		t.Error("a statement file that is not JSON gave a subject")
+	// A member before subject is skipped, and a truncated tail after the
+	// first subject is never read.
+	if name, ok := FirstSubjectName(FormatStatement, strings.NewReader(`{"_type":"x","subject":[{"name":".podium/layer","digest":{}},{"na`)); !ok || name != ".podium/layer" {
+		t.Errorf("statement prefix = %q, %v, want .podium/layer", name, ok)
 	}
+}
+
+// Spec: §7.3.5 — FirstSubjectName reads at most FirstSubjectReadLimit bytes,
+// so a file whose first line or first subject lies beyond the bound gives
+// none, and an endless reader returns.
+func TestFirstSubjectName_Bounded(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("x", FirstSubjectReadLimit)
+	if _, ok := FirstSubjectName(FormatChecksums, strings.NewReader(long+"  .podium/layer\n")); ok {
+		t.Error("a first line beyond the bound gave a subject")
+	}
+	if _, ok := FirstSubjectName(FormatStatement, strings.NewReader(`{"pad":"`+long+`","subject":[{"name":".podium/layer"}]}`)); ok {
+		t.Error("a subject beyond the bound gave a name")
+	}
+	for _, f := range []Format{FormatChecksums, FormatStatement} {
+		if _, ok := FirstSubjectName(f, endless{}); ok {
+			t.Errorf("%s: an endless reader gave a subject", f)
+		}
+	}
+}
+
+// endless yields spaces without end, as a link to a device can.
+type endless struct{}
+
+func (endless) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = ' '
+	}
+	return len(p), nil
 }
 
 // Spec: §7.3.5 — the statement format writes the default Podium predicate

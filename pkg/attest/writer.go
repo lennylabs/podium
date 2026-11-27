@@ -1,6 +1,7 @@
 package attest
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -108,26 +109,68 @@ func OutputFileFormat(name string) (Format, bool) {
 	return "", false
 }
 
+// FirstSubjectReadLimit bounds the bytes FirstSubjectName reads. Every file
+// `podium attest` writes names its first subject within the first few hundred
+// bytes, and the bound keeps an oversized or endless file in the output
+// directory from holding a run.
+const FirstSubjectReadLimit = 64 << 10
+
 // FirstSubjectName returns the name of the first subject of a file of format
-// f, which is the layer subject in every file `podium attest` writes, and
-// false when b does not read as such a file. A run reads it to remove only the
-// files an earlier run wrote for the same layer, so runs for several layer
-// roots can share one output directory.
+// f read from r, which is the layer subject in every file `podium attest`
+// writes, and false when the first FirstSubjectReadLimit bytes do not read as
+// such a file. A run reads it to remove only the files an earlier run wrote
+// for the same layer, so runs for several layer roots can share one output
+// directory.
 //
 // Spec: §7.3.5
-func FirstSubjectName(f Format, b []byte) (string, bool) {
+func FirstSubjectName(f Format, r io.Reader) (string, bool) {
+	r = io.LimitReader(r, FirstSubjectReadLimit)
 	if f == FormatStatement {
-		var st struct {
-			Subject []statementSubject `json:"subject"`
-		}
-		if err := json.Unmarshal(b, &st); err != nil || len(st.Subject) == 0 {
+		return firstStatementSubject(json.NewDecoder(r))
+	}
+	line, err := bufio.NewReader(r).ReadString('\n')
+	if err != nil {
+		return "", false
+	}
+	_, name, ok := strings.Cut(strings.TrimSuffix(line, "\n"), "  ")
+	return name, ok
+}
+
+// firstStatementSubject reads the name of the first element of the subject
+// member of the JSON object dec yields, token by token, so a prefix of the
+// file is enough and the rest is never read.
+func firstStatementSubject(dec *json.Decoder) (string, bool) {
+	if !nextDelim(dec, '{') {
+		return "", false
+	}
+	for dec.More() {
+		key, err := dec.Token()
+		if err != nil {
 			return "", false
 		}
-		return st.Subject[0].Name, true
+		if key != "subject" {
+			var skip json.RawMessage
+			if dec.Decode(&skip) != nil {
+				return "", false
+			}
+			continue
+		}
+		if !nextDelim(dec, '[') || !dec.More() {
+			return "", false
+		}
+		var first statementSubject
+		if dec.Decode(&first) != nil || first.Name == "" {
+			return "", false
+		}
+		return first.Name, true
 	}
-	line, _, _ := strings.Cut(string(b), "\n")
-	_, name, ok := strings.Cut(line, "  ")
-	return name, ok
+	return "", false
+}
+
+// nextDelim reports whether dec's next token is the delimiter d.
+func nextDelim(dec *json.Decoder, d json.Delim) bool {
+	tok, err := dec.Token()
+	return err == nil && tok == d
 }
 
 // numbered reports whether name is prefix, one or more ASCII digits, and
