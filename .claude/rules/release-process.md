@@ -85,6 +85,8 @@ git push origin release/X.Y.x
 
 Merge the fix back into `main` when it is not already there.
 
+The branch carries the embedded Sigstore trusted root of the old tag, which the release workflow refuses once it is not current. Run `go run ./tools/sigstoreroot -check` on `release/X.Y.x`, and when it fails, cherry-pick the commit that refreshed `pkg/sign/embedded/public-good.trusted_root.json` on `main` onto `release/X.Y.x` before the prep commit, or run `go run ./tools/sigstoreroot` there and commit the result on its own. The `sigstore-root` workflow checks each pull request into a `release/*` branch.
+
 ## Before tagging a signing-path release
 
 When the release diff touches `pkg/sign` or the `SignatureProvider` contract, run the Sigstore live smoke against the staging instance first. The release gate does not run it. The procedure is in `RELEASING.md`.

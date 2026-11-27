@@ -89,6 +89,8 @@ git push origin v0.2.1
 
 The `main` line continues toward `0.3.0` independently. Merge the fix back into `main` if it isn't already there.
 
+The patch branch carries the embedded Sigstore trusted root of the old tag, and the release workflow refuses a tag whose embedded root is not current. Run `go run ./tools/sigstoreroot -check` on `release/0.2.x`, and when it fails, cherry-pick the commit that refreshed `pkg/sign/embedded/public-good.trusted_root.json` on `main` onto `release/0.2.x` before the prep commit, or run `go run ./tools/sigstoreroot` there and commit the result on its own. The `sigstore-root` workflow checks each pull request into a `release/*` branch.
+
 ## What CI does on a tag
 
 A push of `vX.Y.Z` triggers the release workflow. A `validate-tag` job runs first and rejects tags whose commit is not reachable from `main` or any `release/*` branch — a safety net that prevents publishing from a feature branch or stale fork.
