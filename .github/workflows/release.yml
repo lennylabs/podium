@@ -266,6 +266,10 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+          # The attested binaries compile from a clean module and build
+          # cache: a cache another job saved, under actions that are pinned
+          # by tag, would otherwise reach the build that this job attests.
+          cache: false
       - name: Install cross-compiler
         if: matrix.apt != ''
         run: |
@@ -560,7 +564,9 @@ jobs:
     needs: release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      # Pinned by commit: this job holds TAP_BUCKET_TOKEN, which writes to the
+      # tap and bucket repositories.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
