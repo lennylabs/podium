@@ -10,7 +10,9 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -228,4 +230,24 @@ func startupRefusal(layerID string, err error) bool {
 	log.Printf("warning: attestation: the startup ingest of layer %s was refused with %s (constraint %q); its stored versions stay served, and `podium layer show %s` prints the next step",
 		layerID, code, attest.ReportString(constraint), layerID)
 	return true
+}
+
+// trustPolicyChangeHook returns the re-evaluation a register or an update
+// runs after it changed a layer's trust policy. The layer events record the
+// change; the re-evaluation records layer.attestation_links_downgraded
+// through the audit stream with the caller that made it. A failure is logged
+// and changes nothing the request did, because the next ingest cycle of the
+// layer runs the re-evaluation again.
+//
+// Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy)
+func trustPolicyChangeHook(st store.Store, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber) func(context.Context, store.LayerConfig, string) {
+	return func(ctx context.Context, lc store.LayerConfig, caller string) {
+		var emit ingest.AuditEmitterFunc
+		if sink != nil {
+			emit = ingestAuditEmitter(ctx, sink, scrubber, caller, lc.TenantID)
+		}
+		if err := att.Reevaluate(ctx, st, lc, clock.Real{}, emit); err != nil {
+			log.Printf("attestation: layer %s: re-evaluate the links after a trust policy change: %v; the next ingest cycle of the layer runs it again", lc.ID, err)
+		}
+	}
 }

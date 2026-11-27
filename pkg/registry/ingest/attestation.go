@@ -180,29 +180,47 @@ type AttestationCycle struct {
 	audit AuditEmitterFunc
 	// wrote records that the cycle made its record write.
 	wrote bool
+	// policy is the policy key of the layer and whether this process holds
+	// the recorded roots, which the re-evaluation decides after the claim and
+	// the links the cycle writes record (§4.7.11 Re-evaluation).
+	policy policyState
+	// evaluated holds the bundles layer step 2 evaluated, which the cycle
+	// links after a failed layer step under warn as after a passed one.
+	evaluated []*snapshotBundle
 }
 
-// Cycle returns the attestation steps of a cycle that claimed lc with claim,
-// or nil when the layer's resolved mode is none, in which case the cycle runs
-// no attestation step and writes no record. Every other resolved mode yields
-// a cycle, so a stored mode the registry cannot read, such as REQUIRE, is
-// refused by the policy check rather than read as none.
+// Cycle returns the attestation steps of a cycle that claimed lc with claim.
+// Under the resolved mode none the cycle runs no attestation step and writes
+// no record: it re-evaluates the layer's links and links the bundles of the
+// attestation directory as unverified. A nil configuration under none
+// returns nil, because it configures no instance to link under. Every other
+// resolved mode runs the steps, so a stored mode the registry cannot read,
+// such as REQUIRE, is refused by the policy check rather than read as none.
 //
 // A nil configuration fails closed as well: it configures no Sigstore
 // instance and no trust default, so a layer whose own mode is above none
 // gets a cycle whose policy check refuses it (unknown_instance or
 // no_requirements) instead of an ingest that verifies nothing.
 //
-// Spec: §4.7.11 (Ingest verification, Policy that became invalid)
+// Spec: §4.7.11 (Ingest verification, Policy that became invalid, Unverified links)
 func (c *AttestationConfig) Cycle(lc store.LayerConfig, claim string) *AttestationCycle {
+	mode := layer.ResolveTrustMode(lc.TrustMode, "")
+	if c != nil {
+		mode = layer.ResolveTrustMode(lc.TrustMode, c.DefaultMode)
+	}
 	if c == nil {
+		if mode == layer.TrustModeNone {
+			return nil
+		}
 		c = &AttestationConfig{}
 	}
-	mode := layer.ResolveTrustMode(lc.TrustMode, c.DefaultMode)
-	if mode == layer.TrustModeNone {
-		return nil
-	}
 	return &AttestationCycle{cfg: c, layer: lc, claim: claim, mode: mode, clock: clock.Real{}}
+}
+
+// verifies reports whether the cycle runs the attestation steps, which is
+// every resolved mode other than none.
+func (a *AttestationCycle) verifies() bool {
+	return a != nil && a.mode != layer.TrustModeNone
 }
 
 // WithLineage sets the lineage query of the cycle for the snapshot at
@@ -224,14 +242,17 @@ func (a *AttestationCycle) bind(c clock.Clock, emit AuditEmitterFunc) {
 	}
 }
 
-// CheckPolicy refuses the cycle of a layer whose resolved policy is invalid
-// with ingest.attestation_policy_invalid, after it writes the refusal to the
-// attestation record. It runs once per cycle, after the claim and before the
-// snapshot is read; a second call does nothing. superseded reports a record
-// write that a later claim refused, which ends the cycle as a superseded one.
-// onWrite runs before the record write, which is a store write of the cycle.
+// CheckPolicy runs the re-evaluation of the layer's links and then refuses
+// the cycle of a layer whose resolved policy is invalid with
+// ingest.attestation_policy_invalid, after it writes the refusal to the
+// attestation record. A layer whose policy is invalid is not re-evaluated.
+// It runs once per cycle, after the claim and before the snapshot is read; a
+// second call does nothing. superseded reports a write that a later claim
+// refused, which ends the cycle as a superseded one. onWrite runs before the
+// re-evaluation writes and the record write, which are store writes of the
+// cycle.
 //
-// Spec: §4.7.11 (Policy that became invalid, Attestation record)
+// Spec: §4.7.11 (Re-evaluation, Policy that became invalid, Attestation record)
 func (a *AttestationCycle) CheckPolicy(ctx context.Context, st store.Store, onWrite func()) (superseded bool, err error) {
 	if a.checked {
 		return false, nil
@@ -239,7 +260,7 @@ func (a *AttestationCycle) CheckPolicy(ctx context.Context, st store.Store, onWr
 	a.checked = true
 	failure := a.policyFailure()
 	if failure == nil {
-		return false, nil
+		return a.reevaluate(ctx, st, onWrite)
 	}
 	failure.Refusal = true
 	if superseded, err := a.writeFailure(ctx, st, failure, onWrite); superseded || err != nil {
@@ -254,6 +275,9 @@ func (a *AttestationCycle) CheckPolicy(ctx context.Context, st store.Store, onWr
 // longer configures. Any other rule a stored policy breaks, which the layer
 // endpoints refuse, fails closed under the constraint policy_rule.
 func (a *AttestationCycle) policyFailure() *AttestationError {
+	if a.mode == layer.TrustModeNone {
+		return nil
+	}
 	if !layer.ValidTrustMode(a.mode) {
 		return attestFailure(CodeAttestationPolicyInvalid, "policy_rule",
 			fmt.Sprintf("layer %s has the trust mode %q, which is not none, warn, or require", a.layer.ID, a.mode),
@@ -278,6 +302,24 @@ func (a *AttestationCycle) policyFailure() *AttestationError {
 			fmt.Sprintf("the trust policy of layer %s breaks a rule: %v", a.layer.ID, err))
 	}
 	return nil
+}
+
+// PolicyConstraint returns the constraint of the policy rule that the
+// resolved trust policy of lc breaks under the configured instances and the
+// trust default, and the empty string for a valid policy. Serving reads it
+// to decide the outcome of a verified version, with the rules a cycle
+// applies when it refuses an invalid policy.
+//
+// Spec: §4.7.11 (Policy that became invalid, Served outcome)
+func (c *AttestationConfig) PolicyConstraint(lc store.LayerConfig) string {
+	a := c.Cycle(lc, "")
+	if a == nil {
+		return ""
+	}
+	if f := a.policyFailure(); f != nil {
+		return f.Constraint()
+	}
+	return ""
 }
 
 // instance returns the configured instance a signer names; an empty name is
@@ -327,6 +369,9 @@ func (a *AttestationCycle) write(ctx context.Context, st store.Store, w store.At
 //
 // Spec: §4.7.11 (Attestation record), §7.3.1 (Git fetch: Deadline)
 func (a *AttestationCycle) RecordSourceFailure(ctx context.Context, st store.Store, cause error, onWrite func()) (recorded bool, err error) {
+	if !a.verifies() {
+		return false, nil
+	}
 	e, ok := spi.AsError(cause)
 	if !ok || e.Details["constraint"] != source.FetchDeadlineConstraint {
 		return false, nil
@@ -350,6 +395,8 @@ type attestationVerdict struct {
 	drops map[string]*AttestationError
 	// outcomes is the attestation outcome of each artifact the cycle kept.
 	outcomes map[string]AttestationOutcome
+	// bundles are the bundles layer step 2 evaluated, which the cycle links.
+	bundles []*snapshotBundle
 }
 
 // AttestationOutcome is the §4.7.11 attestation outcome of one artifact

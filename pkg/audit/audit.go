@@ -51,7 +51,10 @@ const (
 	EventLayerAttestationVerified  EventType = "layer.attestation_verified"
 	EventLayerAttestationFailed    EventType = "layer.attestation_failed"
 	EventLayerAttestationMarkReset EventType = "layer.attestation_mark_reset"
-	EventAdminGranted              EventType = "admin.granted"
+	// EventLayerAttestationLinksDowngraded records a §4.7.11 re-evaluation
+	// that changed links of a layer to unverified.
+	EventLayerAttestationLinksDowngraded EventType = "layer.attestation_links_downgraded"
+	EventAdminGranted                    EventType = "admin.granted"
 	// EventTenantManaged records a §7.3.3 tenant-management operation (create,
 	// update, or deactivate) by an operator. The §8.1 table is non-exhaustive;
 	// this makes runtime tenant provisioning auditable. Caller is the operator,
@@ -111,6 +114,7 @@ func AllEventTypes() []EventType {
 		EventLayerAttestationVerified,
 		EventLayerAttestationFailed,
 		EventLayerAttestationMarkReset,
+		EventLayerAttestationLinksDowngraded,
 		EventAdminGranted,
 		EventTenantManaged,
 		EventVisibilityDenied,

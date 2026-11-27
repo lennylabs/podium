@@ -100,6 +100,7 @@ var operationalEventTypes = []audit.EventType{
 	audit.EventLayerAttestationVerified,
 	audit.EventLayerAttestationFailed,
 	audit.EventLayerAttestationMarkReset,
+	audit.EventLayerAttestationLinksDowngraded,
 	audit.EventAdminGranted,
 	audit.EventTenantManaged,
 	audit.EventVisibilityDenied,

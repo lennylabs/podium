@@ -42,7 +42,7 @@ func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS,
 	if failure != nil {
 		return a.failedLayerStep(ctx, st, failure, kept, onWrite)
 	}
-	v := &attestationVerdict{layerTime: res.time, commit: res.commit}
+	v := &attestationVerdict{layerTime: res.time, commit: res.commit, bundles: res.bundles}
 	v.drops, v.outcomes = a.artifactStep(res.bundles, kept)
 	rec := a.layer.AttestationRecord
 	superseded, err := a.write(ctx, st, store.AttestationWrite{
@@ -70,7 +70,7 @@ func (a *AttestationCycle) failedLayerStep(ctx context.Context, st store.Store, 
 	if f.Refusal {
 		return nil, false, f
 	}
-	v := &attestationVerdict{failure: f, outcomes: map[string]AttestationOutcome{}}
+	v := &attestationVerdict{failure: f, outcomes: map[string]AttestationOutcome{}, bundles: a.evaluated}
 	for i := range kept {
 		v.outcomes[kept[i].ID] = AttestationOutcome{Outcome: OutcomeFailed, Code: f.Code, Scope: "layer", Constraint: f.Constraint()}
 	}

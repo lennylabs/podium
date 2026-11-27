@@ -1374,6 +1374,9 @@ func run(ctx context.Context, stop func()) error {
 	// PODIUM_MIGRATION_OBJECT_READ_TIMEOUT deadline. It is set here, before
 	// the listener serves any request.
 	registry := core.New(st, boundTenant, bootLayers).WithAdmission(signProvider, objStore, cfg.migrationObjectReadTimeout)
+	// Spec: §4.7.11 (Served outcome) — serving decides the policy validity
+	// of a verified version with the rules ingest applies.
+	registry = registry.WithAttestationPolicyCheck(cfg.ingestAttest.PolicyConstraint)
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
@@ -1991,6 +1994,9 @@ func run(ctx context.Context, stop func()) error {
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
 	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, useVectorOutbox, collocatedVec))
+	// Spec: §4.7.11 (Re-evaluation) — a register or an update that changes a
+	// layer's trust policy re-evaluates the layer's links.
+	layers.WithTrustPolicyChange(trustPolicyChangeHook(st, cfg.ingestAttest, auditSink, scrubber))
 
 	// §9: fire a §9.1 operational notification when the reingest path above fails
 	// to ingest a layer. Reuses the same NotificationProvider wired into the

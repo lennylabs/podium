@@ -58,6 +58,7 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 			return nil, nil, err
 		}
 	}
+	a.evaluated = bundles
 	name, err := a.layerSubjectName()
 	if err != nil {
 		return nil, attestFailure(CodeAttestationInvalid, "subject_name",
