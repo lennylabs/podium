@@ -147,6 +147,9 @@ func (s *SQLite) applySchema() error {
 			last_ingested_at TEXT,
 			repo_userinfo TEXT,
 			ingest_claim TEXT,
+			trust_mode TEXT NOT NULL DEFAULT '',
+			trust_requirements TEXT NOT NULL DEFAULT '',
+			trust_layer_root TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS vector_pending (
@@ -1086,6 +1089,10 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	if err != nil {
 		return err
 	}
+	trustReqs, err := trustRequirementsColumn(cfg.TrustRequirements)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -1098,16 +1105,16 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-			 repo_userinfo, ingest_claim)
+			 repo_userinfo, ingest_claim, trust_mode, trust_requirements, trust_layer_root)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-			(SELECT ingest_claim FROM layer_configs WHERE tenant_id = ? AND id = ?))`,
+			(SELECT ingest_claim FROM layer_configs WHERE tenant_id = ? AND id = ?), ?, ?, ?)`,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),
 		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
-		userinfo, cfg.TenantID, cfg.ID)
+		userinfo, cfg.TenantID, cfg.ID, cfg.TrustMode, trustReqs, cfg.TrustLayerRoot)
 	return err
 }
 
@@ -1117,7 +1124,7 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
 		FROM layer_configs
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
@@ -1133,7 +1140,7 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -1213,7 +1220,7 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 		SELECT tenant_id, id, source_type, repo, ref, root, local_path, ord,
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-		       repo_userinfo
+		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1275,7 +1282,7 @@ func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Tim
 func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	var cfg LayerConfig
 	var userDefined, public, org int
-	var repo, groups, users, createdAt string
+	var repo, groups, users, createdAt, trustReqs string
 	var deletedAt, lastIngestedAt, repoUserinfo sql.NullString
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
@@ -1283,8 +1290,12 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 		&cfg.Order, &userDefined, &cfg.Owner,
 		&public, &org, &groups, &users,
 		&cfg.WebhookSecret, &cfg.LastIngestedRef, &cfg.ForcePushPolicy, &cfg.GitProvider,
-		&createdAt, &deletedAt, &lastIngestedAt, &repoUserinfo)
+		&createdAt, &deletedAt, &lastIngestedAt, &repoUserinfo,
+		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot)
 	if err != nil {
+		return LayerConfig{}, err
+	}
+	if cfg.TrustRequirements, err = parseTrustRequirements(trustReqs); err != nil {
 		return LayerConfig{}, err
 	}
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(repo, repoUserinfo)

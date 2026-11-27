@@ -136,6 +136,15 @@ type LayerEndpoint struct {
 	// serverboot wires the §8.6 re-anchor so the rewritten head is anchored
 	// immediately rather than at the next periodic tick. Nil skips it.
 	afterErase func(context.Context)
+	// trustInstances reports the Sigstore instances the registry configures,
+	// which the §4.7.11 policy rules read. Nil knows public-good alone.
+	trustInstances layer.TrustInstances
+	// trustDefault is PODIUM_LAYER_TRUST_DEFAULT, which the no-requirement
+	// rule reads at the endpoints. Empty is none.
+	trustDefault string
+	// declaredLayer reports whether a layer is declared in registry.yaml,
+	// whose declaration alone sets its trust policy. Nil declares none.
+	declaredLayer func(tenantID, id string) bool
 }
 
 // NotificationFunc delivers one §9.1 operational notification. It mirrors
@@ -619,14 +628,21 @@ func (e *LayerEndpoint) emitAudit(r *http.Request, typ audit.EventType, target s
 // produced. A register, unregister, restore, and erase pass a zero before,
 // which every difference test reads as a change. Only update passes the
 // record it read, because only update can store what the layer already held.
+// trust carries the trust policy change fields (trustEventFields), nil for an
+// operation that changed no policy.
 //
 // Spec: §7.3.1, §8.1
-func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerConfig, action string) {
+func (e *LayerEndpoint) emitLayerEvent(r *http.Request, before, cfg store.LayerConfig, action string, trust map[string]string) {
 	typ := audit.EventLayerConfigChanged
 	if cfg.UserDefined {
 		typ = audit.EventLayerUserRegistered
 	}
 	fields := map[string]string{"action": action, "user_defined": boolString(cfg.UserDefined)}
+	// Spec: §4.7.11 (Policy changes) — a trust policy change records the
+	// previous and the new policy on the layer's event.
+	for k, v := range trust {
+		fields[k] = v
+	}
 	// §8.1: record the personal-layer owner so a layer.user_registered event
 	// names the user whose layer changed even when an admin acts on it.
 	if cfg.Owner != "" {
@@ -701,6 +717,7 @@ func layerConfigEqual(a, b store.LayerConfig) bool {
 		a.GitProvider == b.GitProvider &&
 		a.LastIngestedRef == b.LastIngestedRef &&
 		a.ForcePushPolicy == b.ForcePushPolicy &&
+		layer.TrustPolicyEqual(a, b) &&
 		timePtrEqual(a.LastIngestedAt, b.LastIngestedAt) &&
 		a.CreatedAt.Equal(b.CreatedAt) &&
 		timePtrEqual(a.DeletedAt, b.DeletedAt)
@@ -845,6 +862,12 @@ type LayerRegisterRequest struct {
 	RepoToken RepoSecret `json:"repo_token,omitempty"`
 	// ClearRepoCredential removes the stored repository credential.
 	ClearRepoCredential bool `json:"clear_repo_credential,omitempty"`
+	// TrustMode, TrustRequirements, and TrustLayerRoot are the §4.7.11 layer
+	// trust policy. A registration stores them as carried, with the derived
+	// source binding; an update reads them by presence (decodeTrustPatch).
+	TrustMode         string                   `json:"trust_mode,omitempty"`
+	TrustRequirements []store.TrustRequirement `json:"trust_requirements,omitempty"`
+	TrustLayerRoot    string                   `json:"trust_layer_root,omitempty"`
 }
 
 // RepoSecret is a repository credential member of a layer request. String and
@@ -1410,7 +1433,7 @@ func (e *LayerEndpoint) erase(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}
-		e.emitLayerEvent(r, store.LayerConfig{}, l, "erase")
+		e.emitLayerEvent(r, store.LayerConfig{}, l, "erase", nil)
 		purged = append(purged, l.ID)
 	}
 	redacted, err := e.eraseAudit(r, body, tenantID)
@@ -1574,6 +1597,11 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
+	trustP, err := decodeTrustPatch(body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	usernameSent, err := carriesRepoUsername(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
@@ -1624,6 +1652,28 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	if msg := visibilityEntryError(patch.Owner, groups, users); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
+	}
+	// spec: §7.3.1 (Layer trust policy) — an update that carries a trust
+	// policy member checks the policy the patch produces, after the
+	// visibility entry rule and above every field assignment and the
+	// rotation below. An update that carries none leaves the stored policy
+	// unchecked, so a policy a later configuration made invalid does not
+	// refuse an update of another member.
+	if trustP.carried() {
+		// spec: §7.3.1 (Layer trust policy) — a declared layer's policy is
+		// set in registry.yaml, which the next start re-applies.
+		// A patch that restates the stored policy changes nothing and is
+		// admitted, so a client that returns a layer object it read is.
+		patched := trustP.applyTo(cfg)
+		if e.isDeclared(cfg.TenantID, cfg.ID) {
+			if !layer.TrustPolicyEqual(patched, cfg) {
+				writeError(w, http.StatusBadRequest, "registry.invalid_argument", declaredTrustRefusal(cfg.ID))
+				return
+			}
+		} else if msg := e.trustPolicyError(patched); msg != "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+			return
+		}
 	}
 	// spec: §7.3.1 — the repository credential rule, read against the stored
 	// source type and registered repo because an update never changes the
@@ -1691,6 +1741,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.Owner = patch.Owner
 	}
 	cfg = vis.applyTo(cfg)
+	cfg = trustP.applyTo(cfg)
 	// spec: §7.3.1 — a patch that stores nothing writes no record and records
 	// no §8.1 event, so a body restating what the layer holds is answered 200
 	// with the unchanged layer object and leaves the audit stream reporting
@@ -1705,7 +1756,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec §8.1: a config mutation (including a secret rotation) is an
 	// auditable layer.config_changed / layer.user_registered event.
-	e.emitLayerEvent(r, before, cfg, "update")
+	e.emitLayerEvent(r, before, cfg, "update", trustEventFields(before, cfg))
 	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
@@ -1728,8 +1779,21 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	var req LayerRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	// spec: §7.3.1 (Layer trust policy) — the trust members are read by the
+	// same case-insensitive, presence-based decoder update uses, which also
+	// refuses a misspelled trust member and a null string member.
+	trustP, err := decodeTrustPatch(body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
@@ -1769,6 +1833,19 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	if msg := visibilityEntryError(req.Owner, req.Groups, req.Users); msg != "" {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 		return
+	}
+	// spec: §7.3.1 (Layer trust policy) — the policy the request carries, with
+	// the source binding derived from the request's repo, is checked with the
+	// request's own fields, before the stored layer is read.
+	// A declared layer's policy is set in registry.yaml, and its stored
+	// policy decides the registration below (declaredRegistrationError).
+	declared := e.isDeclared(tenantID, req.ID)
+	trust := trustP.applyTo(store.LayerConfig{SourceType: req.SourceType, Repo: req.Repo})
+	if !declared {
+		if msg := e.trustPolicyError(trust); msg != "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+			return
+		}
 	}
 	// spec: §7.3.1 — the layer-write authorization rule, on the path that
 	// reads as a creation. PutLayerConfig below is an upsert keyed on
@@ -1868,6 +1945,10 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		GitProvider:     req.GitProvider,
 		ForcePushPolicy: req.ForcePushPolicy,
 		CreatedAt:       time.Now().UTC(),
+		// Spec: §4.7.11 (Layer trust policy)
+		TrustMode:         trust.TrustMode,
+		TrustRequirements: trust.TrustRequirements,
+		TrustLayerRoot:    trust.TrustLayerRoot,
 	}
 
 	if userDefined {
@@ -1917,6 +1998,13 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(registered, sql.NullString{})
 	case exists && keepsStoredRemote(stored, req, cfg):
 		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(stored.CloneRepo(), sql.NullString{})
+	}
+	if declared {
+		if msg := e.declaredRegistrationError(stored, exists, trustP, trust, cfg); msg != "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+			return
+		}
+		cfg.TrustMode, cfg.TrustRequirements, cfg.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
 	}
 
 	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity
@@ -2015,7 +2103,11 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec §8.1: a user registering a personal layer emits
 	// layer.user_registered; an admin adding an admin-defined layer emits
 	// layer.config_changed.
-	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register")
+	prior := store.LayerConfig{}
+	if exists {
+		prior = stored
+	}
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register", trustEventFields(prior, cfg))
 
 	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
 	if cfg.SourceType == "git" {
@@ -2127,7 +2219,7 @@ func (e *LayerEndpoint) restore(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
-	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "restore")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "restore", nil)
 	resp := map[string]any{"restored": id}
 	if warnings := e.visibilityWarnings(cfg); len(warnings) > 0 {
 		resp["warnings"] = warnings
@@ -2172,7 +2264,7 @@ func (e *LayerEndpoint) unregister(w http.ResponseWriter, r *http.Request) {
 	}
 	// spec §8.1: unregistering a personal layer emits layer.user_registered;
 	// removing an admin-defined layer emits layer.config_changed.
-	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "unregister")
+	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "unregister", nil)
 	writeJSON(w, http.StatusOK, map[string]any{"unregistered": id})
 }
 

@@ -1008,6 +1008,9 @@ Every endpoint in this section that returns a layer returns the same object, wit
 | `users` | array | Visibility. `null` when the layer grants no user. |
 | `git_provider` | string | The provider whose signature scheme verifies this layer's inbound deliveries. Empty resolves to `github`. |
 | `force_push_policy` | string | `tolerant` or `strict`. Present on a layer that sets a policy and absent on one that does not. |
+| `trust_mode` | string | Trust mode: `none`, `warn`, `require`, or empty, which takes `PODIUM_LAYER_TRUST_DEFAULT`. See [Layer trust policy](../deployment/content/layers#layer-trust-policy). |
+| `trust_requirements` | array | The trust requirement, at most one, with any source binding members the registry derived. `null` when the layer has none. |
+| `trust_layer_root` | string | For a `local` layer, the `root` under which its content was signed. |
 | `last_ingested_at` | string | RFC 3339 timestamp of the most recent completed ingest. Absent until the layer has ingested once. |
 | `last_ingested_ref` | string | The commit SHA of the most recent completed ingest for a `git` source. |
 | `created_at` | string | RFC 3339 timestamp of the layer's registration. |
@@ -1085,6 +1088,7 @@ POST /v1/layers
 | `local_path` | No | The filesystem path on the registry host. |
 | `git_provider` | No | The Git provider whose webhook signature scheme verifies this layer's inbound deliveries. It applies to a `git` source alone. Omitting it resolves the layer to `github`. |
 | `force_push_policy` | No | `tolerant` or `strict`. |
+| `trust_mode`, `trust_requirements`, `trust_layer_root` | No | The [layer trust policy](../deployment/content/layers#layer-trust-policy). The registry derives the source binding of a signer of the layer's own repository before it stores the policy. |
 | `public`, `organization`, `groups`, `users` | No | Visibility. Read on a tenant admin's registration alone. |
 | `owner` | No | The layer owner. Read on a tenant admin's registration alone. |
 | `repo_username`, `repo_token` | No | The write-only repository credential. See [Repository credential](#repository-credential). |
@@ -1109,6 +1113,9 @@ POST /v1/layers
     "groups": ["acme-finance"],
     "users": null,
     "git_provider": "github",
+    "trust_mode": "",
+    "trust_requirements": null,
+    "trust_layer_root": "",
     "last_ingested_ref": "",
     "created_at": "2026-09-04T10:15:00Z",
     "deleted_at": null
@@ -1130,7 +1137,7 @@ The registration in the example has not ingested yet, so `last_ingested_at` is a
 
 | Code | When |
 |:--|:--|
-| `400 registry.invalid_argument` | `id` or `source_type` is missing; `force_push_policy` is not `tolerant` or `strict`; `git_provider` names no registered provider, or any `git_provider` is sent on a `local` source; or a [repository credential](#repository-credential) refusal applies. |
+| `400 registry.invalid_argument` | `id` or `source_type` is missing; `force_push_policy` is not `tolerant` or `strict`; `git_provider` names no registered provider, or any `git_provider` is sent on a `local` source; a [repository credential](#repository-credential) refusal applies; or the trust policy breaks a [policy rule](../deployment/content/layers#policy-rules). |
 | `400 registry.invalid_argument` with `details.constraint: "url_credential"` | The `http` or `https` `repo` carries userinfo, or a read would report the `repo` as `[redacted]`. |
 | `403 auth.forbidden` | [Layer write authorization](#layer-write-authorization) refuses the write, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). No `details.constraint`. |
 | `403 auth.forbidden` with `details.constraint: "local_source"` | [Local-source authorization](#local-source-authorization) refuses the registration. |
@@ -1363,6 +1370,7 @@ PUT  /v1/layers/update?id={id}
 |:--|:--|
 | `public`, `organization`, `groups`, `users` | By presence. See [Visibility members](#visibility-members). |
 | `ref`, `root`, `local_path`, `owner`, `git_provider`, `force_push_policy` | By value. A non-zero field replaces the corresponding value, and a zero field leaves it unchanged. |
+| `trust_mode`, `trust_requirements`, `trust_layer_root` | By presence, matched without regard to letter case. A member the body carries replaces the stored value, so `"trust_mode": ""` returns the layer to `PODIUM_LAYER_TRUST_DEFAULT` and `"trust_requirements": []` or `null` removes the requirement; `null` for `trust_mode` or `trust_layer_root` is refused. An update that carries one of them checks the resulting policy; one that carries none leaves the stored policy unchecked. A trust member that changes the policy of a layer declared in `registry.yaml` is refused. |
 | `repo_token`, `repo_username`, `clear_repo_credential` | See [Repository credential on update](#repository-credential-on-update). |
 | `rotate_webhook_secret` | Requests a webhook-secret rotation. The response then carries the new secret in `webhook_secret`. |
 
@@ -1372,7 +1380,7 @@ PUT  /v1/layers/update?id={id}
 
 | Code | When |
 |:--|:--|
-| `400 registry.invalid_argument` | `git_provider` names no registered provider, or any `git_provider` is sent for a layer whose stored source type is not `git`; or a repository credential refusal applies. |
+| `400 registry.invalid_argument` | `git_provider` names no registered provider, or any `git_provider` is sent for a layer whose stored source type is not `git`; a repository credential refusal applies; or the patched trust policy breaks a [policy rule](../deployment/content/layers#policy-rules). |
 | `400 registry.invalid_argument` with `details.constraint: "immutable_visibility"` | The patch asserts `owner` or a visibility field against a stored user-defined layer. |
 | `403 auth.forbidden` | Layer write authorization refuses the caller, or, on a registry in public mode, the request does not carry the [operator token](#operator-token-in-public-mode). |
 | `403 auth.forbidden` with `details.constraint: "local_source"` | The patch carries `local_path` and the caller does not hold the `admin` role. |

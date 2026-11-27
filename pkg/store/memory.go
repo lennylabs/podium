@@ -520,6 +520,7 @@ func (s *Memory) PutLayerConfig(_ context.Context, cfg LayerConfig) error {
 		return err
 	}
 	cfg.Repo, cfg.RegisteredRepo = repo, ""
+	cfg.TrustRequirements = cloneTrustRequirements(cfg.TrustRequirements)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.layers[layerKey(cfg.TenantID, cfg.ID)] = cfg
@@ -540,10 +541,13 @@ func (s *Memory) GetLayerConfig(_ context.Context, tenantID, id string) (LayerCo
 
 // splitStoredLayer applies the layer read rule to a copy of a stored config.
 // The memory store has no repo_userinfo column, so the rule reads Repo alone.
+// The trust requirements are copied so a caller that edits the returned
+// policy does not edit the stored one.
 //
 // Spec: §7.3.1 (Repository credentials)
 func splitStoredLayer(cfg LayerConfig) LayerConfig {
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(cfg.Repo, sql.NullString{})
+	cfg.TrustRequirements = cloneTrustRequirements(cfg.TrustRequirements)
 	return cfg
 }
 

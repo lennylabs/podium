@@ -71,6 +71,13 @@ func TestWakesWatchers_EveryField(t *testing.T) {
 		{"GitProvider", func(c *store.LayerConfig) { c.GitProvider = "gitlab" }, false},
 		{"LastIngestedRef", func(c *store.LayerConfig) { c.LastIngestedRef = "def456" }, false},
 		{"ForcePushPolicy", func(c *store.LayerConfig) { c.ForcePushPolicy = "strict" }, false},
+		// Spec: §4.7.11 — a trust policy decides what ingest admits, which no
+		// materialized tree observes until a cycle stores a version.
+		{"TrustMode", func(c *store.LayerConfig) { c.TrustMode = "require" }, false},
+		{"TrustRequirements", func(c *store.LayerConfig) {
+			c.TrustRequirements = []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: "i", Identity: "alice@acme.com"}}}}
+		}, false},
+		{"TrustLayerRoot", func(c *store.LayerConfig) { c.TrustLayerRoot = "skills" }, false},
 		{"LastIngestedAt", func(c *store.LayerConfig) { c.LastIngestedAt = &other }, false},
 		{"CreatedAt", func(c *store.LayerConfig) { c.CreatedAt = other }, false},
 		{"DeletedAt", func(c *store.LayerConfig) { c.DeletedAt = &other }, false},

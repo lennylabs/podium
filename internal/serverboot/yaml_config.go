@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"slices"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/identity"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 )
 
@@ -232,6 +235,85 @@ type yamlLayerEntry struct {
 	ID         string              `yaml:"id"`
 	Source     yamlLayerSource     `yaml:"source"`
 	Visibility yamlLayerVisibility `yaml:"visibility,omitempty"`
+	// TrustMode, TrustRequirements, and TrustLayerRoot are the §4.7.11 layer
+	// trust policy, in the form of the §7.3.1 layer object members of those
+	// names. TrustRequirements is a node so declaredTrustRequirements can
+	// refuse an unknown key with its line.
+	TrustMode         string    `yaml:"trust_mode,omitempty"`
+	TrustRequirements yaml.Node `yaml:"trust_requirements,omitempty"`
+	TrustLayerRoot    string    `yaml:"trust_layer_root,omitempty"`
+	// trustKeyErr records a misspelled trust key UnmarshalYAML found.
+	trustKeyErr error
+}
+
+// UnmarshalYAML decodes a layer entry and records a key that reads as a
+// trust policy member and is none, such as trust-mode or trust_mod, which
+// declaredTrustPolicy refuses with config.invalid_layer_trust, so a
+// misspelled policy key aborts the start instead of leaving the layer at the
+// default mode. Every other key keeps the decode's reading.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func (e *yamlLayerEntry) UnmarshalYAML(value *yaml.Node) error {
+	type plain yamlLayerEntry
+	if err := value.Decode((*plain)(e)); err != nil {
+		return err
+	}
+	keys, err := entryKeys(resolveAlias(value), 0)
+	if err != nil {
+		e.trustKeyErr = fmt.Errorf("%w (line %d)", err, value.Line)
+		return nil
+	}
+	for _, key := range keys {
+		if layer.IsTrustLikeName(key.Value) && !slices.Contains(layer.TrustMemberNames, key.Value) {
+			e.trustKeyErr = fmt.Errorf("the key %q (line %d) is not a trust policy member; the members are %s",
+				key.Value, key.Line, strings.Join(layer.TrustMemberNames, ", "))
+			break
+		}
+	}
+	return nil
+}
+
+// maxMergeDepth bounds the merge keys entryKeys follows, so a document that
+// nests merges deeply cannot recurse without limit. yaml.v3 refuses an
+// alias cycle before this runs. A deeper chain refuses the entry, because
+// the decode applies merged keys at any depth and a key past the bound
+// would otherwise escape the trust-prefix rule.
+const maxMergeDepth = 16
+
+// entryKeys returns the keys of a mapping node, including the keys it takes
+// through a merge key (<<), whose value is a mapping, an alias of one, or a
+// sequence of them. The trust-prefix rule reads merged keys, because the
+// decode applies them as if written in place. A merge chain deeper than
+// maxMergeDepth returns an error.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func entryKeys(m *yaml.Node, depth int) ([]*yaml.Node, error) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	if depth > maxMergeDepth {
+		return nil, fmt.Errorf("the layer entry nests merge keys (<<) more than %d deep", maxMergeDepth)
+	}
+	var keys []*yaml.Node
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		key, val := m.Content[i], resolveAlias(m.Content[i+1])
+		if key.Value != "<<" {
+			keys = append(keys, key)
+			continue
+		}
+		sources := []*yaml.Node{val}
+		if val.Kind == yaml.SequenceNode {
+			sources = val.Content
+		}
+		for _, src := range sources {
+			merged, err := entryKeys(resolveAlias(src), depth+1)
+			if err != nil {
+				return nil, err
+			}
+			keys = append(keys, merged...)
+		}
+	}
+	return keys, nil
 }
 
 // yamlLayerSource is the §4.6 `source:` block. Exactly one of git or

@@ -893,7 +893,7 @@ podium impact <artifact-id> [--registry <url>]
 
 The `podium layer` commands register, list, order, update, and remove the layers a registry composes. [Connecting layer sources](../deployment/content/layer-sources) covers Git and local sources as a task, and [Layered composition](../deployment/content/layers) covers precedence and visibility.
 
-Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `register`, `reingest`, and `watch` also fall back to `defaults.registry` in the merged `sync.yaml`.
+Every `podium layer` subcommand takes `--registry <url>`, which defaults to `PODIUM_REGISTRY` and is required. `register`, `show`, `reingest`, and `watch` also fall back to `defaults.registry` in the merged `sync.yaml`.
 
 Several layer commands refer to these authorization terms:
 
@@ -916,6 +916,7 @@ podium layer register --id <id> --local <path>
                       [--user-defined] [--owner <oidc-sub>]
                       [--public | --organization]
                       [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
+                      [<trust flags>]
 ```
 
 | Flag | Effect |
@@ -935,8 +936,41 @@ podium layer register --id <id> --local <path>
 | `--organization` | Organization-wide visibility. |
 | `--group <oidc-group>` | Grant visibility to an OIDC group. Repeatable. |
 | `--user <oidc-sub-or-email>` | Grant visibility to an OIDC subject or email. Repeatable. |
+| Trust flags | Set the layer's trust policy. See [Trust policy flags](#trust-policy-flags). |
 
 No flag takes the token as an argument value. The force-push policy is also settable with `podium layer update --force-push-policy` and through the `registry.yaml` key `source.git.force_push_policy`.
+
+#### Trust policy flags
+
+The trust flags set the layer's trust policy, which ingest verification of author attestations applies. The registry stores and validates the policy; no ingest step verifies attestations against it yet. [Layer trust policy](../deployment/content/layers#layer-trust-policy) describes the policy.
+
+| Flag | Effect |
+|:--|:--|
+| `--trust <none\|warn\|require>` | Trust mode. A layer without one takes `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
+| `--trust-signer <issuer>=<identity>` | A signer of the layer's requirement: an OIDC issuer and a certificate identity, split at the first `=`. Repeatable. |
+| `--trust-source-repository <uri>` | `source_repository` of each signer. |
+| `--trust-source-owner <uri>` | `source_repository_owner` of each signer. |
+| `--trust-source-repository-id <id>` | `source_repository_id` of each signer, the host's numeric repository identifier. |
+| `--trust-source-owner-id <id>` | `source_repository_owner_id` of each signer, the host's numeric owner identifier. |
+| `--trust-source-repository-ref <ref>` | `source_repository_ref` of each signer, such as `refs/heads/main`. |
+| `--trust-any-source` | Set `any_source` on each signer, for an issuer whose certificates carry no source fields. |
+| `--trust-any-ref` | Set `any_ref` on each signer, which accepts any source repository ref. |
+| `--trust-instance <name>` | Sigstore instance of each signer. Defaults to `public-good`. The name must be configured in `sigstore.instances` of `registry.yaml`. |
+| `--trust-layer-root <root>` | For a `local` layer, the `root` under which its content was signed. |
+
+The signer and binding flags build the one requirement of the policy, and the binding flags apply to every `--trust-signer`. A binding flag given with no `--trust-signer` exits 2 with an error that names the flag. A requirement with a `predicate_type` is set through the HTTP API or a `registry.yaml` declaration.
+
+For a signer of a `git` layer whose identity is a workflow in the layer's own repository, such as `https://github.com/acme/finance/.github/workflows/podium-attest.yml@refs/heads/main` on the layer `https://github.com/acme/finance`, the registry derives `source_repository` and `source_repository_ref` when the flags name neither. [Derived source binding](../deployment/content/layers#derived-source-binding) states the conditions. Any other signer with a URI identity needs `--trust-source-repository`, `--trust-source-owner`, `--trust-source-repository-id`, `--trust-source-owner-id`, or `--trust-any-source`, and a bound signer also needs `--trust-source-repository-ref` or `--trust-any-ref`.
+
+```
+podium layer register --id finance --repo https://github.com/acme/finance --ref podium/signed \
+  --trust require \
+  --trust-signer 'https://token.actions.githubusercontent.com=https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main' \
+  --trust-source-repository-id 123456 --trust-source-owner-id 7890 \
+  --trust-source-repository-ref refs/heads/main
+```
+
+A policy that breaks a rule is refused with `400 registry.invalid_argument` and a message that names the member and the rule, and the command exits 1. While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, a registration without `--trust` and `--trust-signer` leaves the layer with no requirement and is refused; `--trust none` registers it with no policy.
 
 #### Webhooks
 
@@ -1006,6 +1040,16 @@ The caller's identity determines which layers appear:
 Whether presenting no credential is itself a verification failure is the configured identity provider's rule.
 
 The command prints the registry's response: an object whose `layers` member holds the layer objects. A layer whose credential `--repo-token-file` can set carries `repo_credential`, which reports whether a repository credential is stored. No member carries the credential's value.
+
+### `podium layer show`
+
+Prints one layer, with its trust policy.
+
+```
+podium layer show <id>
+```
+
+The command reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output. The object includes `trust_mode`, `trust_requirements`, and `trust_layer_root`, with any source binding members the registry derived. The command exits 1 when the caller's layer read holds no layer with that ID, which includes a layer the caller cannot read, and when the read fails. It exits 2 on a usage error.
 
 ### `podium layer reorder`
 
@@ -1098,6 +1142,7 @@ podium layer update --id <id>
                     [--owner <oidc-sub>] [--public[=false]] [--organization[=false]]
                     [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
                     [--clear-groups] [--clear-users]
+                    [<trust flags>] [--clear-trust-requirements]
 ```
 
 | Flag | Effect |
@@ -1118,6 +1163,18 @@ podium layer update --id <id>
 | `--user <oidc-sub-or-email>` | Replace the stored user list with the values given on this invocation. Repeatable. |
 | `--clear-groups` | Empty the group list. |
 | `--clear-users` | Empty the user list. |
+| Trust flags | The [trust policy flags](#trust-policy-flags) of `podium layer register`. |
+| `--clear-trust-requirements` | Remove the layer's trust requirement. Cannot be combined with `--trust-signer`. |
+
+#### Trust policy updates
+
+- `--trust` replaces the stored mode, and `--trust-layer-root` replaces the stored root. Omitting a flag keeps the stored value.
+- A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored one.
+- `--clear-trust-requirements` removes the requirement. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
+- An update that carries no trust flag leaves the stored policy as it is.
+- A trust flag that changes the policy of a layer declared in `registry.yaml` is refused with `registry.invalid_argument` and a message stating that the layer's trust policy is declared in `registry.yaml`, because the next start re-applies the declaration. Change the declaration instead.
+- While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, an update that leaves the layer with no `trust_mode` and no requirement is refused, and so is a registration without trust flags.
+- Changing the policy of an admin-defined layer requires the per-tenant `admin` role, and the owner of a user-defined layer can change its own.
 
 #### Repository credential updates
 
@@ -1137,7 +1194,7 @@ The visibility flags withdraw as well as grant, because the update endpoint appl
 - Combining `--clear-groups` with `--group`, or `--clear-users` with `--user`, is refused before any request is sent. The command prints `error: --group cannot be combined with --clear-groups, and --user cannot be combined with --clear-users` and exits 2.
 - Withdrawing every axis leaves a layer that the visibility evaluator reports visible to no caller the registry resolves to a subject. Re-granting one axis restores it.
 - An unauthenticated registry keeps every layer visible, so a withdrawal applied there takes effect once an identity provider is configured.
-- A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility and repository credential included. A withdrawal or a credential change applied to a declared layer reverts at the next start. Make the change in the declaration to make it durable.
+- A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility, repository credential, and trust policy included. A withdrawal or a credential change applied to a declared layer reverts at the next start. Make the change in the declaration to make it durable. A trust flag on a declared layer is refused instead, as [Trust policy updates](#trust-policy-updates) states.
 
 #### User-defined layers
 
