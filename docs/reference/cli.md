@@ -237,6 +237,7 @@ The command walks every artifact of every layer under the root. To lint a single
 - The `DOMAIN.md` import checks.
 - The `DOMAIN.md` body-size warning, which registry ingest does not apply. The command does not run the warning on a `DOMAIN.md` `discovery:` block, which applies when the registry's `discovery.allow_per_domain_overrides` setting is false, because the command does not read that setting.
 - The catalog advisories: `lint.thin_description`, `lint.colliding_descriptions`, and `lint.near_duplicate_content`. Each is a warning. Registry ingest runs them over the layer it ingests and reports them without blocking the ingest, and the command runs them over every artifact it walks. [Skill lint checks](../authoring/frontmatter-reference#skill-lint-checks) describes each one and the `lint_suppress` field that silences it.
+- The `lint.non_portable_name` warning, which registry ingest reports beside the catalog advisories. [Checks that matter to curators](../managing/quality#checks-that-matter-to-curators) describes it.
 
 The command refuses each artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse, and each artifact whose `ARTIFACT.md` declares `extends:` or a removed type (`command` or `context`), before it runs any lint rule. Without `--json`, the command prints a `rejected: <id> (ingest.invalid_artifact): <reason>` line on standard error for each refused artifact. With `--json`, the artifact appears in `rejected` with `details.constraint: "manifest_unparseable"` for frontmatter that does not parse, `details.constraint: "extends_removed"` for an `extends:` refusal, and `details.constraint: "type_removed"` for a removed type. The checks run in that order, so an `ARTIFACT.md` that declares both `extends:` and a removed type reports `extends_removed`. In every case the command lints the remaining artifacts and exits 1. `PODIUM_LINT_*` environment variables set the size and similarity thresholds, as [Lint](configuration#lint) in the configuration reference lists.
 
@@ -301,6 +302,71 @@ The command exits 1 and names the directory in these cases:
 - The root holds several `.md` files and no `SKILL.md`.
 
 `--dry-run` runs the same checks before it reports the plan.
+
+### `podium attest`
+
+Writes the subjects that an author attestation of one layer signs: the layer subject with the layer digest, and one subject per artifact with its package digest. The command does not sign and sends no request to a registry. A signing tool, such as GitHub's `actions/attest-build-provenance` or `cosign attest-blob --statement`, signs the files it writes.
+
+```
+podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-subjects <n>] [--format checksums|statement]
+```
+
+| Flag | Effect |
+|:--|:--|
+| `<dir>` | Directory the layer root is resolved from. Default: the current directory. |
+| `--root <subpath>` | The layer's registered `root` below `<dir>`. Leading and trailing `/` characters are removed. A value with an empty, `.`, or `..` segment, a white space character, a control character, or a backslash is a usage error. |
+| `--commit <rev>` | Read the layer from the tree of this commit in the Git object database, such as `HEAD`, a branch name, or a commit hash. |
+| `--out <dir>` | Directory the files are written to, created when absent. Default: the current directory. |
+| `--max-subjects <n>` | Most subjects in one file, the layer subject included. At least 2. Default: 1024, the limit of GitHub's attestation action. |
+| `--format <format>` | `checksums` (the default) or `statement`. |
+
+The layer subject is named `.podium/layer` for a layer at the root of its source and `.podium/layer/<root>` for a layer with a `root`. Each artifact subject is named `<id>@<version>`, or the bare ID for a skill with no authored version and for a package whose manifest does not parse.
+
+#### Commit and checkout
+
+For a `git` layer, the registry digests the blob bytes and tree paths of the commit it ingests. Run the command with `--commit` so it reads the same bytes:
+
+```
+podium attest --root skills --commit HEAD --out attest-out
+```
+
+With `--commit`, the command finds the repository that holds `<dir>`, and the layer's path in the commit is the path of `<dir>` in the working tree joined with `--root`. It reads the tree with the walk registry ingest applies to a `git` snapshot, so line-ending rules, Git LFS filters, and symbolic links in the checkout do not affect the digests.
+
+Without `--commit`, the command reads the files on disk, as the registry reads a `local` layer. A checkout of a `git` layer then gives other digests than the registry's in these cases:
+
+- A `.gitattributes` line-ending rule, such as `eol=crlf`, or `core.autocrlf` converts the line endings of a checked-out file.
+- A Git LFS filter replaces a committed pointer with the object it names.
+- A symbolic link is checked out as a link. The command reads the target's bytes, and the registry reads the link text.
+- Two committed paths that differ only in letter case collide on a case-insensitive file system, such as the default file systems of macOS and Windows.
+
+A signature over such digests does not match the registry's digests of the commit. When `<dir>` lies in a Git working tree and `--commit` is absent, the command writes a warning on standard error that names `--commit HEAD`.
+
+#### Output files
+
+With `--format checksums`, each file is in the format of the `sha256sum` tool: one line per subject with the 64 lowercase hexadecimal digits of the digest, two spaces, and the subject name. With `--format statement`, each file holds one in-toto Statement v1 document whose `predicateType` is `https://slsa.dev/provenance/v1` and whose `predicate` is empty.
+
+Each file begins with the layer subject and lists the artifacts in ascending order of ID. A layer with more artifacts than `--max-subjects` allows in one file is written over several files, each beginning with the layer subject. The files are named `podium-subjects-<n>.sha256` and `podium-statement-<n>.json`, numbered from 1. Before it writes, the command removes the files of either name in `--out` that an earlier run left. It prints the path of each file it writes on standard output, one per line.
+
+```
+$ podium attest --root skills --commit HEAD --out attest-out
+attest-out/podium-subjects-1.sha256
+$ cat attest-out/podium-subjects-1.sha256
+c07d...3b  .podium/layer/skills
+9f2c...e1  finance/close-books@1.4.0
+41aa...07  finance/ledger-mcp@2.0.1
+```
+
+#### Warnings and refusals
+
+The command writes the `lint.non_portable_name` warning on standard error for each package whose ID or resource path holds a segment that is not a portable name, such as `aux`, `CON .txt`, or `GIT~1`. The warning does not change the exit status. [Checks that matter to curators](../managing/quality#checks-that-matter-to-curators) describes the rule.
+
+A package whose ID holds a control character, a white space character, or a backslash has no subject name, so the layer that holds it cannot be attested. The command then names the package's path with those characters escaped, exits 1, and writes and removes no file. A package whose directory name holds a line feed is one such case.
+
+| Exit code | Meaning |
+|:--|:--|
+| `0` | The files were written. |
+| `1` | The layer root does not exist or is not a directory, `--commit` names no commit or the commit holds no directory at the layer's path, the walk of the layer failed, a package has no subject name, or a file could not be removed or written. |
+| `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, a `--root` the rule above refuses, or more than one `<dir>`. |
 
 ---
 
