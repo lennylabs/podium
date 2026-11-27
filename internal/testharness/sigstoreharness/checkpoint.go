@@ -22,6 +22,11 @@ func checkpointBody(size int, root []byte) string {
 // the §4.7.9 verifier tries every trusted key and does not read the hint.
 // ECDSA signs SHA-256(body) and Ed25519 signs body, as Rekor v2 does.
 func signNote(body string, key crypto.Signer) (string, error) {
+	return signNoteAs(body, checkpointOrigin, key)
+}
+
+// signNoteAs is signNote with the signer name of the signature line.
+func signNoteAs(body, name string, key crypto.Signer) (string, error) {
 	pkixPub, err := x509.MarshalPKIXPublicKey(key.Public())
 	if err != nil {
 		return "", fmt.Errorf("checkpoint key: %w", err)
@@ -41,7 +46,7 @@ func signNote(body string, key crypto.Signer) (string, error) {
 		return "", fmt.Errorf("sign checkpoint: %w", err)
 	}
 	line := base64.StdEncoding.EncodeToString(append(hint[:4], sig...))
-	return body + "\n" + "— " + checkpointOrigin + " " + line + "\n", nil
+	return body + "\n" + "— " + name + " " + line + "\n", nil
 }
 
 // signedInclusion proves body at index of a size-leaf tree and signs the
