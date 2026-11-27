@@ -3,7 +3,6 @@ package serverboot
 import (
 	"context"
 	"database/sql"
-	"net"
 	"strings"
 	"testing"
 
@@ -164,10 +163,7 @@ func TestRun_BindFailureDoesNotRewriteLayerRows(t *testing.T) {
 	legacy := earlierFormLayer{tenant: orgIDForName(defaultOrgName), id: "legacy"}
 	f.seedEarlierFormLayers(t, legacy)
 
-	held, err := net.Listen("tcp", f.addr)
-	if err != nil {
-		t.Fatalf("hold the bind address: %v", err)
-	}
+	held := f.holdBind(t)
 	defer func() { _ = held.Close() }()
 
 	_, runErr := f.boot(t)

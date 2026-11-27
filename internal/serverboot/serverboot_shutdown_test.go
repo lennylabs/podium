@@ -2,9 +2,11 @@ package serverboot
 
 import (
 	"context"
+	"log"
 	"net"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -108,18 +110,6 @@ func TestStartStoreRetentionScheduler_StopsOnContextCancel(t *testing.T) {
 	cancel()
 }
 
-// freeAddr returns a loopback address whose port was free a moment ago.
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
-}
-
 // dialOK reports whether addr accepts a TCP connection within the deadline.
 func dialOK(addr string, within time.Duration) bool {
 	deadline := time.Now().Add(within)
@@ -150,17 +140,32 @@ func healthOK(addr string, within time.Duration) bool {
 	return false
 }
 
+// listeningAddr returns the address in run's "podium-server listening on"
+// line, or "" before run has written it. run writes the line after its own
+// bind succeeded and immediately before it serves, so a /healthz answer on
+// that address comes from that run. Under PODIUM_BIND on port 0 the address
+// names the port the kernel picked.
+func listeningAddr(logs *syncBuffer) string {
+	m := listeningLine.FindStringSubmatch(logs.String())
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// listeningLine matches run's listening line.
+var listeningLine = regexp.MustCompile(`podium-server listening on (\S+) \(`)
+
 // Spec: §13.9 / §13.10 — run boots the standalone server (SQLite, filesystem
 // object store, no auth) and shuts down gracefully when its context is
 // cancelled, the in-process equivalent of a SIGTERM. It exercises the full boot
 // path (config, store, background daemons, serve loop), so the graceful-shutdown
 // wiring is covered in-process and not only by the subprocess e2e smoke.
 func TestRun_StandaloneGracefulShutdown(t *testing.T) {
-	addr := freeAddr(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("PODIUM_BIND", addr)
+	t.Setenv("PODIUM_BIND", "127.0.0.1:0")
 	t.Setenv("PODIUM_POSTGRES_DSN", "") // force the standalone SQLite path
 	t.Setenv("PODIUM_S3_ENDPOINT", "")  // force the filesystem object store
 	t.Setenv("PODIUM_CONFIG_FILE", "")
@@ -168,11 +173,30 @@ func TestRun_StandaloneGracefulShutdown(t *testing.T) {
 	t.Setenv("PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS", "86400")
 	t.Setenv("PODIUM_READONLY_PROBE_FAILURES", "3")
 
+	logs := &syncBuffer{}
+	prev := log.Writer()
+	log.SetOutput(logs)
+	defer log.SetOutput(prev)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	errc := make(chan error, 1)
 	go func() { errc <- run(ctx, func() {}) }()
 
-	if !healthOK(addr, 20*time.Second) {
+	ready := false
+	for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline) && !ready; {
+		select {
+		case err := <-errc:
+			cancel()
+			t.Fatalf("run returned before serving: %v", err)
+		default:
+		}
+		addr := listeningAddr(logs)
+		ready = addr != "" && healthOK(addr, 200*time.Millisecond)
+		if !ready {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if !ready {
 		cancel()
 		t.Fatal("standalone server did not become ready")
 	}
