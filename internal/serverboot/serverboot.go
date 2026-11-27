@@ -1028,10 +1028,9 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
-	// §4.7.11: build the Sigstore instances and start the public-good root
-	// refresh. The refresh runs in the background, so the start does not
-	// wait on the network, and it ends with ctx.
-	if err := cfg.startAttestationRoots(ctx); err != nil {
+	// §4.7.11: build the Sigstore instances before any ingest. The
+	// public-good refresh starts once the registry serves, below.
+	if err := cfg.loadAttestationRoots(); err != nil {
 		return err
 	}
 
@@ -2050,6 +2049,10 @@ func run(ctx context.Context, stop func()) error {
 	// above, so this line reports an ephemeral port rather than the zero the
 	// operator configured.
 	log.Printf("podium-server listening on %s (mode=%s)", cfg.bind, cfg.modeBanner())
+	// §4.7.11: refresh the public-good root in the background, so the start
+	// does not wait on the network. The refresh stops before run returns.
+	stopRefresh := cfg.runAttestationRefresh(ctx)
+	defer stopRefresh()
 	return serveUntilShutdown(ctx, stop, httpServer, ln)
 }
 

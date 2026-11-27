@@ -85,7 +85,7 @@ type attestationConfig struct {
 	// errs holds every refusal, in the order of the settings.
 	errs []error
 
-	// instances is filled by startAttestationRoots: every configured
+	// instances is filled by loadAttestationRoots: every configured
 	// instance by name, public-good included.
 	instances map[string]sign.AttestationInstance
 	// publicGood is the refreshed public-good source, nil when rootFile is
@@ -239,14 +239,13 @@ func publicGoodRootDir(sqlitePath string) string {
 	return filepath.Join(filepath.Dir(sqlitePath), publicGoodRootDirSegment, sign.PublicGoodInstance)
 }
 
-// startAttestationRoots builds every configured instance and starts the
-// public-good refresh, which runs until ctx ends. It makes no network call
-// itself: the first refresh runs in the background, and until it completes
-// the instance serves the copy on disk or the embedded copy. It logs the
-// root of each instance and the SHA-1 timestamp authorities of each root.
+// loadAttestationRoots builds every configured instance with no network
+// call: the public-good instance serves the copy on disk or the embedded
+// copy until runAttestationRefresh completes a refresh. It logs the root of
+// each instance and the SHA-1 timestamp authorities of each root.
 //
 // Spec: §4.7.11
-func (c *Config) startAttestationRoots(ctx context.Context) error {
+func (c *Config) loadAttestationRoots() error {
 	a := &c.attestation
 	a.instances = map[string]sign.AttestationInstance{}
 	if a.rootFile == "" {
@@ -268,7 +267,6 @@ func (c *Config) startAttestationRoots(ctx context.Context) error {
 			Name: sign.PublicGoodInstance, Root: src, TransparencyLog: true, CertificateTransparency: true,
 		}
 		logRootStatus(sign.PublicGoodInstance, "TUF refresh", src.Status())
-		go src.Run(ctx)
 	}
 	for _, fi := range a.files {
 		a.instances[fi.name] = sign.AttestationInstance{
@@ -277,6 +275,30 @@ func (c *Config) startAttestationRoots(ctx context.Context) error {
 		logRootStatus(fi.name, fi.file, sign.StatusOf(fi.root, fi.readAt))
 	}
 	return nil
+}
+
+// runAttestationRefresh starts the background refresh of the public-good
+// root and returns the function that stops it: the stop cancels the
+// refresh and waits for it to return, so a shutdown leaves no request or
+// write to the root directory behind. Under a static root file it starts
+// nothing.
+//
+// Spec: §4.7.11
+func (c *Config) runAttestationRefresh(ctx context.Context) (stop func()) {
+	src := c.attestation.publicGood
+	if src == nil {
+		return func() {}
+	}
+	ctx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		src.Run(ctx)
+	}()
+	return func() {
+		cancel()
+		<-done
+	}
 }
 
 // logRootStatus writes the §4.7.11 start report of one instance.

@@ -138,7 +138,8 @@ type TUFRootConfig struct {
 	// Clock supplies the refresh time and the age (default clock.Real).
 	Clock clock.Clock
 	// HTTPClient sends the TUF requests (default a client with no timeout
-	// of its own: the refresh deadline bounds every request).
+	// of its own and no kept connections: the refresh deadline bounds every
+	// request).
 	HTTPClient *http.Client
 	// Jitter returns a value in [0, 1); a retry delay is multiplied by 0.5
 	// plus that value (default math/rand/v2).
@@ -215,7 +216,12 @@ func (c *TUFRootConfig) fill() error {
 		c.Clock = clock.Real{}
 	}
 	if c.HTTPClient == nil {
-		c.HTTPClient = &http.Client{}
+		// One refresh a day gains nothing from a kept connection, and an
+		// idle HTTP/2 connection would keep a reader goroutine alive past
+		// the process context.
+		t := http.DefaultTransport.(*http.Transport).Clone()
+		t.DisableKeepAlives = true
+		c.HTTPClient = &http.Client{Transport: t}
 	}
 	if c.Jitter == nil {
 		c.Jitter = rand.Float64
@@ -345,6 +351,7 @@ func (s *TUFAttestationRoot) Status() AttestationRootStatus {
 func (s *TUFAttestationRoot) Refresh(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
+	defer s.cfg.HTTPClient.CloseIdleConnections()
 	raw, err := s.fetch(ctx)
 	if err != nil {
 		return fmt.Errorf("attestation: refresh the public-good root: %w", err)

@@ -278,9 +278,11 @@ func TestStartAttestationRoots_RefreshesPublicGood(t *testing.T) {
 	c.sigstoreMirror, c.sigstoreTUFRoot = repo.URL(), repo.RootJSON()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	if err := c.startAttestationRoots(ctx); err != nil {
-		t.Fatalf("startAttestationRoots: %v", err)
+	if err := c.loadAttestationRoots(); err != nil {
+		t.Fatalf("loadAttestationRoots: %v", err)
 	}
+	stopRefresh := c.runAttestationRefresh(ctx)
+	defer stopRefresh()
 	inst := c.AttestationInstances()
 	pg, ok := inst[sign.PublicGoodInstance]
 	if !ok || !pg.TransparencyLog || !pg.CertificateTransparency {
@@ -327,9 +329,10 @@ func TestStartAttestationRoots_StaticPublicGoodFile(t *testing.T) {
 		t.Fatalf("validate: %v", err)
 	}
 	c.sigstoreMirror, c.sigstoreTUFRoot = repo.URL(), repo.RootJSON()
-	if err := c.startAttestationRoots(context.Background()); err != nil {
-		t.Fatalf("startAttestationRoots: %v", err)
+	if err := c.loadAttestationRoots(); err != nil {
+		t.Fatalf("loadAttestationRoots: %v", err)
 	}
+	c.runAttestationRefresh(context.Background())()
 	if c.attestation.publicGood != nil {
 		t.Fatal("a refreshed source was built beside the static root file")
 	}
