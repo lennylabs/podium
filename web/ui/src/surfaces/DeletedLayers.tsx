@@ -219,7 +219,14 @@ export function DeletedLayers({
       >
         {restored}
       </p>
-      <LayerWarnings warnings={restoreWarnings} />
+      {/* §7.3.1: the warning a restore returns is announced through a live
+          region mounted on every state of the surface, for the reason the
+          announcement above is, and the visible banner below it carries no
+          role of its own so the text is not read out twice. */}
+      <p className="assistive-only" role="status" aria-live="polite" data-testid="restore-warning-announcement">
+        {restoreWarnings.join(' ')}
+      </p>
+      <LayerWarnings warnings={restoreWarnings} live={false} />
       {refusal !== null && <RestoreRefusal error={refusal} />}
       {/* What a restore does, stated where the reader decides to press it.
           The precedence it returns to and the ID collision that refuses it

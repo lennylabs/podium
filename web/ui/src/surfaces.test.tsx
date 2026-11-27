@@ -21689,9 +21689,41 @@ describe("the unapplied-visibility warning", () => {
     render(<App />);
     await screen.findByLabelText("Recently unregistered");
     expect(screen.queryByTestId("layer-warnings")).toBeNull();
+    // The live region is mounted before the write lands, so the warning is in
+    // the accessibility tree at the moment its text arrives.
+    const region = screen.getByTestId("restore-warning-announcement");
+    expect(region.getAttribute("role")).toBe("status");
+    expect(region.textContent).toBe("");
     fireEvent.click(await screen.findByRole("button", { name: "Restore alice-personal" }));
     await waitFor(() => {
       expect(screen.getByTestId("layer-warnings").textContent).toContain(warning);
     });
+    expect(screen.getByTestId("restore-warning-announcement").textContent).toBe(warning);
+    // The visible banner carries no role of its own, so the warning is
+    // announced once, through the region that was already mounted.
+    const banner = screen.getByTestId("layer-warnings").firstElementChild;
+    expect(banner?.getAttribute("role")).toBeNull();
+  });
+
+  it("shows the warning an update without a secret rotation returns", async () => {
+    stubRegistry({
+      "/v1/ui/session": { body: posture({ subject: "alice@acme.com", layer_capabilities: { manage_any_layer: true } }) },
+      "/v1/layers": { body: { layers: [adminLayer()] } },
+      "PUT /v1/layers/update": { body: { layer: adminLayer(), warnings: [warning] } },
+    });
+    goTo("#/layers");
+    render(<App />);
+    await screen.findByLabelText("Layer panel");
+    openRowActions("company");
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
+    const form = await screen.findByLabelText("Update company");
+    fireEvent.submit(form);
+    await screen.findByText("Layer company is updated.");
+    // No secret came back, so the outcome renders without the reveal, and the
+    // warning sits beside it in that branch too.
+    expect(screen.queryByLabelText("Webhook secret")).toBeNull();
+    const block = screen.getByTestId("layer-warnings");
+    expect(block.textContent).toContain(warning);
+    expect(block.firstElementChild?.getAttribute("role")).toBe("status");
   });
 });
