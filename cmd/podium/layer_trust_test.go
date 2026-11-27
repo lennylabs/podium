@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/server"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -146,5 +147,47 @@ func TestLayerShow(t *testing.T) {
 	}
 	if err := writeLayerObject(&out, []byte("not json"), "finance"); err == nil {
 		t.Error("a body that is not JSON was written")
+	}
+}
+
+// Spec: §7.3.1 (Layer CLI), §4.7.11 (Requirements file) — `podium layer
+// show <id> --requirements` writes the layer's requirements, with the
+// derived members, as a requirements file that `podium attest check`
+// reads, and exits 1 for a layer with no requirement.
+func TestLayerShow_Requirements(t *testing.T) {
+	base, st := trustCLIServer(t)
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{TenantID: "default", ID: "finance", SourceType: "git", Repo: cliTrustRepo,
+		TrustMode: "require", TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: cliTrustIssuer, Identity: cliTrustIdentity, SourceRepository: cliTrustRepo, SourceRepositoryRef: "refs/heads/main"}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutLayerConfig(context.Background(), store.LayerConfig{TenantID: "default", ID: "open", SourceType: "git", Repo: cliTrustRepo}); err != nil {
+		t.Fatal(err)
+	}
+	if rc := layerShow([]string{"--registry", base, "finance", "--requirements"}); rc != 0 {
+		t.Errorf("show --requirements rc = %d", rc)
+	}
+	if rc := layerShow([]string{"--registry", base, "--requirements", "open"}); rc != 1 {
+		t.Errorf("show --requirements of a layer with no requirement rc = %d, want 1", rc)
+	}
+	var out bytes.Buffer
+	body := []byte(`{"layers":[{"id":"finance","trust_requirements":[{"signers":[{"issuer":"i","identity":"https://acme.test/w","source_repository":"r","source_repository_ref":"refs/heads/main","instance":"github"}]}]}]}`)
+	if err := writeLayerRequirements(&out, body, "finance"); err != nil {
+		t.Fatal(err)
+	}
+	f, err := layer.ParseRequirementsFile(out.Bytes())
+	if err != nil || len(f.TrustRequirements) != 1 || f.TrustRequirements[0].Signers[0].Instance != "github" {
+		t.Fatalf("file = %s, %v", out.String(), err)
+	}
+	if err := layer.CheckRequirements(f.TrustRequirements, func(n string) bool { return n == "github" }); err != nil {
+		t.Errorf("the written file breaks a rule: %v", err)
+	}
+	for name, b := range map[string]string{
+		"absent layer":   `{"layers":[]}`,
+		"unknown member": `{"layers":[{"id":"finance","trust_requirements":[{"signers":[],"bogus":1}]}]}`,
+		"null":           `{"layers":[{"id":"finance","trust_requirements":null}]}`,
+	} {
+		if err := writeLayerRequirements(&out, []byte(b), "finance"); err == nil {
+			t.Errorf("%s: written", name)
+		}
 	}
 }
