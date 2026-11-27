@@ -258,7 +258,12 @@ func (e *yamlLayerEntry) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode((*plain)(e)); err != nil {
 		return err
 	}
-	for _, key := range entryKeys(resolveAlias(value), 0) {
+	keys, err := entryKeys(resolveAlias(value), 0)
+	if err != nil {
+		e.trustKeyErr = fmt.Errorf("%w (line %d)", err, value.Line)
+		return nil
+	}
+	for _, key := range keys {
 		if layer.IsTrustLikeName(key.Value) && !slices.Contains(layer.TrustMemberNames, key.Value) {
 			e.trustKeyErr = fmt.Errorf("the key %q (line %d) is not a trust policy member; the members are %s",
 				key.Value, key.Line, strings.Join(layer.TrustMemberNames, ", "))
@@ -270,18 +275,24 @@ func (e *yamlLayerEntry) UnmarshalYAML(value *yaml.Node) error {
 
 // maxMergeDepth bounds the merge keys entryKeys follows, so a document that
 // nests merges deeply cannot recurse without limit. yaml.v3 refuses an
-// alias cycle before this runs.
+// alias cycle before this runs. A deeper chain refuses the entry, because
+// the decode applies merged keys at any depth and a key past the bound
+// would otherwise escape the trust-prefix rule.
 const maxMergeDepth = 16
 
 // entryKeys returns the keys of a mapping node, including the keys it takes
 // through a merge key (<<), whose value is a mapping, an alias of one, or a
 // sequence of them. The trust-prefix rule reads merged keys, because the
-// decode applies them as if written in place.
+// decode applies them as if written in place. A merge chain deeper than
+// maxMergeDepth returns an error.
 //
 // Spec: §7.3.1 (Layer trust policy)
-func entryKeys(m *yaml.Node, depth int) []*yaml.Node {
-	if m == nil || m.Kind != yaml.MappingNode || depth > maxMergeDepth {
-		return nil
+func entryKeys(m *yaml.Node, depth int) ([]*yaml.Node, error) {
+	if m == nil || m.Kind != yaml.MappingNode {
+		return nil, nil
+	}
+	if depth > maxMergeDepth {
+		return nil, fmt.Errorf("the layer entry nests merge keys (<<) more than %d deep", maxMergeDepth)
 	}
 	var keys []*yaml.Node
 	for i := 0; i+1 < len(m.Content); i += 2 {
@@ -295,10 +306,14 @@ func entryKeys(m *yaml.Node, depth int) []*yaml.Node {
 			sources = val.Content
 		}
 		for _, src := range sources {
-			keys = append(keys, entryKeys(resolveAlias(src), depth+1)...)
+			merged, err := entryKeys(resolveAlias(src), depth+1)
+			if err != nil {
+				return nil, err
+			}
+			keys = append(keys, merged...)
 		}
 	}
-	return keys
+	return keys, nil
 }
 
 // yamlLayerSource is the §4.6 `source:` block. Exactly one of git or

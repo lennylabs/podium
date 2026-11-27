@@ -274,7 +274,7 @@ func derivableRepository(sourceType, repo string) (string, bool) {
 		u.Opaque != "" || u.Host == "" || strings.HasSuffix(u.Host, ".") {
 		return "", false
 	}
-	if !hostChars.MatchString(u.Host) {
+	if !derivableHost(u.Host) {
 		return "", false
 	}
 	path := u.Path
@@ -289,17 +289,37 @@ func derivableRepository(sourceType, repo string) (string, bool) {
 		return "", false
 	}
 	segs := strings.Split(strings.TrimPrefix(path, "/"), "/")
-	if !strings.HasPrefix(path, "/") || len(segs) != 2 || !segmentChars.MatchString(segs[0]) || !segmentChars.MatchString(segs[1]) {
+	if !strings.HasPrefix(path, "/") || len(segs) != 2 || !derivableSegment(segs[0]) || !derivableSegment(segs[1]) {
 		return "", false
 	}
 	return "https://" + u.Host + path, true
 }
 
-// hostChars and segmentChars are the characters a derivable repository URL
-// holds in its host and in its owner and repository segments. A space or any
-// other character derives nothing.
+// derivableHost reports whether host is a DNS name of the derivable form:
+// dot-separated labels of letters, digits, and inner hyphens. An empty
+// label, a label that begins or ends with a hyphen, and any other character
+// derive nothing.
+func derivableHost(host string) bool {
+	for label := range strings.SplitSeq(host, ".") {
+		if !hostLabel.MatchString(label) {
+			return false
+		}
+	}
+	return true
+}
+
+// derivableSegment reports whether seg is an owner or repository segment of
+// the derivable form. The dot segments . and .. name a path a client
+// resolves rather than a repository, so they derive nothing.
+func derivableSegment(seg string) bool {
+	return seg != "." && seg != ".." && segmentChars.MatchString(seg)
+}
+
+// hostLabel and segmentChars are the characters a derivable repository URL
+// holds in a host label and in its owner and repository segments. A space or
+// any other character derives nothing.
 var (
-	hostChars    = regexp.MustCompile(`\A[A-Za-z0-9.-]+\z`)
+	hostLabel    = regexp.MustCompile(`\A[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?\z`)
 	segmentChars = regexp.MustCompile(`\A[A-Za-z0-9._-]+\z`)
 )
 

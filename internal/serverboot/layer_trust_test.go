@@ -302,17 +302,21 @@ func TestIsDeclaredLayer(t *testing.T) {
 }
 
 // Spec: §7.3.1 (Layer trust policy) — entryKeys follows merge keys to a
-// bounded depth.
+// bounded depth and refuses a deeper chain, whose merged keys the decode
+// would still apply.
 func TestEntryKeys_BoundsMergeDepth(t *testing.T) {
 	inner := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "trust_mod"}, {Kind: yaml.ScalarNode, Value: "x"}}}
-	m := inner
-	for range maxMergeDepth + 2 {
-		m = &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, m}}
+	chain := func(n int) *yaml.Node {
+		m := inner
+		for range n {
+			m = &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, m}}
+		}
+		return m
 	}
-	if keys := entryKeys(m, 0); len(keys) != 0 {
-		t.Errorf("entryKeys past the depth bound = %d keys", len(keys))
+	if keys, err := entryKeys(chain(maxMergeDepth+1), 0); err == nil || len(keys) != 0 {
+		t.Errorf("entryKeys past the depth bound = %d keys, err %v; want a refusal", len(keys), err)
 	}
-	if keys := entryKeys(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, inner}}, 0); len(keys) != 1 || keys[0].Value != "trust_mod" {
-		t.Errorf("entryKeys of one merge = %v", keys)
+	if keys, err := entryKeys(chain(maxMergeDepth), 0); err != nil || len(keys) != 1 || keys[0].Value != "trust_mod" {
+		t.Errorf("entryKeys at the depth bound = %v, err %v", keys, err)
 	}
 }

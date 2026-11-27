@@ -93,6 +93,28 @@ func TestDeriveSourceBinding_CharacterSet(t *testing.T) {
 	}
 }
 
+// Spec: §4.7.11 (Derived source binding) — a dot segment, an empty host
+// label, and a host label that begins or ends with a hyphen are outside the
+// https://<host>/<owner>/<repo> form and derive nothing.
+func TestDeriveSourceBinding_OutsideTheForm(t *testing.T) {
+	t.Parallel()
+	for _, repo := range []string{
+		"https://github.com/acme/..",
+		"https://github.com/../x",
+		"https://github.com/./x",
+		"https://github.com/acme/.",
+		"https://github..com/acme/x",
+		"https://-github.com/acme/x",
+		"https://github-.com/acme/x",
+		"https://.github.com/acme/x",
+	} {
+		reqs := []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: ghIssuer, Identity: repo + "/.github/workflows/a.yml@refs/heads/main"}}}}
+		if got := layer.DeriveSourceBinding("git", repo, reqs)[0].Signers[0]; got.SourceRepository != "" {
+			t.Errorf("%s derived source_repository %q, want none", repo, got.SourceRepository)
+		}
+	}
+}
+
 // Spec: §4.7.11 (Derived source binding) — the derivation applies only to a
 // git layer's signer with a URI identity under the repository's workflows
 // path that names no source binding and no any_source; it keeps a named ref
