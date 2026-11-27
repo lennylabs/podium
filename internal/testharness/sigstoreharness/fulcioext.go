@@ -151,6 +151,15 @@ func LeafDuplicateExtension(oid asn1.ObjectIdentifier, value string) LeafOpt {
 	}
 }
 
+// LeafWithoutEKU issues the leaf with no extended-key-usage extension.
+func LeafWithoutEKU() LeafOpt { return func(c *leafConfig) { c.eku = nil } }
+
+// LeafAnyUsageOnly issues the leaf with the any-purpose usage as its only
+// extended key usage.
+func LeafAnyUsageOnly() LeafOpt {
+	return func(c *leafConfig) { c.eku = []x509.ExtKeyUsage{x509.ExtKeyUsageAny} }
+}
+
 // LeafWithoutCodeSigning issues the leaf with the server-authentication
 // extended key usage only.
 func LeafWithoutCodeSigning() LeafOpt {

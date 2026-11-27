@@ -102,16 +102,24 @@ func isLowerHex64(s string) bool {
 // §4.7.11 media type and envelope conditions. The media type is compared
 // before sigstore-go validates the bundle, because the library also
 // validates a version 0.1 bundle, which carries an inclusion promise and
-// no inclusion proof.
+// no inclusion proof. Where the bundle names the media type twice, once as
+// mediaType and once as media_type, protojson refuses the duplicate field.
 //
 // Spec: §4.7.11.
 func parseAttestationBundle(raw []byte) (*bundle.Bundle, *protobundle.Bundle, error) {
+	// protojson also accepts the protobuf field name media_type, so the
+	// media type is read by exact member name before it runs. A bundle
+	// that names its media type only as media_type has none.
+	members, err := version.DecodeJSONObject(raw)
+	if err != nil {
+		return nil, nil, refuse(ReasonParse, "the bundle fails the JSON rule", err)
+	}
+	if mt, ok := jsonString(members["mediaType"]); !ok || (mt != attestationMediaTypeV03 && mt != attestationMediaTypeV03Legacy) {
+		return nil, nil, refuse(ReasonMediaType, "the mediaType member names no accepted bundle version", nil)
+	}
 	pb := new(protobundle.Bundle)
 	if err := protojson.Unmarshal(raw, pb); err != nil {
 		return nil, nil, refuse(ReasonParse, "the bundle does not parse", err)
-	}
-	if mt := pb.GetMediaType(); mt != attestationMediaTypeV03 && mt != attestationMediaTypeV03Legacy {
-		return nil, nil, refuse(ReasonMediaType, "the media type names no accepted bundle version", nil)
 	}
 	b, err := bundle.NewBundle(pb)
 	if err != nil {

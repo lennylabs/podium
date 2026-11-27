@@ -107,6 +107,9 @@ func TestVerifyAttestation_Bindings(t *testing.T) {
 		{"URI identity with no binding", withSource(func(*sh.Source) {}), unbound, sign.ReasonSourceBinding},
 		{"any_source on a leaf with no source fields", noSourceFields, anySource, ""},
 		{"email identity with no binding", ghBundle(t, h), emailSigner(), ""},
+		{"empty issuer against a signer that names none", ghBundle(t, h, sh.WithLeaf(sh.LeafIssuer(""))),
+			sign.AttestationSigner{Identity: sh.DefaultSAN}, sign.ReasonIssuer},
+		{"signer that names no identity", ghBundle(t, h), sign.AttestationSigner{Issuer: sh.DefaultIssuer}, sign.ReasonIdentity},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := verify(t, gh, tc.raw, tc.signer)
@@ -320,5 +323,17 @@ func TestAttestationRoot_Loading(t *testing.T) {
 	}
 	if _, err := sign.VerifyAttestationBundle(context.Background(), ghBundle(t, h), sign.AttestationInstance{Name: "none"}); err == nil {
 		t.Error("an instance with no root verified a bundle")
+	}
+	for name, src := range map[string]sign.AttestationRootSource{
+		"source that returns no root": failingSource{},
+		"zero root":                   &sign.AttestationRoot{},
+	} {
+		_, err := sign.VerifyAttestationBundle(context.Background(), ghBundle(t, h), sign.AttestationInstance{Name: "github", Root: src})
+		if !errors.Is(err, sign.ErrAttestationRootInvalid) {
+			t.Errorf("%s: err = %v, want ErrAttestationRootInvalid", name, err)
+		}
+		if _, ok := sign.AttestationReasonOf(err); ok {
+			t.Errorf("%s: reported as a bundle refusal", name)
+		}
 	}
 }

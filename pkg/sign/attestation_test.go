@@ -1,6 +1,7 @@
 package sign_test
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -167,6 +168,12 @@ func TestVerifyAttestation_BundleAcceptance(t *testing.T) {
 	h := sh.New(t)
 	pg, gh := publicGood(t, h), githubInstance(t, h)
 	later := h.Clock().Add(5 * time.Minute)
+	// ctByRoot lists CT logs and leaves the flag at its zero value; ctByFlag
+	// sets the flag on a root that lists none.
+	ctByRoot := pg
+	ctByRoot.CertificateTransparency = false
+	ctByFlag := gh
+	ctByFlag.CertificateTransparency = true
 	for _, tc := range []struct {
 		name string
 		inst sign.AttestationInstance
@@ -210,6 +217,15 @@ func TestVerifyAttestation_BundleAcceptance(t *testing.T) {
 		{"no leaf certificate", gh, ghBundle(t, h, sh.WithoutCertificate()), sign.ReasonChain},
 		{"leaf from a foreign authority", publicGood(t, h, sh.WithForeignCA()), pgBundle(t, h), sign.ReasonChain},
 		{"leaf without code signing", gh, ghBundle(t, h, sh.WithLeaf(sh.LeafWithoutCodeSigning())), sign.ReasonChain},
+		{"leaf with no extended key usage", gh, ghBundle(t, h, sh.WithLeaf(sh.LeafWithoutEKU())), sign.ReasonChain},
+		{"leaf with only the any-purpose usage", gh, ghBundle(t, h, sh.WithLeaf(sh.LeafAnyUsageOnly())), sign.ReasonChain},
+		{"leaf with no extended key usage, log instance", pg, pgBundle(t, h, sh.WithLeaf(sh.LeafWithoutEKU())), sign.ReasonChain},
+		{"leaf with only the any-purpose usage, log instance", pg, pgBundle(t, h, sh.WithLeaf(sh.LeafAnyUsageOnly())), sign.ReasonChain},
+		{"root lists CT logs and the flag is off", ctByRoot, h.DSSEBundle(statement(t), sh.WithRekorV1Entry()), sign.ReasonCertificateTimestamp},
+		{"flag requires CT and the root lists none", ctByFlag, ghBundle(t, h, sh.WithSCT()), sign.ReasonCertificateTimestamp},
+		{"media type under the protobuf field name", gh, ghBundle(t, h, sh.WithMediaTypeMember("media_type")), sign.ReasonMediaType},
+		{"media type that is not a string", gh, []byte(`{"mediaType":3}`), sign.ReasonMediaType},
+		{"bundle with a byte order mark", gh, append([]byte("\xef\xbb\xbf"), ghBundle(t, h)...), sign.ReasonParse},
 		{"no SCT where the instance has CT logs", pg, h.DSSEBundle(statement(t), sh.WithRekorV1Entry()), sign.ReasonCertificateTimestamp},
 		{"SCT from a foreign log", pg, h.DSSEBundle(statement(t), sh.WithForeignSCT(), sh.WithRekorV1Entry()), sign.ReasonCertificateTimestamp},
 		{"no log entry where a log is required", pg, h.DSSEBundle(statement(t), sh.WithSCT(),
@@ -221,6 +237,7 @@ func TestVerifyAttestation_BundleAcceptance(t *testing.T) {
 		{"version 0.3 log entry without a proof", pg, h.DSSEBundle(statement(t), sh.WithSCT(),
 			sh.WithRekorV1Entry(sh.WithoutRekorProof())), sign.ReasonParse},
 		{"not JSON", gh, []byte("acme, not a bundle"), sign.ReasonParse},
+		{"duplicate media type members", gh, duplicateMediaType(t, ghBundle(t, h)), sign.ReasonParse},
 		{"unknown media type", gh, ghBundle(t, h, sh.WithMediaType("application/vnd.dev.sigstore.bundle.v0.4+json")), sign.ReasonMediaType},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -337,4 +354,13 @@ func TestVerifyAttestation_TimestampAuthorities(t *testing.T) {
 			t.Fatalf("stripped bundle: %v", err)
 		}
 	})
+}
+
+// duplicateMediaType adds a media_type member beside mediaType, which
+// protojson refuses as one field written twice.
+func duplicateMediaType(t testing.TB, raw []byte) []byte {
+	t.Helper()
+	i := bytes.IndexByte(raw, '{')
+	return append(append(append([]byte(nil), raw[:i+1]...),
+		[]byte(`"media_type":"`+sh.BundleMediaTypeV03+`",`)...), raw[i+1:]...)
 }

@@ -24,7 +24,10 @@ type AttestationInstance struct {
 	// admits the integrated time of a signed entry timestamp as a time.
 	TransparencyLog bool
 	// CertificateTransparency requires an SCT of the leaf that verifies
-	// under a certificate transparency log of the root.
+	// under a certificate transparency log of the root, even when the root
+	// lists none, so such a root accepts no bundle. A root that lists CT
+	// logs requires the SCT whatever this flag holds: the flag can add the
+	// requirement and cannot remove it, so the zero value fails closed.
 	CertificateTransparency bool
 }
 
@@ -77,6 +80,12 @@ func VerifyAttestationBundle(ctx context.Context, raw []byte, inst AttestationIn
 	ar, err := inst.Root.AttestationRoot(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("attestation: trusted root of instance %q: %w", inst.Name, err)
+	}
+	// A source that returns no root, or a zero AttestationRoot that no
+	// loader built, holds no trust material; verification stops rather
+	// than dereference it.
+	if ar == nil || ar.material == nil {
+		return nil, fmt.Errorf("attestation: trusted root of instance %q: %w: no trust material", inst.Name, ErrAttestationRootInvalid)
 	}
 	b, pb, err := parseAttestationBundle(raw)
 	if err != nil {
@@ -177,8 +186,15 @@ func (v *bundleVerification) checkCertificateFields() error {
 	return err
 }
 
-// checkChain verifies the leaf's chain at each verified time, then its SCT
-// where the instance has certificate transparency logs.
+// requireSCT reports whether the instance has certificate transparency
+// logs: its root lists one, or its configuration requires them.
+func (v *bundleVerification) requireSCT() bool {
+	return v.inst.CertificateTransparency || len(v.root.CTLogs()) > 0
+}
+
+// checkChain verifies the leaf's chain at each verified time and its code
+// signing usage, then its SCT where the instance has certificate
+// transparency logs.
 func (v *bundleVerification) checkChain() error {
 	leaf := chainCheckCopy(v.leaf)
 	var chains [][]*x509.Certificate
@@ -189,7 +205,14 @@ func (v *bundleVerification) checkChain() error {
 		}
 		chains = c
 	}
-	if !v.inst.CertificateTransparency {
+	// VerifyOptions.KeyUsages admits a leaf with no extended key usage and
+	// one that lists only the any-purpose usage, because crypto/x509 skips
+	// the check for the first and passes the second. §4.7.11 requires the
+	// code-signing usage itself, as §4.7.9 does.
+	if !slices.Contains(v.leaf.ExtKeyUsage, x509.ExtKeyUsageCodeSigning) {
+		return refuse(ReasonChain, "the leaf's extended key usage does not list code signing", nil)
+	}
+	if !v.requireSCT() {
 		return nil
 	}
 	if err := verify.VerifySignedCertificateTimestamp(chains, 1, v.root); err != nil {
@@ -259,7 +282,7 @@ func (v *bundleVerification) checkWholeBundle() error {
 	} else {
 		opts = append(opts, verify.WithSignedTimestamps(1))
 	}
-	if v.inst.CertificateTransparency {
+	if v.requireSCT() {
 		opts = append(opts, verify.WithSignedCertificateTimestamps(1))
 	}
 	verifier, err := verify.NewVerifier(v.root, opts...)

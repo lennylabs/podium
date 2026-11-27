@@ -255,6 +255,14 @@ func isURIIdentity(identity string) bool {
 //
 // Spec: §4.7.11.
 func matchSigner(f CertificateFields, s AttestationSigner) error {
+	// A signer that names no issuer or no identity accepts nothing, even
+	// when its loader skipped Validate, so an empty value never matches.
+	if s.Issuer == "" {
+		return refuse(ReasonIssuer, "the signer names no issuer", nil)
+	}
+	if s.Identity == "" {
+		return refuse(ReasonIdentity, "the signer names no identity", nil)
+	}
 	if f.Issuer.Value != s.Issuer {
 		return refuse(ReasonIssuer, "the certificate issuer differs from the signer's", nil)
 	}

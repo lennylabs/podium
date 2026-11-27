@@ -115,6 +115,9 @@ type bundleConfig struct {
 	flipSig     bool
 	noCert      bool
 	message     bool
+	// mediaTypeKey, when set, is the member name the media type is
+	// written under in place of mediaType.
+	mediaTypeKey string
 }
 
 // timestampSpec is one RFC 3161 token of a bundle.
@@ -180,6 +183,12 @@ func WithoutCertificate() BundleOpt { return func(c *bundleConfig) { c.noCert = 
 // WithMessageSignature writes a message signature in place of the DSSE
 // envelope.
 func WithMessageSignature() BundleOpt { return func(c *bundleConfig) { c.message = true } }
+
+// WithMediaTypeMember writes the media type under the member name key,
+// such as the protobuf field name media_type, in place of mediaType.
+func WithMediaTypeMember(key string) BundleOpt {
+	return func(c *bundleConfig) { c.mediaTypeKey = key }
+}
 
 // defaultBundleConfig is a version 0.3 in-toto bundle under the default
 // leaf, with no log entry and no timestamp.
@@ -256,7 +265,7 @@ func (h *Harness) buildBundle(payload []byte, cfg bundleConfig) ([]byte, error) 
 	} else {
 		b.DSSEEnvelope = &env
 	}
-	return marshalBundle(b, cfg.noCert)
+	return marshalBundle(b, cfg.noCert, cfg.mediaTypeKey)
 }
 
 // addTimestamps adds one RFC 3161 token per spec over sig.
@@ -299,18 +308,25 @@ func (h *Harness) addTimestamps(b *bundleJSON, specs []timestampSpec, sig []byte
 }
 
 // marshalBundle encodes b. A bundle without a certificate carries a
-// public key hint, which the bundle types above do not declare.
-func marshalBundle(b bundleJSON, publicKey bool) ([]byte, error) {
+// public key hint, which the bundle types above do not declare, and a
+// non-empty mediaTypeKey renames the mediaType member.
+func marshalBundle(b bundleJSON, publicKey bool, mediaTypeKey string) ([]byte, error) {
 	out, err := json.MarshalIndent(b, "", "  ")
-	if err != nil || !publicKey {
+	if err != nil || (!publicKey && mediaTypeKey == "") {
 		return out, err
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return nil, err
 	}
-	vm := doc["verificationMaterial"].(map[string]any)
-	vm["publicKey"] = map[string]any{"hint": "acme-key"}
+	if publicKey {
+		vm := doc["verificationMaterial"].(map[string]any)
+		vm["publicKey"] = map[string]any{"hint": "acme-key"}
+	}
+	if mediaTypeKey != "" {
+		doc[mediaTypeKey] = doc["mediaType"]
+		delete(doc, "mediaType")
+	}
 	return json.MarshalIndent(doc, "", "  ")
 }
 
