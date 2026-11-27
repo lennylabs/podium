@@ -169,7 +169,7 @@ A single-node deployment is single-tenant by default. Setting `PODIUM_MULTI_TENA
 
 | Configuration | Startup error |
 |:--|:--|
-| No identity provider, a provider value the registry does not recognize, or public mode with no identity provider | `config.multitenant_no_verifier` |
+| No identity provider, `external`, or public mode with no identity provider | `config.multitenant_no_verifier` |
 | A recognized provider the registry does not verify, such as `oauth-device-code` | `config.identity_provider_unverified` |
 
 A single node omits the Postgres schema-per-org isolation and row-level security the Clustered deployment mode provides for multi-tenant deployments, and it runs no replicas.

@@ -16,6 +16,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -413,6 +414,73 @@ func TestFilesystemSync_SyncProducesLockFile(t *testing.T) {
 	}
 }
 
+// Spec: §4.2, §7.5.3 — `podium sync` against a registry that holds a package
+// under a directory a filesystem resolves to .git (the NTFS short name GIT~1)
+// exits non-zero with an error naming the segment, and writes nothing into
+// the aliased directory or the target's .git.
+func TestFilesystemSync_ArtifactIDAliasingDotGitRefused(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"GIT~1/hooks/ARTIFACT.md": agentArtifact("hooks"),
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
+	})
+	target := t.TempDir()
+	head := filepath.Join(target, ".git", "HEAD")
+	solofsWriteFile(t, head, "ref: refs/heads/main\n")
+	res := runPodium(t, "", nil, "sync", "--registry", reg, "--target", target, "--harness", "none")
+	if res.Exit == 0 {
+		t.Fatalf("sync over a GIT~1 package exited 0; stderr=%s", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, `"GIT~1"`) || !strings.Contains(res.Stderr, "names .git or .podium") {
+		t.Errorf("stderr must name the GIT~1 segment and the refusal; stderr=%s", res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(target, "GIT~1"))
+	if entries, err := os.ReadDir(filepath.Join(target, ".git")); err != nil || len(entries) != 1 {
+		t.Errorf("target .git after the refused sync = (%v, %v), want HEAD alone", entries, err)
+	}
+}
+
+// Spec: §7.5.3 — a committed lock entry whose path aliases .git (GIT~1, an
+// HFS+ ignorable code point, or an NTFS trailing period) is skipped with a
+// warning that names it, the sync completes, and the cleanup removes nothing
+// at the aliased path.
+func TestFilesystemSync_LockEntryAliasingDotGitSkipped(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"shared/note/ARTIFACT.md": agentArtifact("note"),
+	})
+	target := t.TempDir()
+	args := []string{"sync", "--registry", reg, "--target", target, "--harness", "none"}
+	if res := runPodium(t, "", nil, args...); res.Exit != 0 {
+		t.Fatalf("first sync exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	hostile := []string{"GIT~1/config", "\u200c.git/config", ".git./config"}
+	lock, err := podsync.ReadLock(target)
+	if err != nil || lock == nil {
+		t.Fatalf("ReadLock = (%v, %v)", lock, err)
+	}
+	for _, p := range hostile {
+		solofsWriteFile(t, filepath.Join(target, filepath.FromSlash(p)), "operator\n")
+		lock.Artifacts = append(lock.Artifacts, podsync.LockArtifact{ID: "evil/" + p, MaterializedPath: p})
+	}
+	if err := podsync.WriteLock(target, lock); err != nil {
+		t.Fatalf("WriteLock: %v", err)
+	}
+	res := runPodium(t, "", nil, args...)
+	if res.Exit != 0 {
+		t.Fatalf("re-sync over a hostile lock exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	for _, p := range hostile {
+		if !strings.Contains(res.Stderr, "skipping lock entry "+strconv.Quote(p)) {
+			t.Errorf("stderr must name the skipped entry %q; stderr=%s", p, res.Stderr)
+		}
+		if got := readFile(t, filepath.Join(target, filepath.FromSlash(p))); got != "operator\n" {
+			t.Errorf("%s = %q, want the operator file unchanged", p, got)
+		}
+	}
+	mustExist(t, filepath.Join(target, "shared", "note", "ARTIFACT.md"))
+}
+
 func TestFilesystemSync_SyncIdempotent(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
@@ -534,6 +602,49 @@ func TestFilesystemSync_SyncUnknownHarnessFails(t *testing.T) {
 	if !strings.Contains(res.Stderr, "config.unknown_harness") {
 		t.Errorf("stderr missing 'config.unknown_harness': %q", res.Stderr)
 	}
+}
+
+// Spec: §4.4, §7.5.3 — `podium lint` reports a bundled resource under a name
+// a filesystem resolves to .git as one lint.resource_path_reserved error for
+// the artifact and exits 1, and it reports nothing for a skill directory that
+// is a Git clone, because the .git directory is left out of the set.
+func TestFilesystemSync_LintResourcePathReserved(t *testing.T) {
+	t.Parallel()
+	reg := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md":       greetSkillArtifact,
+		"personal/hello/greet/SKILL.md":          greetSkillBody,
+		"personal/hello/greet/GIT~1/config":      "[core]\n",
+		"personal/hello/greet/GIT~1/HEAD":        "ref: refs/heads/main\n",
+		"personal/hello/greet/GIT~1/objects/a/b": "x",
+	})
+	res := runPodium(t, "", nil, "lint", "--registry", reg)
+	if res.Exit != 1 {
+		t.Fatalf("lint exit=%d, want 1; stdout=%s stderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	out := res.Stdout + res.Stderr
+	if n := strings.Count(out, "lint.resource_path_reserved"); n != 1 || !strings.Contains(out, `"GIT~1"`) {
+		t.Errorf("lint output names lint.resource_path_reserved %d times, want once with the GIT~1 segment:\n%s", n, out)
+	}
+
+	clone := writeRegistry(t, map[string]string{
+		"personal/hello/greet/ARTIFACT.md":           greetSkillArtifact,
+		"personal/hello/greet/SKILL.md":              greetSkillBody,
+		"personal/hello/greet/.git/config":           "[core]\n\tfsmonitor = touch pwned\n",
+		"personal/hello/greet/.git/HEAD":             "ref: refs/heads/main\n",
+		"personal/hello/greet/.git/objects/ab/cdef":  "x",
+		"personal/hello/greet/vendor/lib/.git":       "gitdir: x\n",
+		"personal/hello/greet/vendor/lib/README.txt": "lib\n",
+	})
+	if res := runPodium(t, "", nil, "lint", "--registry", clone); res.Exit != 0 || strings.Contains(res.Stdout+res.Stderr, "resource_path_reserved") {
+		t.Errorf("lint over a Git clone exit=%d; stdout=%s stderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+	target := t.TempDir()
+	res = runPodium(t, "", nil, "sync", "--registry", clone, "--target", target, "--harness", "none")
+	if res.Exit != 0 || strings.Contains(res.Stderr, "refusing to write") {
+		t.Errorf("sync over a Git clone exit=%d; stderr=%s", res.Exit, res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(target, "personal", "hello", "greet", ".git"))
+	mustExist(t, filepath.Join(target, "personal", "hello", "greet", "vendor", "lib", "README.txt"))
 }
 
 func TestFilesystemSync_LintCleanRegistryExits0(t *testing.T) {

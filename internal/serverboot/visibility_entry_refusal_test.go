@@ -21,7 +21,7 @@ func TestBootstrap_RefusesVisibilityEntries(t *testing.T) {
 	t.Run("declared layer", func(t *testing.T) {
 		st := newMemoryStoreWithTenant(t)
 		cfg := &Config{
-			identityProvider: "oidc",
+			identityProvider: "oidc-jwt",
 			declaredLayers: []yamlLayerEntry{{
 				ID:         "team-finance",
 				Source:     yamlLayerSource{Local: &yamlLocalSource{Path: declaredLocalTree(t, "policy")}},

@@ -21,7 +21,7 @@ func serveCmd(args []string) int {
 	setUsage(fs, "Run the standalone registry server in-process.")
 	bind := fs.String("bind", "", "address to listen on (overrides PODIUM_BIND)")
 	publicMode := fs.Bool("public-mode", false, "run in public mode (overrides PODIUM_PUBLIC_MODE)")
-	allowPublicBind := fs.Bool("allow-public-bind", false, "allow a registry that authenticates no caller (public mode or no identity provider), or one under trusted-headers, to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
+	allowPublicBind := fs.Bool("allow-public-bind", false, "allow a registry that authenticates no caller (public mode, no identity provider, or PODIUM_IDENTITY_PROVIDER=external), or one under trusted-headers, to bind a non-loopback address (overrides PODIUM_ALLOW_PUBLIC_BIND)")
 	// §13.10: acknowledges, for one start, that a registry which ran with
 	// verified identity now starts without a request-time verifier.
 	allowIdentityProviderRemoval := fs.Bool("allow-identity-provider-removal", false, "start without a request-time identity verifier on a store an earlier verified start recorded, clearing that record; remove it after this start (overrides PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL)")

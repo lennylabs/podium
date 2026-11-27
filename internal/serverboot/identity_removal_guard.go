@@ -145,15 +145,18 @@ type removalPosture struct {
 // Every such start shows every layer to every caller (§4.6). Only a start with
 // no identity provider and not in public mode also admits every caller on the
 // §4.7.2 admin arm: public mode gates that arm on the operator token, and a
-// label the registry resolves to no provider leaves the anonymous caller
-// without an admin grant.
+// start with `external` leaves the anonymous caller without an admin grant.
+// The configured-provider arm is reached only by `external`: validate refuses
+// any other unrecognised value with config.identity_provider_unverified, and
+// refuseIdentityProviderRemoval returns that code for a recognised provider
+// without a verifier before it builds the message.
 func identityRemovalPosture(cfg *Config) removalPosture {
 	const visible = "show every restricted layer to every caller"
 	switch {
 	case cfg.publicMode:
 		return removalPosture{cause: "public mode (PODIUM_PUBLIC_MODE) is on", effect: visible}
 	case cfg.hasIdentityProvider():
-		return removalPosture{cause: fmt.Sprintf("PODIUM_IDENTITY_PROVIDER=%q resolves to no provider the registry verifies", cfg.identityProvider), effect: visible}
+		return removalPosture{cause: fmt.Sprintf("PODIUM_IDENTITY_PROVIDER=%q leaves authentication to whatever is in front of the registry, which verifies no caller", cfg.identityProvider), effect: visible}
 	default:
 		return removalPosture{cause: "no identity provider is configured", effect: visible + " and admit every caller as an admin"}
 	}

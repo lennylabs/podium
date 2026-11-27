@@ -48,7 +48,7 @@ func TestValidate_WebUINonLoopbackAllowed(t *testing.T) {
 		bind:                 "0.0.0.0:8080",
 		webUI:                true,
 		webUIAllowPublicBind: true,
-		identityProvider:     "oidc",
+		identityProvider:     "oidc-jwt",
 		storeType:            "sqlite",
 		objectStore:          "filesystem",
 	}

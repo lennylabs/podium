@@ -170,3 +170,27 @@ func TestIdentityProviderRemoval_NeverVerifiedRegistryUnaffected(t *testing.T) {
 		t.Fatal("a registry that never installed a verifier holds the verified-identity record")
 	}
 }
+
+// Spec: §13.10 (Identity provider removed between starts, External
+// authentication) — PODIUM_IDENTITY_PROVIDER=external wires no request-time
+// verifier, so an external start after a verified start on the same store is
+// refused with config.identity_provider_removed, without the admin clause
+// because no caller passes the admin arm under external, and the
+// acknowledgement admits it.
+func TestIdentityProviderRemoval_ExternalAfterVerifiedStart(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	startAndStop(t, identityStartEnv(home, "trusted-headers"))
+
+	out := refusedStart(t, identityStartEnv(home, "external"),
+		"config.identity_provider_removed",
+		`PODIUM_IDENTITY_PROVIDER="external" leaves authentication to whatever is in front of the registry`,
+	)
+	if strings.Contains(out, "admit every caller as an admin") {
+		t.Errorf("the external refusal names the admin arm, which external keeps closed:\n%s", out)
+	}
+	startAndStop(t, identityStartEnv(home, "external", "PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL=true"))
+	if verifiedIdentityRecorded(t, home) {
+		t.Fatal("the acknowledged external start left the record in place")
+	}
+}

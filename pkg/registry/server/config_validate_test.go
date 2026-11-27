@@ -182,6 +182,41 @@ func TestStartupConfig_NoIdentityProviderNonLoopback(t *testing.T) {
 	}
 }
 
+// Spec: §13.10 (External authentication) — PODIUM_IDENTITY_PROVIDER=external
+// verifies no caller, so a non-loopback bind is refused with
+// config.public_bind_refused naming the value, the address, and the escape
+// hatch, unless --allow-public-bind is set. A loopback bind is always allowed,
+// and public mode beside it keeps config.public_mode_with_idp because external
+// counts as a configured identity provider.
+func TestStartupConfig_ExternalIdentityProviderBind(t *testing.T) {
+	t.Parallel()
+	err := server.StartupConfig{IdentityProvider: server.ExternalIdentityProvider, Bind: "0.0.0.0:8080"}.Validate()
+	if !errors.Is(err, server.ErrPublicBindNonLoopback) {
+		t.Fatalf("external on a non-loopback bind: %v, want config.public_bind_refused", err)
+	}
+	for _, want := range []string{"PODIUM_IDENTITY_PROVIDER=external", `"0.0.0.0:8080"`, "PODIUM_ALLOW_PUBLIC_BIND=true"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal does not contain %q:\n%v", want, err)
+		}
+	}
+	for name, cfg := range map[string]server.StartupConfig{
+		"opt-in":       {IdentityProvider: server.ExternalIdentityProvider, Bind: "0.0.0.0:8080", AllowPublicBind: true},
+		"loopback":     {IdentityProvider: server.ExternalIdentityProvider, Bind: "127.0.0.1:8080"},
+		"default bind": {IdentityProvider: server.ExternalIdentityProvider, Bind: ""},
+	} {
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("%s: Validate() = %v, want nil", name, err)
+		}
+	}
+	if !server.ConfiguresIdentityProvider(server.ExternalIdentityProvider) {
+		t.Error("ConfiguresIdentityProvider(external) = false, want true")
+	}
+	err = server.StartupConfig{PublicMode: true, IdentityProvider: server.ExternalIdentityProvider}.Validate()
+	if !errors.Is(err, server.ErrPublicModeWithIdP) {
+		t.Errorf("public mode with external: %v, want config.public_mode_with_idp", err)
+	}
+}
+
 // Spec: §13.10 — the web UI on a non-loopback bind is refused
 // unless --web-ui-allow-public-bind is set AND an identity provider is
 // configured. Each missing condition on a non-loopback bind fails startup with
@@ -194,7 +229,7 @@ func TestStartupConfig_WebUINonLoopbackRefused(t *testing.T) {
 	}{
 		{"no opt-in, no idp", server.StartupConfig{WebUI: true, Bind: "0.0.0.0:8080"}},
 		{"opt-in but no idp", server.StartupConfig{WebUI: true, WebUIAllowPublicBind: true, Bind: "0.0.0.0:8080"}},
-		{"idp but no opt-in", server.StartupConfig{WebUI: true, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
+		{"idp but no opt-in", server.StartupConfig{WebUI: true, IdentityProvider: "oidc-jwt", Bind: "0.0.0.0:8080"}},
 	}
 	for _, c := range cases {
 		c := c
@@ -216,10 +251,10 @@ func TestStartupConfig_WebUIAllowed(t *testing.T) {
 		name string
 		cfg  server.StartupConfig
 	}{
-		{"non-loopback with opt-in and idp", server.StartupConfig{WebUI: true, WebUIAllowPublicBind: true, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
+		{"non-loopback with opt-in and idp", server.StartupConfig{WebUI: true, WebUIAllowPublicBind: true, IdentityProvider: "oidc-jwt", Bind: "0.0.0.0:8080"}},
 		{"loopback standalone, no opt-in", server.StartupConfig{WebUI: true, Bind: "127.0.0.1:8080"}},
 		{"loopback default bind", server.StartupConfig{WebUI: true, Bind: ""}},
-		{"ui off, non-loopback bind", server.StartupConfig{WebUI: false, IdentityProvider: "oidc", Bind: "0.0.0.0:8080"}},
+		{"ui off, non-loopback bind", server.StartupConfig{WebUI: false, IdentityProvider: "oidc-jwt", Bind: "0.0.0.0:8080"}},
 	}
 	for _, c := range cases {
 		c := c

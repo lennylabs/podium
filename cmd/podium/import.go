@@ -13,6 +13,8 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/materialize"
+	"github.com/lennylabs/podium/pkg/registry/filesystem"
 )
 
 // importCmd normalizes a directory of skills into a Podium filesystem layer
@@ -110,6 +112,13 @@ func buildImportPlan(source, version string) ([]importedSkill, error) {
 			continue
 		}
 		dir := filepath.Join(source, e.Name())
+		// The directory name becomes the artifact ID and a directory of the
+		// target, so a name the target's filesystem resolves to .git, such as
+		// GIT~1, would write the skill's files into the target repository's
+		// .git. The §4.2 canonical-ID rules refuse it before any write.
+		if err := filesystem.ValidateCanonicalID(e.Name()); err != nil {
+			return nil, fmt.Errorf("%s: %w", dir, err)
+		}
 		bodyName, body, resources, err := collectSkillFiles(dir)
 		if err != nil {
 			return nil, fmt.Errorf("%s: %w", dir, err)
@@ -176,19 +185,31 @@ func rootMarkdownFiles(dir string) ([]string, error) {
 // set and carries into the output an artifact the operator did not write for
 // this layer.
 //
-// Spec: §4.3.4, §4.4
+// A directory or file named exactly .git is version-control data that §4.4
+// leaves out of the bundled set, so a source skill that is a Git clone is
+// imported without its repository, and no nested repository with the
+// source's .git/config reaches the target. Any other name that a filesystem
+// resolves to .git, such as GIT~1, is refused at any depth, as ingest refuses
+// it with lint.resource_path_reserved.
+//
+// Spec: §4.3.4, §4.4, §7.5.3
 func readSkillTree(dir string) (map[string][]byte, error) {
 	files := map[string][]byte{}
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
 		if err != nil || info == nil {
 			return err
 		}
-		if info.IsDir() {
-			return nil
-		}
 		rel, err := filepath.Rel(dir, path)
 		if err != nil {
 			return err
+		}
+		if path != dir {
+			if skip, err := skipOrRefuseDotGit(info, rel); skip || err != nil {
+				return err
+			}
+		}
+		if info.IsDir() {
+			return nil
 		}
 		if info.Name() == "ARTIFACT.md" {
 			return fmt.Errorf("holds %s; import writes plain skill directories and never copies an ARTIFACT.md", filepath.ToSlash(rel))
@@ -204,6 +225,22 @@ func readSkillTree(dir string) (map[string][]byte, error) {
 		return nil, err
 	}
 	return files, nil
+}
+
+// skipOrRefuseDotGit applies the .git rules of readSkillTree to one walk entry
+// below the skill root. It reports skip for version-control data, returning
+// filepath.SkipDir for a directory so its files are never read, and an error
+// for any other name that resolves to .git.
+func skipOrRefuseDotGit(info os.FileInfo, rel string) (bool, error) {
+	switch {
+	case filesystem.SkipVersionControl(info.Name()) && info.IsDir():
+		return true, filepath.SkipDir
+	case filesystem.SkipVersionControl(info.Name()):
+		return true, nil
+	case materialize.AliasesDotGit(info.Name()):
+		return false, fmt.Errorf("holds %s, whose name %q a filesystem resolves to .git; rename or remove it", filepath.ToSlash(rel), info.Name())
+	}
+	return false, nil
 }
 
 // chooseSkillBody returns the root-level file among mds that becomes the

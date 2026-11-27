@@ -53,7 +53,7 @@ func guardStart(st identityRecordStore, cfg *Config, verifierInstalled bool) err
 
 // Spec: §13.10 (Identity provider removed between starts) — the prediction the
 // removal check runs on matches the providers whose boot arm installs a
-// verifier, and public mode, an unset provider, an unresolved label, and a
+// verifier, and public mode, an unset provider, `none`, `external`, and a
 // registered provider without a verifier all predict none.
 func TestExpectsRequestVerifier(t *testing.T) {
 	t.Parallel()
@@ -119,7 +119,7 @@ func TestIdentityProviderRemovalGuard_RefusesWithoutVerifier(t *testing.T) {
 	}{
 		{name: "no identity provider", cfg: &Config{}, cause: "no identity provider is configured", wantAdmin: true},
 		{name: "none label", cfg: &Config{identityProvider: "none"}, cause: "no identity provider is configured", wantAdmin: true},
-		{name: "label resolving to no provider", cfg: &Config{identityProvider: "external"}, cause: `PODIUM_IDENTITY_PROVIDER="external" resolves to no provider`},
+		{name: "external authentication", cfg: &Config{identityProvider: "external"}, cause: `PODIUM_IDENTITY_PROVIDER="external" leaves authentication to whatever is in front of the registry`},
 		{name: "public mode", cfg: &Config{publicMode: true}, cause: "public mode (PODIUM_PUBLIC_MODE) is on"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
