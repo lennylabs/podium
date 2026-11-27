@@ -1769,10 +1769,13 @@ func (r *Registry) LoadArtifact(ctx context.Context, id layer.Identity, artifact
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrNotFound, err)
 	}
-	if pin.Kind == version.PinLatest && opts.SessionID != "" {
+	rec := byVersion[resolved]
+	// §5: a load the bridge filter refuses resolves nothing, as a load of an
+	// ID that does not exist, so it leaves no session pin; a later ingest of
+	// another type is then the session's latest.
+	if pin.Kind == version.PinLatest && opts.SessionID != "" && !bridgeRefuses(ctx, rec) {
 		r.recordSessionPin(opts.SessionID, artifactID, resolved)
 	}
-	rec := byVersion[resolved]
 	return assemble(rec)
 }
 

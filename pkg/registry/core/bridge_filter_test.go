@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/store"
@@ -214,5 +215,36 @@ func TestBridgeFilter_TypeChangeAcrossVersions(t *testing.T) {
 	}
 	if res, err := f.reg.LoadArtifact(sdk, usageAlice, "ops/tool", core.LoadArtifactOptions{}); err != nil || res.Version != "2.0.0" {
 		t.Errorf("sdk latest load = %+v, %v; want 2.0.0", res, err)
+	}
+}
+
+// Spec: §5, §4.7.6 — a latest load the bridge filter refuses leaves no session
+// pin, as a load of an ID that does not exist leaves none. ops/tool is a skill
+// at 1.0.0 and an mcp-server at 2.0.0, so the bridge's load in session s1 is
+// refused; once 3.0.0 is ingested as a skill, the next load in s1 resolves to
+// 3.0.0, as a load in a fresh session does.
+func TestBridgeFilter_RefusedLoadLeavesNoSessionPin(t *testing.T) {
+	t.Parallel()
+	f := newUsageFixture(t)
+	put := func(ver, typ string, at time.Time) {
+		t.Helper()
+		m := store.ManifestRecord{TenantID: "t", ArtifactID: "ops/tool", Version: ver, ContentHash: "sha256:tool-" + ver, Type: typ, Name: "tool", Description: "session tool", Layer: "team", IngestedAt: at}
+		if err := f.st.PutManifest(context.Background(), storetest.Seal(t, m, nil, nil)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base := time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC)
+	put("1.0.0", "skill", base)
+	put("2.0.0", "mcp-server", base.Add(time.Hour))
+	bridge := clientCtx("mcp", "")
+	if _, err := f.reg.LoadArtifact(bridge, usageAlice, "ops/tool", core.LoadArtifactOptions{SessionID: "s1"}); !errors.Is(err, core.ErrNotFound) {
+		t.Fatalf("bridge load in s1 = %v, want registry.not_found", err)
+	}
+	put("3.0.0", "skill", base.Add(2*time.Hour))
+	for _, session := range []string{"s1", "s2"} {
+		res, err := f.reg.LoadArtifact(bridge, usageAlice, "ops/tool", core.LoadArtifactOptions{SessionID: session})
+		if err != nil || res.Version != "3.0.0" {
+			t.Errorf("bridge load in %s after 3.0.0 = %+v, %v; want 3.0.0", session, res, err)
+		}
 	}
 }
