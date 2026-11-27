@@ -36,8 +36,9 @@ type bootFixture struct {
 	layerPath  string
 	keyPath    string
 	auditPath  string
-	// addr is the address the last boot listened on, which bootWith reads
-	// from run's log before it calls serving, or the address holdBind holds.
+	// addr is the address the last successful boot listened on, which
+	// bootWith reads from run's log before it calls serving, or the address
+	// holdBind holds. A boot that fails before serving leaves it unchanged.
 	addr string
 }
 

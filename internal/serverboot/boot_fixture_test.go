@@ -27,8 +27,8 @@ func TestBootFixture_ForeignListenerIsNotReadiness(t *testing.T) {
 }
 
 // The fixture binds port 0 and reads the address run bound from its
-// listening line, so two boots of one fixture each serve on the port the
-// kernel picked for them.
+// listening line, so the address it hands to serving names the port the
+// kernel picked rather than port 0.
 func TestBootFixture_ReadsTheBoundAddress(t *testing.T) {
 	f := newBootFixture(t)
 	if _, err := f.bootWith(t, func() {
