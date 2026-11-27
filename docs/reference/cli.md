@@ -308,7 +308,7 @@ The command exits 1 and names the directory in these cases:
 Writes the subjects that an author attestation of one layer signs: the layer subject with the layer digest, and one subject per artifact with its package digest. The command does not sign and sends no request to a registry. A signing tool, such as GitHub's `actions/attest-build-provenance` or `cosign attest-blob --statement`, signs the files it writes.
 
 ```
-podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-subjects <n>] [--format checksums|statement]
+podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-subjects <n>] [--format checksums|statement] [--predicate-type <uri>]
 ```
 
 | Flag | Effect |
@@ -319,6 +319,7 @@ podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-s
 | `--out <dir>` | Directory the files are written to, created when absent. Default: the current directory. |
 | `--max-subjects <n>` | Most subjects in one file, the layer subject included. At least 2. Default: 1024, the limit of GitHub's attestation action. |
 | `--format <format>` | `checksums` (the default) or `statement`. |
+| `--predicate-type <uri>` | The `predicateType` of the statement format. Default: `https://lennylabs.github.io/podium/attestation/subjects/v1`. Applies to `--format statement` alone. |
 
 The layer subject is named `.podium/layer` for a layer at the root of its source and `.podium/layer/<root>` for a layer with a `root`. Each artifact subject is named `<id>@<version>`, or the bare ID for a skill with no authored version and for a package whose manifest does not parse.
 
@@ -343,9 +344,13 @@ A signature over such digests does not match the registry's digests of the commi
 
 #### Output files
 
-With `--format checksums`, each file is in the format of the `sha256sum` tool: one line per subject with the 64 lowercase hexadecimal digits of the digest, two spaces, and the subject name. With `--format statement`, each file holds one in-toto Statement v1 document whose `predicateType` is `https://slsa.dev/provenance/v1` and whose `predicate` is empty.
+With `--format checksums`, each file is in the format of the `sha256sum` tool: one line per subject with the 64 lowercase hexadecimal digits of the digest, two spaces, and the subject name. With `--format statement`, each file holds one in-toto Statement v1 document whose `predicate` is the empty object.
 
-Each file begins with the layer subject and lists the artifacts in ascending order of ID. A layer with more artifacts than `--max-subjects` allows in one file is written over several files, each beginning with the layer subject. The files are named `podium-subjects-<n>.sha256` and `podium-statement-<n>.json`, numbered from 1. Before it writes, the command removes the files of either name in `--out` that an earlier run left. It prints the path of each file it writes on standard output, one per line.
+The statement's `predicateType` is `https://lennylabs.github.io/podium/attestation/subjects/v1` by default. Podium defines that type: the signer attests the listed subjects, and the predicate is empty. Podium reads the type and never the predicate. `--predicate-type` sets another type, for example to match the type of another signing recipe. The predicate stays empty, so a type whose schema requires members, such as SLSA provenance (`https://slsa.dev/provenance/v1`), gives a statement that tools which check the predicate refuse. A checksums file has no predicate type of its own, because the tool that signs it chooses the type, so `--predicate-type` with `--format checksums` is a usage error.
+
+Each file begins with the layer subject and lists the artifacts in ascending order of ID. A layer with more artifacts than `--max-subjects` allows in one file is written over several files, each beginning with the layer subject. The files are named `podium-subjects-<n>.sha256` and `podium-statement-<n>.json`.
+
+Before it writes, the command removes the files of either name in `--out` whose first subject is this run's layer subject. Files of another layer subject stay, and so do files it cannot read or whose first subject it cannot read, so runs for several layer roots can share one `--out`. The command numbers its files with the lowest numbers that no remaining file takes. It prints the path of each file it writes on standard output, one per line.
 
 ```
 $ podium attest --root skills --commit HEAD --out attest-out
@@ -366,7 +371,7 @@ A package whose ID holds a control character, a white space character, or a back
 |:--|:--|
 | `0` | The files were written. |
 | `1` | The layer root does not exist or is not a directory, `--commit` names no commit, `<dir>` lies below the top of its working tree under `--commit`, the commit holds no directory at the layer's path, the walk of the layer failed, a package has no subject name, or a file could not be removed or written. |
-| `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, a `--root` the rule above refuses, or more than one `<dir>`. |
+| `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, a `--root` the rule above refuses, a `--predicate-type` that is not an absolute URI or that comes with `--format checksums`, or more than one `<dir>`. |
 
 ---
 
