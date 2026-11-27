@@ -702,10 +702,15 @@ layers:
   - id: team-finance
     source:
       git:
-        repo: git@github.com:acme/podium-finance.git
-        ref: main
+        repo: https://github.com/acme/podium-finance
+        ref: podium/signed
     visibility:
       groups: [acme-finance, acme-finance-leads]
+    trust_mode: require
+    trust_requirements:
+      - signers:
+          - issuer: https://token.actions.githubusercontent.com
+            identity: https://github.com/acme/podium-finance/.github/workflows/podium-attest.yml@refs/heads/main
 
   - id: platform-shared
     source:
@@ -731,6 +736,8 @@ layers:
     visibility:
       users: [alice@acme.com]
 ```
+
+A declared layer carries its trust policy in the keys `trust_mode`, `trust_requirements`, and `trust_layer_root`, in the form of the §7.3.1 layer object members of those names (§4.7.11).
 
 ### Collisions
 
@@ -1146,3 +1153,30 @@ The registry configures `public-good` in every deployment, and `sigstore.instanc
 **Static root file.** `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` names a file that holds the trusted root of the `public-good` instance for attestation verification, which serves an air-gapped deployment. When it is set, the registry makes no refresh and uses neither the copy on disk nor the embedded copy. A root read from a file, which is this root and the root of every other instance, has no refresh and no issue time that the registry can read, so it carries no age limit and the operator replaces it. Attestation verification does not read `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE`, which keeps the meaning §6.2 gives it for the §4.7.9 envelope. A deployment can hold the root of a private or staging Sigstore instance in that setting, and reading it as the `public-good` root would verify every signer that names no instance against that instance's certificate authority.
 
 **Start checks.** A registry start loads the trusted root of every configured instance before any ingest. The following abort the start with `config.invalid`, in an error that names the instance and the file or the setting: a trusted root file of a configured instance, or the file that `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` names, that cannot be read or parsed or that holds several roots; a root with a timestamp authority entry that does not begin with the authority's own certificate; a `public-good` root file that lists no transparency log or no certificate transparency log; a `sigstore.instances` entry that breaks a rule of §13.12; and a `PODIUM_SIGSTORE_ROOT_REFRESH`, `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`, or `PODIUM_SIGSTORE_ROOT_MAX_AGE` value that §13.12 does not admit. The `public-good` root without a file has its copy on disk and its embedded copy and raises no such failure. The start logs the digest and the root time of the root of each instance, and a warning for each timestamp authority whose chain holds a SHA-1 signature. A root past its maximum age is no start failure.
+
+**Layer trust policy.** Each layer carries a trust policy, which ingest verification applies to the content of the layer. The policy is held in the members `trust_mode`, `trust_requirements`, and `trust_layer_root` of the §7.3.1 layer object.
+
+- `trust_mode` is `none`, `warn`, or `require`. An empty value resolves to `PODIUM_LAYER_TRUST_DEFAULT` (§13.12), whose default is `none`.
+- `trust_requirements` is an array of requirements that holds at most one requirement. A requirement is an object with the members `signers`, an array of signer objects, and `predicate_type`, an optional string. An artifact meets a requirement when an accepted bundle of one of its signers lists a subject with the artifact's name and package digest, and the bundle's `predicateType` equals the requirement's `predicate_type` when the requirement names one. The signers of the requirement also attest the layer subject.
+- `trust_layer_root` applies to a `local` layer. It holds the `root` under which the layer's content was signed, and the layer subject expected for the layer is `.podium/layer/<trust_layer_root>`. An empty value, which is the default, expects `.podium/layer`. A `git` layer takes the name of its layer subject from its `root`.
+
+A signer object has the string members `issuer` and `identity`, the source binding members `source_repository`, `source_repository_owner`, `source_repository_id`, and `source_repository_owner_id`, the boolean `any_source`, the ref binding member `source_repository_ref`, the boolean `any_ref`, and the string `instance`. `instance` names the Sigstore instance of the signer, and an empty value is `public-good`. A requirement object or a signer object that holds a member of another name is refused, so a misspelled member cannot drop a binding or move a signer to `public-good` without an error.
+
+A requirement states that one of its signers signed a statement of its predicate type over the artifact's bytes. It states nothing about what the statement says, because a verifier does not read `predicate`, so a scan statement that records findings meets a requirement as a statement of a passing result does. A signer that a requirement lists therefore signs only on a passing result: a scanner signs after a scan with no finding above its threshold, and a review signer signs after an approval.
+
+**Derived source binding.** When a signer of a `git` layer has a URI identity, names no source binding member, does not set `any_source`, and has an identity that begins with the layer's repository URL followed by `/.github/workflows/`, the registry sets the signer's `source_repository` to the layer's repository URL. When that signer also names no `source_repository_ref` and does not set `any_ref`, the registry sets `source_repository_ref` to the part of the identity after its last `@`, when that part is not empty. The registry derives the binding only from a repository URL of the form `https://<host>/<owner>/<repo>`, optionally followed by `.git` or by `/`, with no user information, port, query, or fragment. The derived `source_repository` is that URL without the trailing `.git` or `/`, and the identity is compared with it byte for byte. An SSH URL, an scp-like address, a URL with user information or a port, and a URL of any other form derive nothing, so a signer of such a layer that names no binding is refused by the rules below. A URL whose letter case differs from the name the host records derives a binding that matches no certificate. The registry derives the binding when it validates a policy, and the stored policy holds the derived members, which the layer object reports. A workflow in the layer's own repository can be called from another repository as a reusable workflow, and the derived binding refuses a certificate issued to such a caller. A signer whose workflow lives in another repository names its binding.
+
+**Policy rules.** The registry refuses a trust policy that breaks one of the following rules:
+
+- `trust_mode` is `none`, `warn`, `require`, or the empty value.
+- `trust_requirements` holds at most one requirement. A policy with several requirements is refused with a message stating that several requirements are not available yet.
+- A `trust_mode` of `warn` or `require` has a requirement. The rule reads the layer's own `trust_mode`. A layer whose empty mode resolves to `warn` or `require` through `PODIUM_LAYER_TRUST_DEFAULT` is not refused by it, and the start log below names such a layer.
+- A requirement has at least one signer.
+- A signer names an `issuer` and an `identity`. A signer whose identity is a URI names a source binding member or sets `any_source`, and a signer that names a source binding member names `source_repository_ref` or sets `any_ref`. Each rule applies after the derivation above.
+- A signer that sets `any_source` names no source binding member, and a signer that sets `any_ref` names no `source_repository_ref`.
+- A signer's `instance` is empty or names an instance the registry configures (§13.12).
+- A `git` layer has an empty `trust_layer_root`. A `trust_layer_root` neither begins nor ends with `/`, holds no empty, `.`, or `..` segment, and holds no character that the subject name character rule excludes.
+
+The layer endpoints refuse such a policy with `registry.invalid_argument` (§7.3.1). A layer declared in `registry.yaml` whose policy breaks a rule aborts the registry start with `config.invalid_layer_trust`, in an error that names the layer and the rule (§7.3.1).
+
+**Policy changes.** Changing the trust policy of an admin-defined layer requires the per-tenant `admin` role, and the owner of a user-defined layer changes the policy of that layer, under the §7.3.1 layer write authorization rule. A change records the previous and the new `trust_mode`, `trust_requirements`, and `trust_layer_root` in the layer's §8.1 event, which records any use of `any_source` and `any_ref`. A change applies from the next ingest cycle and refuses no version the registry already stores. At each start, after the declared and `--layer-path` layers are seeded, the registry logs a warning for each stored layer whose `trust_mode` is empty, whose mode `PODIUM_LAYER_TRUST_DEFAULT` resolves to `warn` or `require`, and that has no requirement. The registry stores and validates the policy in this release, and no ingest step verifies attestations against it yet.
