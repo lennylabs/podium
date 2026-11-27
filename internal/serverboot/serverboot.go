@@ -1027,6 +1027,13 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
+	// §4.7.11: build the Sigstore instances before any ingest, with no
+	// network call and no write. No ingest step verifies attestations yet,
+	// so nothing starts the public-good refresh (StartAttestationRefresh).
+	if err := cfg.loadAttestationRoots(); err != nil {
+		return err
+	}
+
 	st, err := openStore(cfg)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
@@ -2340,6 +2347,17 @@ type Config struct {
 	// each call of the Git source (§7.3.1 Git fetch), from the environment or
 	// the registry.yaml git_fetch_depth key.
 	gitFetchDepth gitFetchDepthConfig
+	// attestation is the §4.7.11 Sigstore instance configuration: the
+	// sigstore.instances key, PODIUM_ATTESTATION_TRUSTED_ROOT_FILE, and the
+	// refresh settings of the public-good root, with the root files read.
+	attestation attestationConfig
+	// sigstoreMirror and sigstoreTUFRoot replace the Sigstore TUF
+	// repository of the public-good refresh and the TUF root.json it starts
+	// from. They have no setting: only an in-process test sets them, so a
+	// production binary always refreshes from tuf.DefaultMirror under the
+	// root.json that sigstore-go embeds.
+	sigstoreMirror  string
+	sigstoreTUFRoot []byte
 	// §4.6 default visibility for newly-registered layers when no
 	// explicit visibility is supplied. One of "public" |
 	// "organization" | "private". Defaults to "private" so
@@ -2498,7 +2516,7 @@ func (c *Config) Settings() []Setting {
 		}
 		return "<redacted>"
 	}
-	return []Setting{
+	return append([]Setting{
 		{"bind", c.bind, envOrSrc("PODIUM_BIND", defaultSrc)},
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"allow_public_bind", boolStr(c.allowPublicBind), envOrSrc("PODIUM_ALLOW_PUBLIC_BIND", defaultSrc)},
@@ -2546,7 +2564,7 @@ func (c *Config) Settings() []Setting {
 		{"cohere_api_key", redact(c.cohereAPIKey), envOrSrc("COHERE_API_KEY", "")},
 		{"ollama_url", c.ollamaURL, envOrSrc("PODIUM_OLLAMA_URL", defaultSrc)},
 		{"pii_redaction.enabled", boolStr(c.piiRedaction.Active()), envOrSrc("PODIUM_PII_REDACTION", yamlSrc)},
-	}
+	}, c.attestationSettings(envOrSrc)...)
 }
 
 func boolStr(b bool) string {
@@ -2713,6 +2731,7 @@ func LoadConfig() *Config {
 	// the start: starting on the defaults would drop the configured identity
 	// provider, layers, and store settings (§13.12).
 	fileGitFetchTimeout, fileGitFetchDepth := "", ""
+	var fileSigstore yamlSigstore
 	if y, err := readYAMLConfig(); err != nil {
 		c.configFileErr = err
 	} else {
@@ -2720,10 +2739,15 @@ func LoadConfig() *Config {
 		if y != nil {
 			fileGitFetchTimeout = y.GitFetchTimeout
 			fileGitFetchDepth = y.GitFetchDepth
+			fileSigstore = y.Sigstore
 		}
 	}
 	c.gitFetch = resolveGitFetchTimeout(os.Getenv(source.FetchTimeoutSetting), fileGitFetchTimeout)
 	c.gitFetchDepth = resolveGitFetchDepth(os.Getenv(source.FetchDepthSetting), fileGitFetchDepth)
+	// §4.7.11: the Sigstore instances and their root files, read now so a
+	// root file that cannot be read refuses the start before any ingest. A
+	// relative trusted_root resolves beside registry.yaml.
+	c.attestation = resolveAttestation(os.Getenv, fileSigstore, filepath.Dir(registryYAMLPath()), clock.Real{}.Now())
 	// §13.12: the Pinecone namespace prefix defaults to "default"
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
@@ -2859,7 +2883,7 @@ func (c *Config) SettingErrors() []error {
 			errs = append(errs, err)
 		}
 	}
-	return errs
+	return append(errs, c.attestation.errs...)
 }
 
 func (c *Config) validate() error {
@@ -2941,6 +2965,11 @@ func (c *Config) validate() error {
 	}
 	if c.gitFetchDepth.err != nil {
 		return c.gitFetchDepth.err
+	}
+	// §4.7.11: an unreadable root file, an invalid sigstore.instances entry,
+	// and a refresh setting §13.12 does not admit refuse the start.
+	if err := c.attestation.err(); err != nil {
+		return err
 	}
 	return c.semanticOverlapGuard()
 }

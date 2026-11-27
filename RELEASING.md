@@ -44,6 +44,8 @@ The two SDKs are fully tag-driven; only `buildinfo.go` and `Chart.yaml` require 
 
    On a MINOR or MAJOR bump, re-verify the product comparison in spec §1.5 and in `docs/getting-started/why-podium.md` first: each listed product's name, availability, and stated capabilities, plus new products in the covered categories. A correction to §1.5 goes through the proposal pipeline and merges before the prep PR. `.claude/rules/release-process.md` states the full check.
 
+   Run `go run ./tools/sigstoreroot -check` as well. When it reports that the embedded public-good Sigstore trusted root is not current, run `go run ./tools/sigstoreroot` and land the changed `pkg/sign/embedded/public-good.trusted_root.json` in its own pull request before the prep PR. A release binary counts the age of that root from its build date (§4.7.11), so the release workflow refuses a tag whose embedded root differs from the current TUF target. The `sigstore-root` workflow runs the same check on each prep PR whose head branch is `release/*` and weekly against `main`, and `.claude/rules/release-process.md` carries the same step.
+
 2. **Bump the Go default version and the chart** (drop the `-dev` suffix):
    - `internal/buildinfo/buildinfo.go`: `Version = "0.2.0"`.
    - `deploy/helm/podium/Chart.yaml`: `version: 0.2.0` and `appVersion: 0.2.0`.
@@ -87,6 +89,8 @@ git push origin v0.2.1
 
 The `main` line continues toward `0.3.0` independently. Merge the fix back into `main` if it isn't already there.
 
+The patch branch carries the embedded Sigstore trusted root of the old tag, and the release workflow refuses a tag whose embedded root is not current. Run `go run ./tools/sigstoreroot -check` on `release/0.2.x`, and when it fails, cherry-pick the commit that refreshed `pkg/sign/embedded/public-good.trusted_root.json` on `main` onto `release/0.2.x` before the prep commit, or run `go run ./tools/sigstoreroot` there and commit the result on its own. The `sigstore-root` workflow checks each pull request into a `release/*` branch.
+
 ## What CI does on a tag
 
 A push of `vX.Y.Z` triggers the release workflow. A `validate-tag` job runs first and rejects tags whose commit is not reachable from `main` or any `release/*` branch — a safety net that prevents publishing from a feature branch or stale fork.
@@ -95,7 +99,7 @@ Once that gate passes, five test jobs run in parallel and every publish job list
 
 | Job | Covers |
 |:--|:--|
-| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. |
+| `go` | Full Go suite: `make lint`, `make speccov-drift`, `make matrix-audit`, `make test`, `make coverage-budget`. It first runs `go run ./tools/sigstoreroot -check`, which fails when the embedded public-good Sigstore trusted root differs from the current target of the Sigstore TUF repository. |
 | `python` | `pytest` against `sdks/podium-py`. |
 | `typescript` | `vitest` against `sdks/podium-ts`. |
 | `postgres` | Live `pkg/store` and `pkg/vector` against a `pgvector/pgvector:pg16` service container. |

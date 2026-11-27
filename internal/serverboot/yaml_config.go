@@ -58,8 +58,11 @@ type yamlConfig struct {
 	// source, an integer from 1 to 2147483646. Mirrors PODIUM_GIT_FETCH_DEPTH;
 	// env wins. LoadConfig resolves and validates it, as it does
 	// GitFetchTimeout.
-	GitFetchDepth string       `yaml:"git_fetch_depth,omitempty"`
-	ReadOnly      yamlReadOnly `yaml:"read_only,omitempty"`
+	GitFetchDepth string `yaml:"git_fetch_depth,omitempty"`
+	// Sigstore is the §13.12 `sigstore:` block: the §4.7.11 instances
+	// besides public-good. LoadConfig resolves and validates it.
+	Sigstore yamlSigstore `yaml:"sigstore,omitempty"`
+	ReadOnly yamlReadOnly `yaml:"read_only,omitempty"`
 	// Tenant is the §3.5 per-tenant config block (currently the
 	// scope-preview gate). Config-file-only with an env override.
 	Tenant yamlTenant `yaml:"tenant,omitempty"`
@@ -359,13 +362,9 @@ func interpolateScalar(n *yaml.Node) {
 // decode returns a config.invalid error, which validate refuses the start
 // with.
 func readYAMLConfig() (*yamlConfig, error) {
-	path := os.Getenv("PODIUM_CONFIG_FILE")
+	path := registryYAMLPath()
 	if path == "" {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			return nil, nil
-		}
-		path = home + "/.podium/registry.yaml"
+		return nil, nil
 	}
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -388,6 +387,20 @@ func readYAMLConfig() (*yamlConfig, error) {
 		return nil, configFileParseError(path, err)
 	}
 	return &out.Registry, nil
+}
+
+// registryYAMLPath is the registry.yaml the registry reads: the file
+// PODIUM_CONFIG_FILE names, or ~/.podium/registry.yaml. It is empty when the
+// variable is unset and the home directory cannot be resolved.
+func registryYAMLPath() string {
+	if path := os.Getenv("PODIUM_CONFIG_FILE"); path != "" {
+		return path
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return home + "/.podium/registry.yaml"
 }
 
 // configFileReadError is the refusal for a registry.yaml that exists but

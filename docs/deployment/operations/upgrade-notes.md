@@ -21,6 +21,15 @@ From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM
 - A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
 - A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
 
+### Sigstore trusted roots for author attestation
+
+From 0.8.0, the registry loads the Sigstore instances and trusted roots of author attestation verification at its start (spec §4.7.11). No ingest step verifies attestations yet. [Configuration](../../reference/configuration#author-attestation) lists the settings.
+
+- The refresh of the Sigstore public-good trusted root, a request to `https://tuf-repo-cdn.sigstore.dev` every 24 hours that writes `sigstore/public-good/` beside the SQLite store file, runs only on a registry that verifies attestations on the public-good instance. 0.8.0 verifies none at ingest, so a 0.8.0 registry makes no such request and creates no such directory. When verification arrives, an air-gapped registry sets `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` to a trusted root file, which turns the refresh off, and a registry deployed with the Helm chart, whose root filesystem is read-only, points `PODIUM_SQLITE_PATH` at a mounted writable volume to keep the root copy across restarts.
+- A start refuses with `config.invalid` when `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE`, `PODIUM_SIGSTORE_ROOT_REFRESH`, `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`, `PODIUM_SIGSTORE_ROOT_MAX_AGE`, or a `sigstore.instances` entry of `registry.yaml` holds a value the registry cannot use, such as a trusted root file that cannot be read or a refresh interval below `1m`. 0.7.0 read none of them. Before the upgrade, check that any of them a deployment already sets holds a valid value.
+- `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` keeps its meaning for `podium sign` and `podium verify`. The registry does not read it for attestations.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the settings and the `sigstore/` directory, which can be deleted.
+
 ### Bounded Git fetch
 
 From 0.8.0, each ingest of a `git` layer clones the tracked ref alone, with no tags, at the depth that `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets, 16 commits by default, and fetches again at four times the depth while the force-push check cannot decide from the history it holds. 0.7.0 cloned the complete history once a layer had a last ingested commit.
