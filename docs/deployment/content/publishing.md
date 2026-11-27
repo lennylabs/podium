@@ -67,6 +67,14 @@ Config validation rejects a marketplace target whose harness set names OpenCode 
 
 Re-rendering a marketplace target is idempotent. The materialization writer and the sync lock file remove the files of artifacts that left the view. The JSON manifests merge with the Podium-owned merge tag, so stale entries drop out.
 
+The lock committed with the rendered tree records a `file_hash` for each file the render writes whole, and the render removes a stale file only when its bytes in the checkout still match that hash. When a stale file cannot be removed under that check, the render fails the target before it writes or removes anything, and nothing is committed or pushed. This happens when the lock entry records no `file_hash`, as in a lock that Podium 0.7.0 committed, when the file changed after the render wrote it, including through a line-ending conversion that Git applies on checkout, and when the file cannot be read. A removal that fails during the cleanup, for example in a read-only directory, also fails the target before the publish phase. The error names each file with its reason. For each named file, do one of the following and commit the change:
+
+- Remove the file from the repository.
+- Restore the bytes the render wrote.
+- When the render did not write the file, for example because someone added a forged entry for `README.md` to the lock, remove that entry from `.podium/sync.lock` and keep the file.
+
+A lock entry that names a file the render did not write fails every render until the entry is removed. Podium fails the render rather than delete a file it cannot attribute to itself. A render that fails the hash check leaves the checkout as it was, so the next run renders the whole catalog change, and the publish phase commits and pushes it. A removal that fails during the cleanup happens after the render has written the new tree. Fix the cause, such as the directory's permissions, and render again in the same checkout rather than deleting the file by hand: the next render then removes the file and reports the change, while a file deleted by hand leaves that render with no change to publish. [Removal of out-of-scope files](../../consuming/selective-materialization#removal-of-out-of-scope-files) states the full rule.
+
 The git diff after a render is the catalog delta. When the delta is empty, `skip_if_no_changes` suppresses an empty commit. A second `podium sync --config` against an unchanged catalog therefore produces no second commit.
 
 ---

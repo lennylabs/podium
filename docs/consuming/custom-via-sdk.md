@@ -278,6 +278,8 @@ The registry synthesizes an `ARTIFACT.md` for a skill that has none. `materializ
 
 The `harness` argument of `materialize()` accepts only `none`. Any other value raises an argument error before a file is written: `ValueError` in Python and `Error` in TypeScript.
 
+`materialize()` refuses an artifact whose canonical ID or resource path has a segment that names `.git`, such as `.git`, `.GIT`, or the NTFS short name `GIT~1`, because a written `.git/config` can set a command that Git runs. It raises `MaterializeError` before it fetches a resource or writes a file. The SDKs also skip a workspace overlay that holds a package whose canonical ID has a segment that names `.git` or `.podium`, with a warning that names the overlay path: a `RuntimeWarning` in Python and a process warning in TypeScript.
+
 ---
 
 ## Load artifacts in bulk

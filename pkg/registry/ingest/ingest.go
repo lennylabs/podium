@@ -1415,8 +1415,8 @@ func loadPlainSkill(fsys fs.FS, skillPath, layerID string) (filesystem.ArtifactR
 }
 
 // captureResources walks the package directory dir and records every file
-// in it as a bundled resource of rec, except the package root's manifests and
-// the files of a nested package.
+// in it as a bundled resource of rec, except the package root's manifests,
+// the files of a nested package, and version-control data.
 func captureResources(fsys fs.FS, dir string, rec *filesystem.ArtifactRecord) error {
 	skillPath := joinPath(dir, "SKILL.md")
 	isSkill := rec.Artifact.Type == manifest.TypeSkill
@@ -1425,6 +1425,14 @@ func captureResources(fsys fs.FS, dir string, rec *filesystem.ArtifactRecord) er
 			// spec: §6.10 — an unreadable directory under the artifact package
 			// is the same source-unreachable condition walkLayer reports.
 			return fmt.Errorf("%w: %v", source.ErrSourceUnreachable, err)
+		}
+		// Spec: §4.4 — a directory or file named exactly .git is
+		// version-control data, left out of the set and never read.
+		if p != dir && filesystem.SkipVersionControl(d.Name()) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			// spec: §4.2/§4.4 — stop at a nested artifact-package boundary so

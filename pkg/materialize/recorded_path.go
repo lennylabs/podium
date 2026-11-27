@@ -21,13 +21,16 @@ var ErrUnsafeRecordedPath = errors.New("materialize: unsafe recorded path")
 // sync records is a path a later run accepts.
 //
 // A path passes when it is a non-empty, slash-separated relative path with no
-// empty, ".", "..", or ".git" segment, no backslash, no control character,
-// and no volume name, and it names no sync state under .podium/. The only
-// .podium/ subtree an adapter writes is the bundled-resource bucket
-// .podium/resources/ (§6.7), so every other .podium/ path (the lock, its
-// temporary, sync.yaml, sync.local.yaml, the workspace overlay, the change
-// summary) is refused. The .git and .podium comparisons ignore case because a
-// case-insensitive filesystem resolves .GIT to .git.
+// empty, ".", or ".." segment, no segment that names .git, no backslash, no
+// control character, and no volume name, and it names no sync state under
+// .podium/. The only .podium/ subtree an adapter writes is the
+// bundled-resource bucket .podium/resources/ (§6.7), so every other .podium/
+// path (the lock, its temporary, sync.yaml, sync.local.yaml, the workspace
+// overlay, the change summary) is refused. A segment names .git or .podium
+// under the aliasing rule (AliasesDotGit, AliasesDotPodium): a filesystem
+// resolves .GIT, a .git that carries a code point HFS+ ignores, .git. with
+// the trailing period NTFS strips, and the short name GIT~1 to the real .git,
+// so a byte comparison alone would let a write land there.
 //
 // Spec: §7.5.3
 func CheckRecordedPath(p string) error {
@@ -48,11 +51,11 @@ func CheckRecordedPath(p string) error {
 		switch {
 		case s == "" || s == "." || s == "..":
 			return fmt.Errorf("%w: empty, \".\", or \"..\" segment", ErrUnsafeRecordedPath)
-		case strings.EqualFold(s, ".git"):
-			return fmt.Errorf("%w: .git segment", ErrUnsafeRecordedPath)
+		case AliasesDotGit(s):
+			return fmt.Errorf("%w: .git segment %q", ErrUnsafeRecordedPath, s)
 		}
 	}
-	if strings.EqualFold(segs[0], ".podium") && (len(segs) < 3 || segs[1] != "resources") {
+	if AliasesDotPodium(segs[0]) && (len(segs) < 3 || segs[1] != "resources") {
 		return fmt.Errorf("%w: sync state under .podium/", ErrUnsafeRecordedPath)
 	}
 	return nil

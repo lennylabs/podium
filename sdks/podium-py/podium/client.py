@@ -10,11 +10,12 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import warnings
 import webbrowser
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from . import _config, _delivery, _oauth, _overlay, _skill_document
+from . import _config, _delivery, _oauth, _overlay, _reserved_names, _skill_document
 from ._errors import RegistryError
 
 try:
@@ -147,8 +148,17 @@ def _safe_join(root: str, rel: str) -> str:
     Mirrors pkg/materialize.Write's ErrOutOfDestination guard: a
     bundled-resource path containing ``..`` must not write outside the
     destination root.
+
+    Spec: §7.5.3, §7.6 — a segment of ``rel`` (the canonical ID or a
+    resource path) that names ``.git``, literally or under the aliasing rule,
+    raises, because a filesystem resolves it to a ``.git`` directory where a
+    written ``config`` can set a command Git runs. ``root`` is the caller's
+    destination and is not checked.
     """
     parts = [p for p in rel.replace("\\", "/").split("/") if p not in ("", ".")]
+    for part in parts:
+        if _reserved_names.names_dot_git(part):
+            raise MaterializeError(f"path segment {part!r} of {rel!r} names .git")
     target = os.path.normpath(os.path.join(root, *parts))
     root_abs = os.path.normpath(root)
     if target != root_abs and not target.startswith(root_abs + os.sep):
@@ -903,11 +913,23 @@ class Client:
             return None
         if session_id and session_id in self._overlay_cache:
             return self._overlay_cache[session_id]
-        index = _overlay.LocalOverlay(self.overlay_path)
+        try:
+            index: "_overlay.LocalOverlay | None" = _overlay.LocalOverlay(self.overlay_path)
+        except _overlay.OverlayRefused as exc:
+            # Spec: §6.4, §6.9 — an overlay that holds a package whose
+            # canonical ID names .git or .podium fails to load. The SDK skips
+            # the overlay with a warning naming the path, as the MCP server
+            # does, and serves none of its packages.
+            warnings.warn(
+                f"workspace overlay path {self.overlay_path!r} unavailable ({exc}); overlay disabled",
+                RuntimeWarning,
+                stacklevel=2,
+            )
+            index = None
         # spec §6.4 — an overlay with neither artifacts nor DOMAIN.md files
         # contributes nothing, so it is treated as absent. load_domain reads
         # the DOMAIN.md set, so a domains-only overlay is retained here.
-        if not index.artifacts and not index.domains:
+        if index is not None and not index.artifacts and not index.domains:
             index = None
         if session_id:
             self._overlay_cache[session_id] = index

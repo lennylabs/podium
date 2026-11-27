@@ -433,7 +433,7 @@ func checkResolvedTarget(absDest, realDest, full, landing, rel string) error {
 // or written through such a link even when it resolves inside the root.
 func checkPodiumDir(absDest, rel string) error {
 	first, _, _ := strings.Cut(filepath.ToSlash(rel), "/")
-	if !strings.EqualFold(first, ".podium") {
+	if !AliasesDotPodium(first) {
 		return nil
 	}
 	info, err := os.Lstat(filepath.Join(absDest, first))

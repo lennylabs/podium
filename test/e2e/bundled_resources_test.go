@@ -1573,6 +1573,74 @@ func TestBundled_ImportSkipsDotPrefixedDirectories(t *testing.T) {
 	mustNotExist(t, filepath.Join(tgt, ".github"))
 }
 
+// podium import refuses a --source subdirectory whose name a filesystem
+// resolves to .git, such as the NTFS short name GIT~1, because the name
+// becomes the artifact ID and a directory of the target. The refusal names
+// the directory, and the target's .git is untouched.
+//
+// Spec: §4.2, §7.5.3
+func TestBundled_ImportRefusesDotGitAlias(t *testing.T) {
+	t.Parallel()
+	src := writeRegistry(t, map[string]string{
+		"GIT~1/SKILL.md": "---\nname: hooks\ndescription: Hooks.\n---\n\nBody.\n",
+		"GIT~1/config":   "[core]\n\tfsmonitor = touch pwned\n",
+	})
+	tgt := t.TempDir()
+	head := filepath.Join(tgt, ".git", "HEAD")
+	solofsWriteFile(t, head, "ref: refs/heads/main\n")
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt)
+	if res.Exit != 1 {
+		t.Fatalf("import exit=%d, want 1; stderr=%s", res.Exit, res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, filepath.Join(src, "GIT~1")) || !strings.Contains(res.Stderr, "names .git or .podium") {
+		t.Errorf("stderr = %q, want the directory and the .git refusal", res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(tgt, "GIT~1"))
+	mustNotExist(t, filepath.Join(tgt, ".git", "config"))
+}
+
+// podium import leaves a source skill's .git directory, and a nested .git
+// file, out of the target, so a skill that is a Git clone imports without
+// planting a repository with the source's .git/config in the layer. A folder
+// inside the skill whose name a filesystem resolves to .git is refused, and
+// nothing is written.
+//
+// Spec: §4.4, §7.5.3
+func TestBundled_ImportLeavesOutDotGitAndRefusesAliases(t *testing.T) {
+	t.Parallel()
+	const skill = "---\nname: pdf\ndescription: Read PDFs.\n---\n\nRead the PDF.\n"
+	src := writeRegistry(t, map[string]string{
+		"pdf/SKILL.md":           skill,
+		"pdf/scripts/run.sh":     "echo hi\n",
+		"pdf/.git/config":        "[core]\n\tfsmonitor = touch pwned\n",
+		"pdf/.git/HEAD":          "ref: refs/heads/main\n",
+		"pdf/.git/objects/ab/cd": "x",
+		"pdf/vendor/lib/.git":    "gitdir: x\n",
+	})
+	tgt := t.TempDir()
+	res := runPodium(t, "", nil, "import", "--source", src, "--target", tgt)
+	if res.Exit != 0 {
+		t.Fatalf("import of a Git clone exit=%d stderr=%s", res.Exit, res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(tgt, "pdf", ".git"))
+	mustNotExist(t, filepath.Join(tgt, "pdf", "vendor", "lib", ".git"))
+	mustExist(t, filepath.Join(tgt, "pdf", "scripts", "run.sh"))
+	if res := runPodium(t, "", nil, "lint", "--registry", tgt); res.Exit != 0 {
+		t.Errorf("lint of the imported layer exit=%d; stdout=%s stderr=%s", res.Exit, res.Stdout, res.Stderr)
+	}
+
+	src = writeRegistry(t, map[string]string{
+		"pdf/SKILL.md":            skill,
+		"pdf/assets/GIT~1/config": "[core]\n\tfsmonitor = touch pwned\n",
+	})
+	tgt = t.TempDir()
+	res = runPodium(t, "", nil, "import", "--source", src, "--target", tgt)
+	if res.Exit != 1 || !strings.Contains(res.Stderr, "assets/GIT~1") || !strings.Contains(res.Stderr, "resolves to .git") {
+		t.Errorf("import with assets/GIT~1 exit=%d, want 1 naming the folder; stderr=%s", res.Exit, res.Stderr)
+	}
+	mustNotExist(t, filepath.Join(tgt, "pdf"))
+}
+
 // The --type flag is removed from podium import, so passing it exits 2.
 //
 // Spec: §4.3.4

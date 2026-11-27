@@ -149,6 +149,7 @@ func rulesWith(client *http.Client, th Thresholds) []Rule {
 		ruleDomainImportCycle{},
 		ruleDomainImportBroadGlob{},
 		ruleDomainBodySize{th: th},
+		ruleResourcePathReserved{},
 	}
 }
 

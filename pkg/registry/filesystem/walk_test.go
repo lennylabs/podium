@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"testing"
 
@@ -732,6 +733,88 @@ func TestWalk_AtSegmentRejected(t *testing.T) {
 		t.Fatalf("expected error for '@' in a canonical-ID segment")
 	} else if !strings.Contains(err.Error(), "@") {
 		t.Errorf("error %q missing '@'", err)
+	}
+}
+
+// Spec: §4.2, §7.5.3 — a canonical-ID segment that names .git or .podium
+// under the aliasing rule is refused, because a consumer writes the ID as a
+// path and a filesystem resolves GIT~1 or a .git that carries a code point
+// HFS+ ignores to the real .git. Package discovery already skips a
+// dot-prefixed directory; these names do not begin with a dot.
+func TestValidateCanonicalID_RefusesReservedNameAliases(t *testing.T) {
+	t.Parallel()
+	for _, id := range []string{
+		"GIT~1/hooks",
+		"finance/git~1",
+		"\u200c.git/config",
+		"finance/\u200c.GIT",
+		"PODIUM~1/sync",
+		"\ufeff.podium/overlay",
+		"PO1A2B~1/x",
+	} {
+		err := ValidateCanonicalID(id)
+		if err == nil || !strings.Contains(err.Error(), "names .git or .podium") {
+			t.Errorf("ValidateCanonicalID(%q) = %v, want the .git or .podium refusal", id, err)
+		}
+	}
+	for _, id := range []string{"GIT~2/hooks", "git/hooks", "finance/github-actions", "podium/x"} {
+		if err := ValidateCanonicalID(id); err != nil {
+			t.Errorf("ValidateCanonicalID(%q) = %v, want nil", id, err)
+		}
+	}
+}
+
+// Spec: §4.4 — the filesystem walk leaves a directory or file named exactly
+// .git below a package root out of the bundled set, so a skill directory
+// that is a Git clone bundles its working files alone. A name that only
+// resolves to .git stays in the set for lint to refuse.
+func TestWalk_DotGitLeftOutOfBundledSet(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{Path: "team/pdf/ARTIFACT.md", Content: stringf(agentArtifact, "Pdf", "pdf")},
+		testharness.WriteTreeOption{Path: "team/pdf/scripts/run.sh", Content: "echo hi\n"},
+		testharness.WriteTreeOption{Path: "team/pdf/.git/config", Content: "[core]\n"},
+		testharness.WriteTreeOption{Path: "team/pdf/.git/objects/ab/cdef", Content: "x"},
+		testharness.WriteTreeOption{Path: "team/pdf/vendor/lib/.git", Content: "gitdir: x\n"},
+		testharness.WriteTreeOption{Path: "team/pdf/GIT~1/config", Content: "[core]\n"},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	recs, err := reg.Walk(WalkOptions{})
+	if err != nil || len(recs) != 1 {
+		t.Fatalf("Walk = (%d records, %v), want one", len(recs), err)
+	}
+	var got []string
+	for p := range recs[0].Resources {
+		got = append(got, p)
+	}
+	sort.Strings(got)
+	if strings.Join(got, ",") != "GIT~1/config,scripts/run.sh" {
+		t.Errorf("resources = %v, want GIT~1/config and scripts/run.sh", got)
+	}
+}
+
+// Spec: §4.2, §7.5.3 — the walk refuses a package whose directory name
+// aliases .git, so a filesystem-source sync or an overlay never materializes
+// it into a workspace.
+func TestWalk_AliasedDotGitSegmentRejected(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	testharness.WriteTree(t, root,
+		testharness.WriteTreeOption{
+			Path:    "GIT~1/hooks/ARTIFACT.md",
+			Content: stringf(agentArtifact, "Hooks", "hooks"),
+		},
+	)
+	reg, err := Open(root)
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	if _, err = reg.Walk(WalkOptions{}); err == nil || !strings.Contains(err.Error(), `"GIT~1"`) {
+		t.Fatalf("Walk = %v, want the refusal naming the GIT~1 segment", err)
 	}
 }
 
