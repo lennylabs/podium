@@ -96,6 +96,7 @@ func KnownMatrices() []Matrix {
 					"config.layer_path_ambiguous",
 					"config.invalid_idp_group_mapping",
 					"config.public_mode_with_idp",
+					"config.identity_provider_removed",
 					"config.invalid_sign_mode",
 					"config.signature_provider_unavailable",
 					"config.scim_store_unavailable",

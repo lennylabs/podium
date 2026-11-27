@@ -1667,6 +1667,15 @@ func run(ctx context.Context, stop func()) error {
 		return err
 	}
 
+	// §13.10 Identity provider removed between starts: a start with a
+	// verifier records verified identity, and a start without one over a
+	// store that recorded it is refused unless the operator acknowledges the
+	// removal. It reads verifierInstalled rather than the provider label, and
+	// runs before server.New so a refused start serves no request.
+	if err := identityProviderRemovalGuard(ctx, st, cfg, verifierInstalled); err != nil {
+		return err
+	}
+
 	srv := server.New(registry, bootOpts...)
 
 	// §7.3.1 layer-management endpoint: mounted alongside the meta-
@@ -2087,6 +2096,13 @@ type Config struct {
 	// PODIUM_ALLOW_PUBLIC_BIND). Public mode refuses a non-loopback bind
 	// unless this is set.
 	allowPublicBind bool
+	// allowIdentityProviderRemoval is the §13.10 acknowledgement
+	// (--allow-identity-provider-removal /
+	// PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL) that a registry which ran with
+	// verified identity now starts without a request-time verifier. It is
+	// meant for one start, which clears the record; it has no registry.yaml
+	// key for that reason.
+	allowIdentityProviderRemoval bool
 	// webUI mounts the §13.10 single-page web UI at /app/ and redirects the
 	// root to it (--web-ui /
 	// PODIUM_WEB_UI). webUIAllowPublicBind (--web-ui-allow-public-bind /
@@ -2461,6 +2477,7 @@ func (c *Config) Settings() []Setting {
 		{"bind", c.bind, envOrSrc("PODIUM_BIND", defaultSrc)},
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"allow_public_bind", boolStr(c.allowPublicBind), envOrSrc("PODIUM_ALLOW_PUBLIC_BIND", defaultSrc)},
+		{"allow_identity_provider_removal", boolStr(c.allowIdentityProviderRemoval), envOrSrc("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
 		{"oauth_audience", strings.Join(c.oauthAudiences, ","), envOrSrc("PODIUM_OAUTH_AUDIENCE", yamlSrc)},
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
@@ -2547,6 +2564,7 @@ func LoadConfig() *Config {
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
 		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", objectstore.DefaultReadTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
+		allowIdentityProviderRemoval:    isTrue(os.Getenv("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL")),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),
 		oauthAuthorizationEndpoint:      os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
