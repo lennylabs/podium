@@ -28,14 +28,17 @@ import (
 )
 
 // bootFixture is one standalone boot the rehash tests drive: an isolated home,
-// a sqlite store, a one-artifact layer path, and a free bind address.
+// a sqlite store, a one-artifact layer path, and the address its last boot
+// listened on.
 type bootFixture struct {
 	home       string
 	sqlitePath string
 	layerPath  string
 	keyPath    string
 	auditPath  string
-	addr       string
+	// addr is the address the last boot listened on, which bootWith reads
+	// from run's log before it calls serving, or the address holdBind holds.
+	addr string
 }
 
 func newBootFixture(t *testing.T) *bootFixture {
@@ -52,7 +55,6 @@ func newBootFixture(t *testing.T) *bootFixture {
 		layerPath:  layerPath,
 		keyPath:    filepath.Join(home, "registry-signing.key"),
 		auditPath:  filepath.Join(home, "audit.log"),
-		addr:       freeAddr(t),
 	}
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
@@ -63,7 +65,11 @@ func newBootFixture(t *testing.T) *bootFixture {
 	t.Setenv("PODIUM_SQLITE_PATH", f.sqlitePath)
 	t.Setenv("PODIUM_LAYER_PATH", layerPath)
 	t.Setenv("PODIUM_AUDIT_LOG_PATH", f.auditPath)
-	t.Setenv("PODIUM_BIND", f.addr)
+	// Port 0: run binds a port the kernel picks and holds it from then on.
+	// A port a test picked, released, and passed to run could be taken by
+	// another listener in between, whose /healthz answer bootWith would read
+	// as this registry being ready.
+	t.Setenv("PODIUM_BIND", "127.0.0.1:0")
 	// The registry signs by default (§13.10), so a fixture that is not about
 	// signing turns it off; a case that signs sets registry-key and its key.
 	t.Setenv("PODIUM_SIGN", "none")
@@ -122,9 +128,10 @@ func (f *bootFixture) bootWith(t *testing.T, serving func()) (string, error) {
 		}
 		// healthOK's own readiness rule: the listener is open long
 		// before the boot finishes, so readiness is /healthz answering
-		// rather than a dial succeeding. The answer counts only once this
-		// run has logged its own listener (ownsListener).
-		if ownsListener(logs, f.addr) && healthOK(f.addr, 200*time.Millisecond) {
+		// rather than a dial succeeding. The address comes from run's
+		// listening line (listeningAddr).
+		if addr := listeningAddr(logs); addr != "" && healthOK(addr, 200*time.Millisecond) {
+			f.addr = addr
 			if serving != nil {
 				serving()
 			}
@@ -140,6 +147,30 @@ func (f *bootFixture) bootWith(t *testing.T, serving func()) (string, error) {
 	}
 	t.Fatal("run neither bound its listener nor returned")
 	return "", nil
+}
+
+// holdBind listens on a loopback port, points PODIUM_BIND and f.addr at it,
+// and returns the listener, so the next boot's bind fails while the caller
+// holds it.
+func (f *bootFixture) holdBind(t *testing.T) net.Listener {
+	t.Helper()
+	held, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("hold a bind address: %v", err)
+	}
+	f.addr = held.Addr().String()
+	t.Setenv("PODIUM_BIND", f.addr)
+	return held
+}
+
+// releaseBind closes the listener holdBind returned and points PODIUM_BIND
+// back at port 0 for the next boot.
+func (f *bootFixture) releaseBind(t *testing.T, held net.Listener) {
+	t.Helper()
+	if err := held.Close(); err != nil {
+		t.Fatalf("release the bind address: %v", err)
+	}
+	t.Setenv("PODIUM_BIND", "127.0.0.1:0")
 }
 
 // openStoreDirect opens the fixture's sqlite store outside any server process,
@@ -593,10 +624,7 @@ func TestRun_BindFailureDoesNotRewriteTheStore(t *testing.T) {
 		t.Fatalf("close store: %v", err)
 	}
 
-	held, err := net.Listen("tcp", f.addr)
-	if err != nil {
-		t.Fatalf("hold the bind address: %v", err)
-	}
+	held := f.holdBind(t)
 	defer func() { _ = held.Close() }()
 
 	_, runErr := f.boot(t)
@@ -664,15 +692,10 @@ func TestRun_BindFailureStillRefusesAGeneratedKey(t *testing.T) {
 		}
 	}
 
-	held, err := net.Listen("tcp", f.addr)
-	if err != nil {
-		t.Fatalf("hold the bind address: %v", err)
-	}
+	held := f.holdBind(t)
 	_, runErr := f.boot(t)
 	assert(t, runErr)
-	if err := held.Close(); err != nil {
-		t.Fatalf("release the bind address: %v", err)
-	}
+	f.releaseBind(t, held)
 
 	_, runErr = f.boot(t)
 	assert(t, runErr)
@@ -1232,10 +1255,7 @@ func TestRun_RefusesAnUnmigratedStoreOutsideTheKeyDirectory(t *testing.T) {
 		f := newBootFixture(t)
 		rec := unmigratedSigningStore(t, f)
 		moveKey(t, f)
-		held, err := net.Listen("tcp", f.addr)
-		if err != nil {
-			t.Fatalf("hold the bind address: %v", err)
-		}
+		held := f.holdBind(t)
 		defer func() { _ = held.Close() }()
 		_, runErr := f.boot(t)
 		requireAll(t, runErr, "registry start:", "sign-stored-rows")
@@ -1365,10 +1385,7 @@ func TestRun_EmptyStoreOutsideTheKeyDirectoryIngestsNothingOnABindFailure(t *tes
 	keyPath := filepath.Join(t.TempDir(), "registry-signing.key")
 	t.Setenv("PODIUM_SIGN", "registry-key")
 	t.Setenv("PODIUM_SIGN_KEY_PATH", keyPath)
-	held, err := net.Listen("tcp", f.addr)
-	if err != nil {
-		t.Fatalf("hold the bind address: %v", err)
-	}
+	held := f.holdBind(t)
 	_, runErr := f.boot(t)
 	if runErr == nil || !strings.Contains(runErr.Error(), "serve: bind") {
 		t.Fatalf("run = %v, want the bind error", runErr)
@@ -1383,9 +1400,7 @@ func TestRun_EmptyStoreOutsideTheKeyDirectoryIngestsNothingOnABindFailure(t *tes
 	if err := st.Close(); err != nil {
 		t.Fatalf("close store: %v", err)
 	}
-	if err := held.Close(); err != nil {
-		t.Fatalf("release the bind address: %v", err)
-	}
+	f.releaseBind(t, held)
 
 	if _, err := f.boot(t); err != nil {
 		t.Fatalf("second start: %v", err)

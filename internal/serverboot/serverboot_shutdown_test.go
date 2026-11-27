@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -109,18 +110,6 @@ func TestStartStoreRetentionScheduler_StopsOnContextCancel(t *testing.T) {
 	cancel()
 }
 
-// freeAddr returns a loopback address whose port was free a moment ago.
-func freeAddr(t *testing.T) string {
-	t.Helper()
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("listen: %v", err)
-	}
-	addr := ln.Addr().String()
-	_ = ln.Close()
-	return addr
-}
-
 // dialOK reports whether addr accepts a TCP connection within the deadline.
 func dialOK(addr string, within time.Duration) bool {
 	deadline := time.Now().Add(within)
@@ -138,18 +127,6 @@ func dialOK(addr string, within time.Duration) bool {
 // deadline. run opens its listener early, so a raw dial lands in the backlog
 // long before the boot finishes; /healthz answers only once the serve loop is
 // running, which is after the §13.4 rehash pass and the bootstrap ingest.
-// ownsListener reports whether the run writing to logs bound addr itself.
-//
-// freeAddr releases its port before run binds it, so another process can
-// take the port in between. run does not stop on a failed bind until just
-// before it serves, so a /healthz answer from that other process would read
-// as this registry being ready, and a caller that then cancels the context
-// interrupts this run in the middle of its start. run logs the listening
-// line only after its own bind succeeded, immediately before it serves.
-func ownsListener(logs *syncBuffer, addr string) bool {
-	return strings.Contains(logs.String(), "podium-server listening on "+addr+" ")
-}
-
 func healthOK(addr string, within time.Duration) bool {
 	client := &http.Client{Timeout: 200 * time.Millisecond}
 	deadline := time.Now().Add(within)
@@ -163,17 +140,32 @@ func healthOK(addr string, within time.Duration) bool {
 	return false
 }
 
+// listeningAddr returns the address in run's "podium-server listening on"
+// line, or "" before run has written it. run writes the line after its own
+// bind succeeded and immediately before it serves, so a /healthz answer on
+// that address comes from that run. Under PODIUM_BIND on port 0 the address
+// names the port the kernel picked.
+func listeningAddr(logs *syncBuffer) string {
+	m := listeningLine.FindStringSubmatch(logs.String())
+	if m == nil {
+		return ""
+	}
+	return m[1]
+}
+
+// listeningLine matches run's listening line.
+var listeningLine = regexp.MustCompile(`podium-server listening on (\S+) \(`)
+
 // Spec: §13.9 / §13.10 — run boots the standalone server (SQLite, filesystem
 // object store, no auth) and shuts down gracefully when its context is
 // cancelled, the in-process equivalent of a SIGTERM. It exercises the full boot
 // path (config, store, background daemons, serve loop), so the graceful-shutdown
 // wiring is covered in-process and not only by the subprocess e2e smoke.
 func TestRun_StandaloneGracefulShutdown(t *testing.T) {
-	addr := freeAddr(t)
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("PODIUM_BIND", addr)
+	t.Setenv("PODIUM_BIND", "127.0.0.1:0")
 	t.Setenv("PODIUM_POSTGRES_DSN", "") // force the standalone SQLite path
 	t.Setenv("PODIUM_S3_ENDPOINT", "")  // force the filesystem object store
 	t.Setenv("PODIUM_CONFIG_FILE", "")
@@ -198,7 +190,8 @@ func TestRun_StandaloneGracefulShutdown(t *testing.T) {
 			t.Fatalf("run returned before serving: %v", err)
 		default:
 		}
-		ready = ownsListener(logs, addr) && healthOK(addr, 200*time.Millisecond)
+		addr := listeningAddr(logs)
+		ready = addr != "" && healthOK(addr, 200*time.Millisecond)
 		if !ready {
 			time.Sleep(10 * time.Millisecond)
 		}

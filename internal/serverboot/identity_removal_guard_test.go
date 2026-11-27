@@ -364,7 +364,7 @@ func TestRun_RefusedStartLeavesStoreAndLiveReplicaUnchanged(t *testing.T) {
 
 		t.Setenv("PODIUM_IDENTITY_PROVIDER", "")
 		t.Setenv("PODIUM_BOOTSTRAP_ADMINS", "bob@acme.com")
-		t.Setenv("PODIUM_BIND", freeAddr(t))
+		t.Setenv("PODIUM_BIND", "127.0.0.1:0")
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		refused = run(ctx, func() {})
