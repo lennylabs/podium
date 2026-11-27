@@ -17,7 +17,7 @@ on:
         default: false
 
 concurrency:
-  group: podium-attest
+  group: podium-attest-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:

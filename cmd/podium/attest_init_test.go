@@ -141,7 +141,7 @@ func TestAttestInit_SharedAndReusable(t *testing.T) {
 	if got := readWorkflow(t, dir); got != wantRendered(t, ghactions.Workflow{Kind: ghactions.KindCaller, Branch: "trunk", Shared: "acme/.github"}) {
 		t.Errorf("caller workflow:\n%s", got)
 	}
-	if !strings.Contains(stdout, "--trust-preset github-actions --trust-signer 'https://token.actions.githubusercontent.com=https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main'") ||
+	if !strings.Contains(stdout, "--trust-preset github-actions --trust-signer https://token.actions.githubusercontent.com=https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main") ||
 		!strings.Contains(stdout, "push it to trunk") {
 		t.Errorf("stdout:\n%s", stdout)
 	}

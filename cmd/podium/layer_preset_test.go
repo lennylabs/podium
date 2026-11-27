@@ -164,7 +164,7 @@ func TestTrustPreset_Refusals(t *testing.T) {
 		{"https://github.com/acme/old", nil, []string{"with the record of acme/new", "Register with --repo https://github.com/acme/new"}},
 		{"https://github.com/acme/secret", nil, []string{"as private", "--trust-instance github", "--trust-source-repository-id 123456"}},
 		{"https://github.com/acme/inside", nil, []string{"as internal", "--trust-instance github"}},
-		{"https://github.com/acme/gone", nil, []string{"HTTP 404", "GH_TOKEN or GITHUB_TOKEN", "--trust-source-repository-id <repository-id>"}},
+		{"https://github.com/acme/gone", nil, []string{"HTTP 404", "GH_TOKEN or GITHUB_TOKEN", "--trust-source-repository-id '<repository-id>'"}},
 		{"https://github.com/acme/broken", nil, []string{"HTTP 500", "--trust-signer"}},
 		{"https://github.com/acme/slowpoe", map[string]string{"PODIUM_GITHUB_API_TIMEOUT": "100ms"}, []string{"no answer within 100ms (PODIUM_GITHUB_API_TIMEOUT)"}},
 	}

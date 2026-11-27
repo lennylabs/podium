@@ -359,3 +359,77 @@ func TestRecipeScript_PublishRetriesALostRace(t *testing.T) {
 		t.Errorf("files = %v, want the scanner's bundle restored", got)
 	}
 }
+
+// Spec: §7.3.5 (Writing the signing workflow) — the guard reads the tip from
+// the ls-remote line whose ref name is exactly refs/heads/<branch>, so a
+// branch or a tag whose name ends in that text does not stop signing.
+func TestRecipeScript_GuardReadsTheExactRef(t *testing.T) {
+	t.Parallel()
+	r := newRecipe(t)
+	tip := r.git(r.origin, "rev-parse", "refs/heads/main")
+	work := filepath.Join(r.base, "full")
+	r.git("", "clone", "-q", r.origin, work)
+	r.git(work, "commit", "-q", "--allow-empty", "-m", "decoy")
+	r.git(work, "push", "-q", "origin", "HEAD:refs/heads/attacker/refs/heads/main")
+	r.git(work, "push", "-q", "origin", "HEAD:refs/tags/refs/heads/main")
+	output := filepath.Join(r.base, "out")
+	code, out := r.runScript(work, r.guard, "GITHUB_REF=refs/heads/main", "GITHUB_SHA="+tip, "GITHUB_OUTPUT="+output, "GITHUB_STEP_SUMMARY="+filepath.Join(r.base, "s"))
+	got, _ := os.ReadFile(output)
+	if code != 0 || strings.TrimSpace(string(got)) != "sign=true" {
+		t.Errorf("guard with decoy refs: exit %d, output %q\n%s", code, got, out)
+	}
+}
+
+// Spec: §7.3.5 (Writing the signing workflow) — the publish step reads the
+// signed ref by its exact name, so a decoy ref whose name ends in
+// refs/heads/podium/signed neither fails the first run nor becomes a parent.
+func TestRecipeScript_PublishReadsTheExactSignedRef(t *testing.T) {
+	t.Parallel()
+	r := newRecipe(t)
+	main1 := r.git(r.origin, "rev-parse", "refs/heads/main")
+	work := filepath.Join(r.base, "decoy")
+	r.git("", "clone", "-q", r.origin, work)
+	r.git(work, "commit", "-q", "--allow-empty", "-m", "decoy")
+	r.git(work, "push", "-q", "origin", "HEAD:refs/heads/attacker/refs/heads/podium/signed")
+	r.bundle("build", "run 1")
+	first := r.publishRun()
+	if p := r.parents(first); len(p) != 1 || p[0] != main1 {
+		t.Errorf("first commit parents = %v, want [%s]", p, main1)
+	}
+	r.pushMain("v2")
+	r.bundle("build", "run 2")
+	second := r.publishRun()
+	if p := r.parents(second); len(p) != 2 || p[0] != first {
+		t.Errorf("second commit parents = %v, want the real signed tip first", p)
+	}
+}
+
+// Spec: §7.3.5 (Writing the signing workflow) — a re-run of the publish job
+// alone of an older run, whose commit is no longer the tip of main, ends
+// successfully with a notice and leaves podium/signed where the newer run
+// put it.
+func TestRecipeScript_PublishRerunOfAnOlderRunPublishesNothing(t *testing.T) {
+	t.Parallel()
+	r := newRecipe(t)
+	oldCheckout := r.checkout()
+	r.pushMain("v2")
+	r.bundle("build", "run B")
+	newer := r.publishRun()
+
+	r.bundle("build", "run A")
+	summary := filepath.Join(r.base, "summary-rerun")
+	code, out := r.runScript(oldCheckout, r.publish, "GITHUB_STEP_SUMMARY="+summary)
+	if code != 0 {
+		t.Fatalf("re-run exited %d:\n%s", code, out)
+	}
+	if got := r.git(r.origin, "rev-parse", "refs/heads/podium/signed"); got != newer {
+		t.Errorf("podium/signed moved from %s to %s", newer, got)
+	}
+	if r.git(r.origin, "show", "refs/heads/podium/signed:skills/greet/ARTIFACT.md") != "v2" {
+		t.Error("podium/signed no longer holds the newest main")
+	}
+	notes, _ := os.ReadFile(summary)
+	if !strings.Contains(out, "::notice::podium-attest did not publish") || !strings.Contains(string(notes), "no longer the tip") {
+		t.Errorf("no notice:\n%s\n%s", out, notes)
+	}
+}

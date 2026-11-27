@@ -106,7 +106,7 @@ const GenericFlags = "--trust require \\\n    --trust-signer '<issuer>=<identity
 // preset refuses. A zero record writes placeholders for the values the
 // command could not read. instance names the Sigstore instance, and an empty
 // one leaves --trust-instance out. signer, when not empty, is the
-// <issuer>=<identity> of a shared workflow.
+// <issuer>=<identity> of a shared workflow. Each value is shell-quoted.
 //
 // Spec: §7.3.1 (Trust preset)
 func ExplicitFlags(repo Repo, rec Record, signer, instance string) string {
@@ -118,16 +118,16 @@ func ExplicitFlags(repo Repo, rec Record, signer, instance string) string {
 		signer = Issuer + "=" + WorkflowIdentity(name, branch)
 	}
 	flags := []string{
-		"--ref " + SignedRef,
+		"--ref " + ShellQuote(SignedRef),
 		"--trust require",
-		"--trust-signer '" + signer + "'",
-		"--trust-source-repository " + repoNamed(name).URL(),
-		"--trust-source-repository-id " + repoID,
-		"--trust-source-owner-id " + ownerID,
-		"--trust-source-repository-ref refs/heads/" + branch,
+		"--trust-signer " + ShellQuote(signer),
+		"--trust-source-repository " + ShellQuote(repoNamed(name).URL()),
+		"--trust-source-repository-id " + ShellQuote(repoID),
+		"--trust-source-owner-id " + ShellQuote(ownerID),
+		"--trust-source-repository-ref " + ShellQuote("refs/heads/"+branch),
 	}
 	if instance != "" {
-		flags = append(flags, "--trust-instance "+instance)
+		flags = append(flags, "--trust-instance "+ShellQuote(instance))
 	}
 	return strings.Join(flags, " \\\n    ")
 }

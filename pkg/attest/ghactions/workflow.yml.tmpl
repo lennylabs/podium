@@ -8,6 +8,8 @@
           dir="$RUNNER_TEMP/podium-bin"
           mkdir -p "$dir"
           gh release download "$PODIUM_VERSION" --repo lennylabs/podium --pattern "podium-linux-$arch" --dir "$dir"
+          gh attestation verify "$dir/podium-linux-$arch" --repo lennylabs/podium \
+            --signer-workflow lennylabs/podium/.github/workflows/release.yml
           mv "$dir/podium-linux-$arch" "$dir/podium"
           chmod +x "$dir/podium"
           echo "$dir" >> "$GITHUB_PATH"
@@ -34,7 +36,7 @@ on:
         default: false
 
 concurrency:
-  group: podium-attest
+  group: podium-attest-${{ github.ref }}
   cancel-in-progress: false
 
 permissions:
@@ -91,7 +93,7 @@ on:
         default: false
 
 concurrency:
-  group: podium-attest
+  group: podium-attest-${{ github.ref }}
   cancel-in-progress: false
 [[- end ]]
 
@@ -133,7 +135,7 @@ jobs:
           if [ -z "$PODIUM_MAIN_BRANCH" ] || [ "$GITHUB_REF" != "refs/heads/$PODIUM_MAIN_BRANCH" ]; then
             stop "the run is on $GITHUB_REF, and only the branch ${PODIUM_MAIN_BRANCH:-(unknown)} is signed"
           fi
-          tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | cut -f1)
+          tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
           if [ "$tip" != "$GITHUB_SHA" ]; then
             stop "commit $GITHUB_SHA is not the tip of $PODIUM_MAIN_BRANCH (${tip:-none}); the run for the tip signs the current state"
           fi
@@ -242,16 +244,11 @@ jobs:
             git read-tree "$main"
             rm -rf -- "${dirs[@]}"
             prev=""
-            rc=0
-            git ls-remote --exit-code origin "refs/heads/$PODIUM_SIGNED_REF" > /dev/null || rc=$?
-            case "$rc" in
-              0)
-                git fetch --no-tags --depth=1 origin "+refs/heads/$PODIUM_SIGNED_REF:refs/podium/signed-tip"
-                prev=$(git rev-parse refs/podium/signed-tip)
-                ;;
-              2) ;;
-              *) exit "$rc" ;;
-            esac
+            listed=$(git ls-remote origin "refs/heads/$PODIUM_SIGNED_REF")
+            if [ -n "$(printf '%s\n' "$listed" | awk -v ref="refs/heads/$PODIUM_SIGNED_REF" '$2 == ref { print $1 }')" ]; then
+              git fetch --no-tags --depth=1 origin "+refs/heads/$PODIUM_SIGNED_REF:refs/podium/signed-tip"
+              prev=$(git rev-parse refs/podium/signed-tip)
+            fi
             if [ -n "$prev" ] && [ "$PODIUM_RECOVER" != "true" ]; then
               for d in "${dirs[@]}"; do
                 if git cat-file -e "$prev:$d" 2> /dev/null; then
@@ -270,6 +267,12 @@ jobs:
               commit=$(git commit-tree "$tree" -p "$prev" -p "$main" -m "podium-attest: sign $main")
             else
               commit=$(git commit-tree "$tree" -p "$main" -m "podium-attest: sign $main")
+            fi
+            tip=$(git ls-remote origin "refs/heads/$PODIUM_MAIN_BRANCH" | awk -v ref="refs/heads/$PODIUM_MAIN_BRANCH" '$2 == ref { print $1 }')
+            if [ "$tip" != "$main" ]; then
+              echo "::notice::podium-attest did not publish: commit $main is no longer the tip of $PODIUM_MAIN_BRANCH (${tip:-none}); the run for the tip publishes the current state"
+              echo "podium-attest did not publish: $main is no longer the tip of $PODIUM_MAIN_BRANCH" >> "$GITHUB_STEP_SUMMARY"
+              exit 0
             fi
             if git push origin "$commit:refs/heads/$PODIUM_SIGNED_REF"; then
               echo "podium-attest signed $main and pushed $commit to $PODIUM_SIGNED_REF" >> "$GITHUB_STEP_SUMMARY"

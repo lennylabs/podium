@@ -70,7 +70,7 @@ func resolveTrustPreset(ctx context.Context, req presetRequest, env presetEnv) (
 	}
 	if rec.FullName != repo.FullName() {
 		_, _ = fmt.Fprintf(env.stderr, "error: the GitHub API answers for %s with the record of %s: the repository was renamed, or the letter case of its name differs. An identity built from %s matches no certificate; nothing was registered. Register with --repo %s.\n",
-			repo.FullName(), rec.FullName, repo.FullName(), rec.Repo().URL())
+			repo.FullName(), rec.FullName, repo.FullName(), ghactions.ShellQuote(rec.Repo().URL()))
 		return nil, 1
 	}
 	if !rec.Public() {

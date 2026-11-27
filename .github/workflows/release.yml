@@ -207,6 +207,12 @@ jobs:
   build:
     needs: [go, python, typescript, postgres, s3]
     runs-on: ${{ matrix.os }}
+    # The attestation step below is the only one that needs id-token and
+    # attestations; this job holds them and no other job does.
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     defaults:
       run:
         # Use bash on every runner including windows-latest (Git Bash).
@@ -343,6 +349,18 @@ jobs:
               fi
             done
           fi
+      - name: Attest the binaries
+        # The workflow that `podium attest init` writes verifies the build
+        # provenance of the podium binary it installs with `gh attestation
+        # verify --signer-workflow lennylabs/podium/.github/workflows/release.yml`
+        # before it runs it (spec §7.3.5), so every published binary carries
+        # an attestation signed by this workflow.
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/podium-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+            dist/podium-server-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
+            dist/podium-mcp-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}
       - name: Package archive for Homebrew tap / Scoop bucket
         # Brew + scoop consumers expect a single archive per platform
         # containing all three binaries with their canonical names

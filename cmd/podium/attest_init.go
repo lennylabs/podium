@@ -95,7 +95,7 @@ func runAttestInit(ctx context.Context, args []string, env attestInitEnv) int {
 	}
 	_, _ = fmt.Fprintf(env.stdout, "Wrote %s\n", path)
 	if opts.reusable {
-		_, _ = fmt.Fprintf(env.stdout, "Commit the file and push it to the main branch of %s. Each layer repository then calls it with the workflow that this command writes there:\n  podium attest init --shared-workflow %s\n", repo.FullName(), repo.FullName())
+		_, _ = fmt.Fprintf(env.stdout, "Commit the file and push it to the main branch of %s. Each layer repository then calls it with the workflow that this command writes there:\n  podium attest init --shared-workflow %s\n", repo.FullName(), ghactions.ShellQuote(repo.FullName()))
 		return 0
 	}
 	writeRegistration(env.stdout, repo, rec, recErr, w.Branch, opts)
@@ -258,7 +258,7 @@ func writeRegistration(w io.Writer, repo ghactions.Repo, rec ghactions.Record, r
 	}
 	trust := "--trust-preset " + ghactions.PresetName
 	if signer != "" {
-		trust += " --trust-signer '" + signer + "'"
+		trust += " --trust-signer " + ghactions.ShellQuote(signer)
 	}
 	switch {
 	case recErr != nil:
@@ -278,9 +278,9 @@ func writeRegistration(w io.Writer, repo ghactions.Repo, rec ghactions.Record, r
 		_, _ = fmt.Fprintf(w, "Commit the file and push it to %s. Then register each layer:\n", branch)
 	}
 	for _, r := range roots {
-		cmd := "podium layer register --id <id> --repo " + name.URL()
+		cmd := "podium layer register --id <id> --repo " + ghactions.ShellQuote(name.URL())
 		if r != "" {
-			cmd += " --root " + r
+			cmd += " --root " + ghactions.ShellQuote(r)
 		}
 		_, _ = fmt.Fprintf(w, "  %s %s\n", cmd, strings.ReplaceAll(trust, "\n", "\n  "))
 	}

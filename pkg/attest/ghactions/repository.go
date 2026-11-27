@@ -262,24 +262,21 @@ func decodeRecord(body []byte) (Record, error) {
 	case !found || !validSegment(owner) || !validSegment(name):
 		return Record{}, fmt.Errorf("ghactions: the repository record's full_name %q is not <owner>/<repo>", rec.FullName)
 	case !validBranch(rec.DefaultBranch):
-		return Record{}, fmt.Errorf("ghactions: the repository record's default_branch %q is no branch name", rec.DefaultBranch)
+		return Record{}, fmt.Errorf("ghactions: the repository record's default_branch %q is not a branch name of ASCII letters, digits, \".\", \"_\", \"-\", and \"/\"", rec.DefaultBranch)
 	}
 	return rec, nil
 }
 
 // validBranch reports whether b is a branch name the recipe writes into a
-// ref and a certificate identity: not empty, and free of white space,
-// control characters, and the characters Git refuses in a ref.
+// ref, a certificate identity, a workflow, and a printed command: segments
+// separated by "/" of ASCII letters, digits, ".", "_", and "-", not beginning
+// with "-" and holding no "..". The record comes from the network, and a
+// branch such as x$(cmd) would otherwise reach a shell when an operator
+// pastes a printed command.
+//
+// Spec: §7.3.1 (Trust preset)
 func validBranch(b string) bool {
-	if b == "" || strings.HasPrefix(b, "-") || strings.Contains(b, "..") {
-		return false
-	}
-	for _, r := range b {
-		if r <= ' ' || r == 0x7f || strings.ContainsRune(`~^:?*[\`, r) {
-			return false
-		}
-	}
-	return true
+	return safeName.MatchString(b) && !strings.HasPrefix(b, "-") && !strings.Contains(b, "..")
 }
 
 // TokenFromEnv returns the token in GH_TOKEN, or in GITHUB_TOKEN when
@@ -306,6 +303,22 @@ func TimeoutFromEnv(getenv func(string) string) (time.Duration, error) {
 		return 0, fmt.Errorf("%s %q is not a duration above zero", TimeoutEnv, v)
 	}
 	return d, nil
+}
+
+// shellSafe is the set of characters a POSIX shell gives no meaning in a
+// word.
+var shellSafe = regexp.MustCompile(`\A[A-Za-z0-9@%+=:,./_-]+\z`)
+
+// ShellQuote returns s as one POSIX shell word: unchanged when it holds only
+// characters a shell gives no meaning, and otherwise in single quotes with
+// each single quote written as '\”. Every value a printed command
+// interpolates goes through it, so pasting the command runs nothing the
+// value holds.
+func ShellQuote(s string) string {
+	if shellSafe.MatchString(s) {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // formatID writes a numeric identifier as the certificate field holds it.

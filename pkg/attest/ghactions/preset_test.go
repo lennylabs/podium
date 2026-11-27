@@ -69,7 +69,7 @@ func TestExplicitFlags(t *testing.T) {
 	got := ExplicitFlags(Repo{"acme", "finance"}, publicRecord, "", PrivateInstance)
 	for _, want := range []string{
 		"--ref podium/signed", "--trust require",
-		"--trust-signer 'https://token.actions.githubusercontent.com=https://github.com/acme/finance/.github/workflows/podium-attest.yml@refs/heads/trunk'",
+		"--trust-signer https://token.actions.githubusercontent.com=https://github.com/acme/finance/.github/workflows/podium-attest.yml@refs/heads/trunk",
 		"--trust-source-repository https://github.com/acme/finance", "--trust-source-repository-id 123456",
 		"--trust-source-owner-id 7890", "--trust-source-repository-ref refs/heads/trunk", "--trust-instance github",
 	} {
@@ -78,13 +78,19 @@ func TestExplicitFlags(t *testing.T) {
 		}
 	}
 	got = ExplicitFlags(Repo{"acme", "finance"}, Record{}, "i=x", "")
-	for _, want := range []string{"<repository-id>", "<owner-id>", "refs/heads/<default-branch>", "--trust-signer 'i=x'", "https://github.com/acme/finance"} {
+	for _, want := range []string{"'<repository-id>'", "'<owner-id>'", "'refs/heads/<default-branch>'", "--trust-signer i=x", "https://github.com/acme/finance"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("placeholder flags lack %q:\n%s", want, got)
 		}
 	}
 	if strings.Contains(got, "--trust-instance") {
 		t.Errorf("flags name an instance:\n%s", got)
+	}
+	// A value with a shell metacharacter is quoted, with an embedded quote
+	// escaped, so pasting the flags runs nothing the value holds.
+	got = ExplicitFlags(Repo{"acme", "finance"}, publicRecord, "https://i.example=it's $(x)", "")
+	if !strings.Contains(got, `--trust-signer 'https://i.example=it'\''s $(x)'`) {
+		t.Errorf("signer not quoted:\n%s", got)
 	}
 	if !strings.Contains(GenericFlags, "<issuer>=<identity>") {
 		t.Errorf("generic flags = %s", GenericFlags)

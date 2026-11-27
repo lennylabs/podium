@@ -111,7 +111,8 @@ func TestTrustPreset_RegistersTheResolvedPolicy(t *testing.T) {
 
 // Spec: §7.3.1 (Trust preset), §13.12 (PODIUM_GITHUB_API_TIMEOUT) — a
 // --repo outside github.com sends no request even with GH_TOKEN set, and a
-// failed request, a deadline, a renamed repository, and a private one each
+// failed request, a deadline, a renamed repository, a private one, and a
+// record whose default branch holds shell syntax each
 // register nothing and name the explicit flags.
 func TestTrustPreset_RefusalsRegisterNothing(t *testing.T) {
 	t.Parallel()
@@ -119,6 +120,7 @@ func TestTrustPreset_RefusalsRegisterNothing(t *testing.T) {
 		"/repos/acme/old":    e2eRecord("acme/new", "main", "public"),
 		"/repos/acme/secret": e2eRecord("acme/secret", "main", "private"),
 		"/repos/acme/slow":   "slow",
+		"/repos/acme/shell":  e2eRecord("acme/shell", "x$(touch${IFS}pwned)", "private"),
 	})
 	srv := startServer(t, "")
 	env := append(brEnv(srv.BaseURL), "GH_TOKEN=tok-e2e")
@@ -140,6 +142,7 @@ func TestTrustPreset_RefusalsRegisterNothing(t *testing.T) {
 		{"https://github.com/acme/old", nil, "Register with --repo https://github.com/acme/new"},
 		{"https://github.com/acme/secret", nil, "--trust-instance github"},
 		{"https://github.com/acme/missing", nil, "HTTP 404"},
+		{"https://github.com/acme/shell", nil, "is not a branch name"},
 		{"https://github.com/acme/slow", []string{"PODIUM_GITHUB_API_TIMEOUT=300ms"}, "no answer within 300ms (PODIUM_GITHUB_API_TIMEOUT)"},
 	}
 	for _, c := range cases {
@@ -273,7 +276,7 @@ func TestAttestInit_Variants(t *testing.T) {
 	res := runPodium(t, dir, nil, "attest", "init", "--root", "skills", "--root", "tools", "--shared-workflow", "acme/.github", "--test-github-api", api.URL)
 	cliWantExit(t, res, 0, "shared, two roots")
 	cliContains(t, res.Stdout, "Then register each layer:", "two roots")
-	cliContains(t, res.Stdout, "--root tools --trust-preset github-actions --trust-signer 'https://token.actions.githubusercontent.com=https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main'", "shared")
+	cliContains(t, res.Stdout, "--root tools --trust-preset github-actions --trust-signer https://token.actions.githubusercontent.com=https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main", "shared")
 	wf, err := os.ReadFile(filepath.Join(dir, ".github", "workflows", "podium-attest.yml"))
 	if err != nil || !strings.Contains(string(wf), "uses: acme/.github/.github/workflows/podium-attest.yml@main") || !strings.Contains(string(wf), "roots: skills tools") {
 		t.Errorf("caller workflow: %v\n%s", err, wf)

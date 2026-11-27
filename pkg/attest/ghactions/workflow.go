@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"text/template"
 
@@ -22,6 +23,49 @@ const (
 	downloadAction = "actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2"
 	attestAction   = "actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2"
 )
+
+// MinInstallVersion is the earliest podium release whose binaries carry a
+// build provenance attestation, which the workflow's install step verifies.
+// A workflow written by an older version, such as a source build of main
+// before that release, installs this release, because an older one cannot
+// pass the verification.
+const MinInstallVersion = "v0.8.0"
+
+// installVersion returns version, or MinInstallVersion when version orders
+// before it by its numeric major, minor, and patch parts. A pre-release of
+// MinInstallVersion orders before it.
+func installVersion(version string) string {
+	if versionLess(version, MinInstallVersion) {
+		return MinInstallVersion
+	}
+	return version
+}
+
+// versionLess compares two vMAJOR.MINOR.PATCH[-suffix] strings numerically;
+// a version with a suffix orders before the same version without one. A part
+// that does not parse counts as 0.
+func versionLess(a, b string) bool {
+	pa, sa := versionParts(a)
+	pb, sb := versionParts(b)
+	for i := range pa {
+		if pa[i] != pb[i] {
+			return pa[i] < pb[i]
+		}
+	}
+	return sa && !sb
+}
+
+// versionParts returns the numeric parts of v and whether it has a suffix.
+func versionParts(v string) ([3]int, bool) {
+	core, _, suffixed := strings.Cut(strings.TrimPrefix(v, "v"), "-")
+	core, _, _ = strings.Cut(core, "+")
+	var out [3]int
+	for i, p := range strings.SplitN(core, ".", 3) {
+		n, _ := strconv.Atoi(p)
+		out[i] = n
+	}
+	return out, suffixed
+}
 
 // SharedRef is the ref a caller workflow calls the shared workflow at. The
 // signer identity of a shared workflow ends in refs/heads/ and this ref.
@@ -109,6 +153,7 @@ func (w Workflow) templateData() (map[string]any, error) {
 	if !safeName.MatchString(version) || strings.Contains(version, "/") {
 		return nil, fmt.Errorf("%w: the podium version %q", ErrWorkflowValue, w.Version)
 	}
+	version = installVersion(version)
 	data := map[string]any{
 		"Kind":         string(w.Kind),
 		"Version":      version,

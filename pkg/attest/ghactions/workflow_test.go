@@ -124,14 +124,14 @@ func TestRender_RepositoryStructure(t *testing.T) {
 	if at(t, doc, "on", "workflow_dispatch", "inputs", "recover", "type") != "boolean" {
 		t.Error("workflow_dispatch has no boolean recover input")
 	}
-	if at(t, doc, "concurrency", "group") != "podium-attest" || at(t, doc, "concurrency", "cancel-in-progress") != false {
+	if at(t, doc, "concurrency", "group") != "podium-attest-${{ github.ref }}" || at(t, doc, "concurrency", "cancel-in-progress") != false {
 		t.Errorf("concurrency = %v", doc["concurrency"])
 	}
 	if p := at(t, doc, "permissions").(map[string]any); len(p) != 0 {
 		t.Errorf("workflow permissions = %v, want none", p)
 	}
 	env := at(t, doc, "env").(map[string]any)
-	if env["PODIUM_VERSION"] != "v0.7.0" || env["PODIUM_ROOTS"] != "skills team/tools" || env["PODIUM_MAIN_BRANCH"] != "main" || env["PODIUM_SIGNED_REF"] != "podium/signed" {
+	if env["PODIUM_VERSION"] != MinInstallVersion || env["PODIUM_ROOTS"] != "skills team/tools" || env["PODIUM_MAIN_BRANCH"] != "main" || env["PODIUM_SIGNED_REF"] != "podium/signed" {
 		t.Errorf("env = %v", env)
 	}
 	wantPerms := map[string]map[string]any{
@@ -172,6 +172,14 @@ func TestRender_RepositoryStructure(t *testing.T) {
 	}
 	if !strings.Contains(stringOf(step(t, doc, "publish", "Publish")["run"]), "podium attest import --root") {
 		t.Error("the publish step does not run podium attest import")
+	}
+	for _, job := range []string{"subjects", "publish"} {
+		run := stringOf(step(t, doc, job, "Install podium")["run"])
+		verify := strings.Index(run, "gh attestation verify")
+		if verify < 0 || verify > strings.Index(run, `mv "$dir/podium-linux-$arch"`) ||
+			!strings.Contains(run, "--signer-workflow lennylabs/podium/.github/workflows/release.yml") {
+			t.Errorf("the %s job installs podium without verifying its attestation first:\n%s", job, run)
+		}
 	}
 }
 
@@ -238,5 +246,29 @@ func TestRender_Refusals(t *testing.T) {
 	}
 	if _, err := ParseShared("acme/.github/x"); err == nil {
 		t.Error("a shared repository of three segments was accepted")
+	}
+}
+
+// Spec: §7.3.5 (Writing the signing workflow) — the workflow installs the
+// version that wrote it, or the first release with attested binaries when
+// that version is older.
+func TestInstallVersion(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"v0.7.0":       MinInstallVersion,
+		"v0.7.9":       MinInstallVersion,
+		"v0.8.0-rc.1":  MinInstallVersion,
+		"v0.8.0":       "v0.8.0",
+		"v0.8.1":       "v0.8.1",
+		"v0.10.0":      "v0.10.0",
+		"v1.0.0+build": "v1.0.0+build",
+	} {
+		if got := installVersion(in); got != want {
+			t.Errorf("installVersion(%s) = %s, want %s", in, got, want)
+		}
+	}
+	doc := parseWorkflow(t, Workflow{Kind: KindReusable, Version: "0.7.0"})
+	if at(t, doc, "env", "PODIUM_VERSION") != MinInstallVersion {
+		t.Errorf("PODIUM_VERSION = %v", at(t, doc, "env", "PODIUM_VERSION"))
 	}
 }

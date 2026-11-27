@@ -172,7 +172,7 @@ func TestFetch_Failures(t *testing.T) {
 		"garbage":   "no repository record",
 		"noids":     "no repository or owner identifier",
 		"badname":   "is not <owner>/<repo>",
-		"badbranch": "is no branch name",
+		"badbranch": "is not a branch name",
 	} {
 		if _, err := f.Fetch(context.Background(), Repo{"acme", name}); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", name, err, want)
@@ -208,6 +208,7 @@ func TestValidBranch(t *testing.T) {
 	for b, want := range map[string]bool{
 		"main": true, "release/1.x": true, "": false, "-x": false, "a..b": false, "a b": false,
 		"a~1": false, "a^": false, "a:b": false, "a?": false, "a*": false, "a[": false, `a\b`: false, "a\x7f": false,
+		"x$(touch${IFS}/tmp/p)": false, "a{b}": false, "a'b": false, "a//b": false, "a/": false, "feature/x-1_2.3": true,
 	} {
 		if validBranch(b) != want {
 			t.Errorf("validBranch(%q) != %v", b, want)
@@ -233,6 +234,37 @@ func TestTokenAndTimeoutFromEnv(t *testing.T) {
 	for _, v := range []string{"0", "-1s", "10", "soon"} {
 		if _, err := TimeoutFromEnv(env(map[string]string{TimeoutEnv: v})); err == nil || !strings.Contains(err.Error(), TimeoutEnv) {
 			t.Errorf("timeout %q: %v", v, err)
+		}
+	}
+}
+
+// Spec: §7.3.1 (Trust preset) — a record whose default branch holds a shell
+// or YAML metacharacter is refused, so the branch never reaches a printed
+// command or the workflow.
+func TestDecodeRecord_RefusesAShellBranch(t *testing.T) {
+	t.Parallel()
+	body := `{"id":1,"full_name":"acme/x","default_branch":"x$(touch${IFS}/tmp/pwned)","visibility":"private","owner":{"id":2}}`
+	if _, err := decodeRecord([]byte(body)); err == nil || !strings.Contains(err.Error(), "is not a branch name") {
+		t.Errorf("decodeRecord = %v", err)
+	}
+}
+
+// Spec: §7.3.1 (Trust preset) — ShellQuote leaves a word of safe characters
+// unchanged and single-quotes any other, escaping each single quote.
+func TestShellQuote(t *testing.T) {
+	t.Parallel()
+	for in, want := range map[string]string{
+		"https://github.com/acme/x": "https://github.com/acme/x",
+		"refs/heads/main":           "refs/heads/main",
+		"a=b@c:d,e%f+g":             "a=b@c:d,e%f+g",
+		"":                          "''",
+		"<id>":                      "'<id>'",
+		"x$(touch /tmp/p)":          "'x$(touch /tmp/p)'",
+		"it's":                      `'it'\''s'`,
+		"a b":                       "'a b'",
+	} {
+		if got := ShellQuote(in); got != want {
+			t.Errorf("ShellQuote(%q) = %s, want %s", in, got, want)
 		}
 	}
 }
