@@ -30,6 +30,14 @@ From 0.8.0, the registry loads the Sigstore instances and trusted roots of autho
 - `PODIUM_SIGSTORE_TRUSTED_ROOT_FILE` keeps its meaning for `podium sign` and `podium verify`. The registry does not read it for attestations.
 - A rollback to 0.7.0 needs no step. 0.7.0 ignores the settings and the `sigstore/` directory, which can be deleted.
 
+### Layer trust policy
+
+From 0.8.0, a layer carries a trust policy: `trust_mode`, `trust_requirements`, and `trust_layer_root` (spec §4.7.11). The registry stores and validates it, and no ingest step verifies attestations against it yet. [Layer trust policy](../content/layers#layer-trust-policy) describes it.
+
+- The SQLite and Postgres stores add the columns `trust_mode`, `trust_requirements`, and `trust_layer_root` to `layer_configs` at the first start, and every existing layer reads with an empty policy. No step is needed.
+- A start refuses with `config.invalid_layer_trust` when `PODIUM_LAYER_TRUST_DEFAULT` holds a value other than `none`, `warn`, or `require`, or when a layer declared in `registry.yaml` carries a trust policy that breaks a rule. 0.7.0 read neither, and it ignored the `trust_mode`, `trust_requirements`, and `trust_layer_root` keys of a declaration.
+- A rollback to 0.7.0 starts on the migrated store, and 0.7.0 does not read the columns. On SQLite, a layer write under 0.7.0, such as an update, a reorder, or the re-seed of a declared or `--layer-path` layer at each start, replaces the row and clears its policy. On Postgres the columns keep their values. After a rollback and a return to 0.8.0, check each policy with `podium layer show <id>`.
+
 ### Workspace `.podium` that is a symbolic link
 
 From 0.8.0, `podium sync` reads and writes its lock and `sync.yaml` only when the target's `.podium` is a directory rather than a symbolic link. A target whose `.podium` is a symbolic link, such as one that shares `sync.yaml` across Git worktrees, or whose `.podium` is not a directory, fails these commands before they write anything: `podium sync`, `podium sync override`, `podium sync save-as`, `podium profile edit`, and `podium init` in that workspace. The error names `.podium` and states that it must be a directory. 0.7.0 read and wrote through the link.

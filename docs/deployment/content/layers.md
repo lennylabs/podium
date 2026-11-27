@@ -141,6 +141,70 @@ Authoring rights stay with the source. Whoever can merge to a layer's tracked Gi
 
 ---
 
+## Layer trust policy
+
+Each layer carries a trust policy that states which signers' author attestations its content needs. The registry stores and validates the policy in this release. No ingest step verifies attestations against it yet, so a policy refuses no content today.
+
+The policy has three members, which the layer object reports and `podium layer show <id>` prints:
+
+| Member | Meaning |
+|:--|:--|
+| `trust_mode` | `none`, `warn`, or `require`. An empty value takes `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
+| `trust_requirements` | A list that holds at most one requirement. A requirement has `signers` and an optional `predicate_type`. Several requirements are not available yet. |
+| `trust_layer_root` | For a `local` layer, the `root` under which its content was signed. A `git` layer takes it from its `root`. |
+
+A signer has an OIDC `issuer` and a certificate `identity`, which are compared byte for byte with the signing certificate. It also has source binding members (`source_repository`, `source_repository_owner`, `source_repository_id`, and `source_repository_owner_id`, or `any_source: true`), a ref binding (`source_repository_ref`, or `any_ref: true`), and an optional `instance`, which names a Sigstore instance of `sigstore.instances` and defaults to `public-good`.
+
+- A signer whose identity is a URI, such as a workflow identity, names a source binding or `any_source`. A shared workflow's identity is issued to every repository that calls it, and the binding names the repository whose content counts.
+- A signer with a source binding also names `source_repository_ref` or `any_ref`. A caller on another branch of the bound repository obtains the same workflow identity, and the ref binding refuses it.
+- The identifier members hold the host's numeric identifiers. A repository or owner name can be registered again by another party after a rename or a deletion, and an identifier is not assigned twice, so the identifier members are the stronger binding.
+
+A layer declared in `registry.yaml` carries the policy in the keys of the same names:
+
+```yaml
+registry:
+  layers:
+    - id: finance
+      source:
+        git:
+          repo: https://github.com/acme/finance
+          ref: podium/signed
+      trust_mode: require
+      trust_requirements:
+        - signers:
+            - issuer: https://token.actions.githubusercontent.com
+              identity: https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main
+              source_repository_id: "123456"
+              source_repository_owner_id: "7890"
+              source_repository_ref: refs/heads/main
+```
+
+A layer registered at runtime takes the policy from the [trust policy flags](../../reference/cli#trust-policy-flags) of `podium layer register` and `podium layer update`, or from the `trust_mode`, `trust_requirements`, and `trust_layer_root` members of the [layer endpoints](../../reference/http-api#layer-management).
+
+### Derived source binding
+
+A workflow in the layer's own repository needs no explicit binding. When a signer of a `git` layer has a URI identity that begins with the layer's repository URL followed by `/.github/workflows/`, and names no source binding and no `any_source`, the registry sets `source_repository` to the repository URL. When the signer also names no ref binding, the registry sets `source_repository_ref` to the part of the identity after its last `@`. The stored policy holds the derived members, and `podium layer show` prints them.
+
+The registry derives the binding only from a repository URL of the form `https://<host>/<owner>/<repo>`, optionally followed by `.git` or `/`, with no user information, port, query, or fragment. An SSH URL or an scp-like address derives nothing, so a signer of such a layer names its binding. A URL whose letter case differs from the repository's name on the host derives a binding that matches no certificate.
+
+### Policy rules
+
+A registration or an update whose policy breaks one of these rules is refused with `registry.invalid_argument`, and a declared layer whose policy breaks one refuses the registry start with `config.invalid_layer_trust`:
+
+- A `trust_mode` of `warn` or `require` needs a requirement, and a requirement needs at least one signer.
+- A policy holds at most one requirement.
+- A signer names an `issuer` and an `identity`, and the binding rules above hold after the derivation.
+- A signer that sets `any_source` names no source binding member, and one that sets `any_ref` names no `source_repository_ref`.
+- A signer's `instance` is one the registry configures.
+- A `git` layer sets no `trust_layer_root`. A `trust_layer_root` neither begins nor ends with `/` and holds no empty, `.`, or `..` segment, and no white space, control character, or backslash.
+- A requirement or a signer holds no member of another name.
+
+An update that changes no trust member does not re-check the stored policy, so a policy whose instance was later removed from `registry.yaml` does not block an unrelated update. A layer whose empty mode `PODIUM_LAYER_TRUST_DEFAULT` resolves to `warn` or `require` and that has no requirement is logged as a warning at each start.
+
+Changing the policy of an admin-defined layer requires the tenant `admin` role, and the owner of a user-defined layer changes its own. A change is recorded on the layer's audit event with the previous and the new policy.
+
+---
+
 ## Changing the order
 
 `podium layer reorder <id> [<id> ...]` re-sequences the named layers. The argument order is precedence, lowest to highest:

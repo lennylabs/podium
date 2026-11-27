@@ -188,6 +188,7 @@ A configuration that sets `PODIUM_OAUTH_AUTHORIZATION_ENDPOINT` and leaves `PODI
 | `layers` | (none) | list | (none) | Admin-defined layers, lowest precedence first. The registry writes each entry into the metadata store at every start and ingests a `local` source at startup. A `git` source is ingested on its first webhook or reingest. |
 | `layer_path` | `PODIUM_LAYER_PATH` | string | (none) | Filesystem registry root that the registry ingests at startup. Flag `--layer-path`. [`podium serve`](cli#podium-serve) describes how the path resolves into layers. |
 | `default_layer_visibility` | `PODIUM_DEFAULT_LAYER_VISIBILITY` | string | `public` without an identity provider, `private` with one | Visibility of a layer registered or declared without a `visibility:` block: `public`, `organization`, or `private`. |
+| (none) | `PODIUM_LAYER_TRUST_DEFAULT` | string | `none` | Trust mode of a layer whose `trust_mode` is empty: `none`, `warn`, or `require`. Any other value refuses startup with `config.invalid_layer_trust`. Each start logs a warning for a layer that this default resolves to `warn` or `require` and that has no trust requirement. `podium config show --server` reports it as `layers.trust_default`. [Layer trust policy](../deployment/content/layers#layer-trust-policy) describes the policy. |
 
 Each entry of `layers` takes these keys:
 
@@ -203,8 +204,11 @@ Each entry of `layers` takes these keys:
 | `source.local.path` | string | Directory the registry process reads. A `local` entry requires it. |
 | `visibility.public`, `visibility.organization` | boolean | Visibility to everyone, or to every authenticated caller of the tenant. |
 | `visibility.groups`, `visibility.users` | list of strings | Visibility to the named groups or users. |
+| `trust_mode` | string | Trust mode of the layer: `none`, `warn`, or `require`. Unset takes `PODIUM_LAYER_TRUST_DEFAULT`. |
+| `trust_requirements` | list | At most one requirement, each with `signers` and an optional `predicate_type`. [Layer trust policy](../deployment/content/layers#layer-trust-policy) lists the signer keys. |
+| `trust_layer_root` | string | For a `local` entry, the `root` under which the layer's content was signed. |
 
-An entry that sets both sources or neither, or that omits a required key, refuses startup.
+An entry that sets both sources or neither, or that omits a required key, refuses startup. An entry whose trust policy breaks a [policy rule](../deployment/content/layers#policy-rules), including a requirement or signer key the policy does not define, refuses startup with `config.invalid_layer_trust`, in an error that names the layer and the rule.
 
 ### Discovery
 
