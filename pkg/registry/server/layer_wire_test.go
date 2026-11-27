@@ -27,6 +27,8 @@ var layerObjectMembers = []string{
 	"id", "source_type", "repo", "ref", "root", "local_path", "order",
 	"user_defined", "owner", "public", "organization", "groups", "users",
 	"git_provider", "last_ingested_ref", "created_at", "deleted_at",
+	// Spec: §4.7.11 — the trust policy members are carried on every layer.
+	"trust_mode", "trust_requirements", "trust_layer_root",
 }
 
 // mustPut sends a PUT with a JSON body, which is the verb the update route
@@ -164,7 +166,7 @@ func TestLayerEndpoint_LayerObjectMemberNames(t *testing.T) {
 	if err := json.Unmarshal(gitLayer, &gitObj); err != nil {
 		t.Fatalf("decode git layer: %v", err)
 	}
-	for _, member := range []string{"groups", "users"} {
+	for _, member := range []string{"groups", "users", "trust_requirements"} {
 		if got := string(gitObj[member]); got != "null" {
 			t.Errorf("%s on a layer that sets none = %s, want null", member, got)
 		}
