@@ -35,9 +35,11 @@ var sleepFor = func(d time.Duration) { time.Sleep(d) }
 
 // layerCmd dispatches `podium layer ...` subcommands per spec §7.3.1.
 //
-//	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--repo-username <name>] [--repo-token-file <path|->] [--clear-repo-credential]
-//	podium layer register --id <id> --local <path>
+//	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--repo-username <name>] [--repo-token-file <path|->] [--clear-repo-credential] [<trust flags>]
+//	podium layer register --id <id> --local <path> [<trust flags>]
+//	podium layer update --id <id> [<trust flags>] [--clear-trust-requirements]
 //	podium layer list
+//	podium layer show <id>
 //	podium layer reorder <id> [<id> ...]
 //	podium layer unregister <id>
 //	podium layer reingest <id>
@@ -47,6 +49,7 @@ func layerCmd(args []string) int {
 		printGroupHelp("layer", "Manage layers registered with the registry.", [][2]string{
 			{"register", "Register a layer with the registry."},
 			{"list", "List registered layers."},
+			{"show", "Print one registered layer, with its trust policy."},
 			{"reorder", "Re-sequence the layer list."},
 			{"unregister", "Remove a layer."},
 			{"restore", "Recover a layer unregistered within the recovery window."},
@@ -64,6 +67,8 @@ func layerCmd(args []string) int {
 		return layerRegister(args[1:])
 	case "list":
 		return layerList(args[1:])
+	case "show":
+		return layerShow(args[1:])
 	case "reorder":
 		return layerReorder(args[1:])
 	case "unregister":
@@ -106,6 +111,7 @@ func layerUpdate(args []string) int {
 	clearGroups := fs.Bool("clear-groups", false, "empty the layer's group visibility list")
 	clearUsers := fs.Bool("clear-users", false, "empty the layer's user visibility list")
 	cred := addRepoCredentialFlags(fs)
+	trust := addTrustFlags(fs, true)
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable)")
@@ -130,6 +136,16 @@ func layerUpdate(args []string) int {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
+	}
+	// Spec: §7.3.1 (Layer CLI) — the trust flags patch the trust members by
+	// presence, and a requirement built from them replaces the stored one.
+	trustBody, err := trust.body(set)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	for k, v := range trustBody {
+		body[k] = v
 	}
 	if set["ref"] {
 		body["ref"] = *ref
@@ -261,6 +277,7 @@ func layerRegister(args []string) int {
 	organization := fs.Bool("organization", false, "visibility: organization-wide (requires the administrator role)")
 	forcePush := fs.String("force-push-policy", "", "git force-push handling: tolerant (default) or strict")
 	cred := addRepoCredentialFlags(fs)
+	trust := addTrustFlags(fs, false)
 	var groups, users stringSliceFlag
 	fs.Var(&groups, "group", "OIDC group with visibility (repeatable; requires the administrator role)")
 	fs.Var(&users, "user", "OIDC subject or email with visibility (repeatable; requires the administrator role)")
@@ -292,7 +309,13 @@ func layerRegister(args []string) int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 2
 	}
-	body := map[string]any{"id": *id}
+	// Spec: §7.3.1 (Layer CLI) — the trust flags set the layer's policy.
+	body, err := trust.body(set)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
+	body["id"] = *id
 	if *repo != "" {
 		body["source_type"] = "git"
 		body["repo"] = *repo
