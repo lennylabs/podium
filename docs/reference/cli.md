@@ -346,11 +346,21 @@ A signature over such digests does not match the registry's digests of the commi
 
 With `--format checksums`, each file is in the format of the `sha256sum` tool: one line per subject with the 64 lowercase hexadecimal digits of the digest, two spaces, and the subject name. With `--format statement`, each file holds one in-toto Statement v1 document whose `predicate` is the empty object.
 
-The statement's `predicateType` is `https://lennylabs.github.io/podium/attestation/subjects/v1` by default. Podium defines that type: the signer attests the listed subjects, and the predicate is empty. Podium reads the type and never the predicate. `--predicate-type` sets another type, for example to match the type of another signing recipe. The predicate stays empty, so a type whose schema requires members, such as SLSA provenance (`https://slsa.dev/provenance/v1`), gives a statement that tools which check the predicate refuse. A checksums file has no predicate type of its own, because the tool that signs it chooses the type, so `--predicate-type` with `--format checksums` is a usage error.
+The statement's `predicateType` is `https://lennylabs.github.io/podium/attestation/subjects/v1` by default. Podium defines that type on the [Attestation subjects predicate](attestation-subjects) page: the signer attests the listed subjects, and the predicate is empty. Podium reads the type and never the predicate. `--predicate-type` sets another type, for example to match the type of another signing recipe. The predicate stays empty, so a type whose schema requires members, such as SLSA provenance (`https://slsa.dev/provenance/v1`), gives a statement that tools which check the predicate refuse. A checksums file has no predicate type of its own, because the tool that signs it chooses the type, so `--predicate-type` with `--format checksums` is a usage error.
 
 Each file begins with the layer subject and lists the artifacts in ascending order of ID. A layer with more artifacts than `--max-subjects` allows in one file is written over several files, each beginning with the layer subject. The files are named `podium-subjects-<n>.sha256` and `podium-statement-<n>.json`.
 
-Before it writes, the command removes the files of either name in `--out` whose first subject is this run's layer subject. Files of another layer subject stay, and so do files it cannot read or whose first subject it cannot read, so runs for several layer roots can share one `--out`. The command numbers its files with the lowest numbers that no remaining file takes. It prints the path of each file it writes on standard output, one per line.
+Before it writes, the command removes the regular files of either name in `--out` whose first subject is this run's layer subject. It reads at most the first 64 KiB of each such file. These entries stay, so runs for several layer roots can share one `--out`:
+
+- Files whose first subject is another layer subject.
+- Files the command cannot read, or whose first subject it cannot read within that bound.
+- Entries that are not regular files, such as symbolic links, directories, named pipes, and devices. The command neither reads nor follows them.
+
+The command creates each of its files under the lowest number whose name no entry of `--out` holds, and it creates a file only when no entry of that name exists. Two runs that write to one `--out` at the same time therefore write separate files. A file number does not identify a layer root. The command prints the path of each file it writes on standard output, one per line, and a signing step signs the files at those paths:
+
+```
+podium attest --root skills --commit HEAD --out attest-out > attest-files.txt
+```
 
 ```
 $ podium attest --root skills --commit HEAD --out attest-out
