@@ -262,8 +262,8 @@ func TestGateway_TrustedHeadersMultitenantNoSecretRefused(t *testing.T) {
 // selects each request's tenant from the verified caller identity, so a
 // multi-tenant registry with no request-time identity verifier fails to start
 // with config.multitenant_no_verifier. The cases cover an unset provider, the
-// free-form labels "none" and "oidc" that resolve to no registered provider,
-// and public mode on the default loopback bind. Each case sets
+// values "none" and "external" that resolve to no registered provider, and
+// public mode on the default loopback bind. Each case sets
 // PODIUM_IDENTITY_PROVIDER explicitly because mergeEnv inherits the test
 // process environment, which testenv.Load can populate from test.env, and an
 // inherited provider would let the boot pass.
@@ -275,7 +275,7 @@ func TestGateway_MultiTenantNoVerifierRefused(t *testing.T) {
 	}{
 		{name: "unset provider", env: []string{"PODIUM_IDENTITY_PROVIDER="}},
 		{name: "none label", env: []string{"PODIUM_IDENTITY_PROVIDER=none"}},
-		{name: "oidc label", env: []string{"PODIUM_IDENTITY_PROVIDER=oidc"}},
+		{name: "external", env: []string{"PODIUM_IDENTITY_PROVIDER=external"}},
 		{
 			name: "public mode",
 			env:  []string{"PODIUM_IDENTITY_PROVIDER=", "PODIUM_PUBLIC_MODE=true"},

@@ -151,7 +151,7 @@ func (r ruleSkillArtifactFields) Check(_ context.Context, _ *filesystem.Registry
 
 // skillVersionMismatch reports an ARTIFACT.md version that differs from a
 // major.minor.patch SKILL.md metadata.version. The walk's
-// ArtifactRecord.ResolveSkillFields copies metadata.version into the record
+// manifest.ResolvePackage copies metadata.version into the record
 // when ARTIFACT.md declares no version, so a difference arises only from an
 // authored mismatch. A metadata.version in any other form is ignored by §4.3.4
 // and never mismatches.
@@ -181,7 +181,7 @@ func skillVersionMismatch(rec filesystem.ArtifactRecord) (Diagnostic, bool) {
 // not decode never mismatches; ruleSkillMetadataFields warns on it instead.
 //
 // The check re-parses rec.AuthoredBytes rather than reading rec.Artifact,
-// because the walk's ArtifactRecord.ResolveSkillFields has already written the
+// because the walk's manifest.ResolvePackage has already written the
 // resolved values into rec.Artifact. A comparison with rec.Artifact would miss
 // an explicit deprecated: false, sensitivity: "", or tags: [] in ARTIFACT.md,
 // which the resolver keeps and which lint must still compare. A plain skill

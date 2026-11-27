@@ -108,11 +108,10 @@ func buildSCIMHandler(store scim.Store) *scim.Handler {
 // would reverse a decision the gateway made and hand a caller a layer the
 // gateway kept from it.
 //
-// The default arm denies, so an unset provider, a free-form label the registry
-// resolves to no provider, and any provider added later resolve group
-// membership from the caller's own identity until they are named here. A
-// provider that gains directory-resolved group membership is added in the same
-// change that gives it one.
+// The default arm denies, so an unset provider, the external value, and any
+// provider added later resolve group membership from the caller's own identity
+// until they are named here. A provider that gains directory-resolved group
+// membership is added in the same change that gives it one.
 //
 // Spec: §6.3.1, §6.3.2, §6.3.3
 func scimResolvesGroups(identityProvider string) bool {
@@ -1046,6 +1045,17 @@ func run(ctx context.Context, stop func()) error {
 		defer func() { _ = closer.Close() }()
 	}
 
+	// §13.10 Identity provider removed between starts: refuse a start without
+	// a request-time verifier over a store that recorded verified identity
+	// before the bootstrap below writes anything. A verified replica still
+	// serving this store reads the layer rows the bootstrap writes, so a start
+	// refused after writing them would already have widened that replica's
+	// visibility. The record itself is written once the verifier is installed.
+	identityCheck, err := refuseIdentityProviderRemoval(ctx, st, cfg)
+	if err != nil {
+		return err
+	}
+
 	// Standalone bootstrap: ensure the bootstrapped org exists so initial
 	// requests don't fail on missing-tenant lookups (§13.10 auto-bootstrap).
 	// spec: §4.7.1 — the org ID is a UUID while "default" stays the
@@ -1561,9 +1571,10 @@ func run(ctx context.Context, stop func()) error {
 	// oauth-device-code, injected-session-token, oidc-jwt, and trusted-headers
 	// providers are seeded into the registry; the last three additionally
 	// install a request-time verifier so the registry resolves the caller on
-	// every meta-tool call. Server-side identity modes that are not MCP-server providers (the
-	// empty standalone default, "oidc", public mode) are absent from the
-	// registry and stay on the anonymous resolver.
+	// every meta-tool call. The values that select no provider (the empty
+	// standalone default, "none", "external", and public mode) are absent from
+	// the registry and stay on the anonymous resolver; validate refuses every
+	// other unregistered value before this point.
 	verifierInstalled := false
 	providerSelected := false
 	// layerVerify is the request-time verifier the §7.3.1 layer endpoint uses
@@ -1673,6 +1684,20 @@ func run(ctx context.Context, stop func()) error {
 	if err := identityVisibilityGuard(cfg.identityProvider, providerSelected, cfg.publicMode, verifierInstalled); err != nil {
 		return err
 	}
+	// §13.10 Startup warning for unapplied visibility. It runs here, after
+	// the declared-layer and --layer-path seed above and once the verifier is
+	// known, so it reports the stored layers under the current configuration.
+	if appliesNoVisibility(cfg.publicMode, verifierInstalled) {
+		logUnappliedVisibility(ctx, st, tenantID, cfg.publicMode, log.Printf)
+	}
+
+	// §13.10 Identity provider removed between starts: a start whose
+	// verifier is installed records verified identity, and an acknowledged
+	// removal clears the record. It runs before server.New, and it checks
+	// verifierInstalled against the prediction the removal check used.
+	if err := recordVerifiedIdentity(ctx, st, cfg, verifierInstalled, identityCheck); err != nil {
+		return err
+	}
 
 	srv := server.New(registry, bootOpts...)
 
@@ -1708,6 +1733,11 @@ func run(ctx context.Context, stop func()) error {
 		// §7.3.1 Operator token in public mode: the endpoint refuses a write
 		// without the token before reading its body and keeps the list whole.
 		layers = layers.WithPublicMode(cfg.operatorToken)
+	}
+	if appliesNoVisibility(cfg.publicMode, verifierInstalled) {
+		// §7.3.1 Unapplied-visibility warning: a write response reports a
+		// layer whose declared visibility this registry does not apply.
+		layers = layers.WithUnappliedVisibility()
 	}
 	layers = layers.
 		// §7.5.4: an admin layer change wakes a `podium sync --watch`
@@ -2094,6 +2124,13 @@ type Config struct {
 	// PODIUM_ALLOW_PUBLIC_BIND). Public mode refuses a non-loopback bind
 	// unless this is set.
 	allowPublicBind bool
+	// allowIdentityProviderRemoval is the §13.10 acknowledgement
+	// (--allow-identity-provider-removal /
+	// PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL) that a registry which ran with
+	// verified identity now starts without a request-time verifier. It is
+	// meant for one start, which clears the record; it has no registry.yaml
+	// key for that reason.
+	allowIdentityProviderRemoval bool
 	// webUI mounts the §13.10 single-page web UI at /app/ and redirects the
 	// root to it (--web-ui /
 	// PODIUM_WEB_UI). webUIAllowPublicBind (--web-ui-allow-public-bind /
@@ -2479,6 +2516,7 @@ func (c *Config) Settings() []Setting {
 		{"bind", c.bind, envOrSrc("PODIUM_BIND", defaultSrc)},
 		{"public_mode", boolStr(c.publicMode), envOrSrc("PODIUM_PUBLIC_MODE", defaultSrc)},
 		{"allow_public_bind", boolStr(c.allowPublicBind), envOrSrc("PODIUM_ALLOW_PUBLIC_BIND", defaultSrc)},
+		{"allow_identity_provider_removal", boolStr(c.allowIdentityProviderRemoval), envOrSrc("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL", defaultSrc)},
 		{"identity_provider", c.identityProvider, envOrSrc("PODIUM_IDENTITY_PROVIDER", yamlSrc)},
 		{"oauth_audience", strings.Join(c.oauthAudiences, ","), envOrSrc("PODIUM_OAUTH_AUDIENCE", yamlSrc)},
 		{"identity_provider.authorization_endpoint", c.oauthAuthorizationEndpoint, envOrSrc("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT", yamlSrc)},
@@ -2565,6 +2603,7 @@ func LoadConfig() *Config {
 		webUIOAuthExchangeTimeout:       envPositiveDuration("PODIUM_WEB_UI_OAUTH_EXCHANGE_TIMEOUT", defaultWebUIOAuthExchangeTimeout),
 		migrationObjectReadTimeout:      envPositiveDuration("PODIUM_MIGRATION_OBJECT_READ_TIMEOUT", objectstore.DefaultReadTimeout),
 		signMode:                        os.Getenv("PODIUM_SIGN"),
+		allowIdentityProviderRemoval:    isTrue(os.Getenv("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL")),
 		identityProvider:                os.Getenv("PODIUM_IDENTITY_PROVIDER"),
 		oauthAudiences:                  identity.NormalizeAudiences(splitCSVTrim(os.Getenv("PODIUM_OAUTH_AUDIENCE"))),
 		oauthAuthorizationEndpoint:      os.Getenv("PODIUM_OAUTH_AUTHORIZATION_ENDPOINT"),
@@ -2843,6 +2882,12 @@ func (c *Config) validate() error {
 	// may have been meant to come from it.
 	if c.configFileErr != nil {
 		return c.configFileErr
+	}
+	// §6.3 / §13.10: an unrecognized PODIUM_IDENTITY_PROVIDER refuses the
+	// start ahead of the identity and bind checks below, each of which would
+	// otherwise read the mistyped value as a configured provider.
+	if err := identityProviderLabelGuard(c.identityProvider); err != nil {
+		return err
 	}
 	startup := server.StartupConfig{
 		PublicMode:           c.publicMode,

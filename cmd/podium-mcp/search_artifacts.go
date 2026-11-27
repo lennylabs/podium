@@ -44,17 +44,28 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 	// artifact frontmatter on the wire for the §7.6.1 read-CLI/SDK schema, so
 	// the bridge drops it before handing results to the agent (and keeps
 	// registry hits uniform with overlay descriptors, which carry none).
-	overlayRecords := s.overlaySnapshot()
+	overlayRecords := bridgeRecords(s.overlaySnapshot())
 	if len(overlayRecords) == 0 {
-		// No overlay: pass the registry response through (frontmatter stripped)
-		// so single-deployment behavior is otherwise unchanged.
+		// No overlay: pass the registry response through (frontmatter stripped
+		// and §5 mcp-server descriptors dropped) so single-deployment behavior
+		// is otherwise unchanged. The registry leaves the mcp-server artifacts
+		// out of the bridge's search itself (§5, §7.2.2); the drop covers a
+		// registry that does not.
 		decoded := jsonAny(body)
 		stripSearchResultFrontmatter(decoded)
+		lowerTotalMatched(decoded, dropHiddenDescriptors(decoded, "results"))
 		return decoded
 	}
+	visible := registry.Results[:0]
 	for _, r := range registry.Results {
+		if typ, _ := r["type"].(string); hiddenFromBridge(typ) {
+			continue
+		}
 		delete(r, "frontmatter")
+		visible = append(visible, r)
 	}
+	registry.TotalMatched = max(registry.TotalMatched-(len(registry.Results)-len(visible)), 0)
+	registry.Results = visible
 
 	query, _ := args["query"].(string)
 	typeFilter, _ := args["type"].(string)
@@ -79,6 +90,23 @@ func (s *mcpServer) searchArtifacts(args map[string]any) any {
 		"query":         registry.Query,
 		"total_matched": fusedTotalMatched(registry.TotalMatched, registry.Results, local, semantic),
 		"results":       fused,
+	}
+}
+
+// lowerTotalMatched subtracts the n descriptors the bridge dropped from the
+// total_matched of the decoded search response v, never below zero. The
+// registry this guards against counts every match, mcp-server artifacts
+// included, and the bridge sees the type only of the results it returned, so
+// the total still counts a hidden match beyond the page.
+//
+// Spec: §5
+func lowerTotalMatched(v any, n int) {
+	m, ok := v.(map[string]any)
+	if !ok || n == 0 {
+		return
+	}
+	if total, ok := m["total_matched"].(float64); ok {
+		m["total_matched"] = max(total-float64(n), 0)
 	}
 }
 
@@ -138,7 +166,7 @@ func stripSearchResultFrontmatter(decoded any) {
 // serves silently with no status field (offlineEnvelope honors the mode).
 func (s *mcpServer) offlineSearchArtifacts(args map[string]any) any {
 	query, _ := args["query"].(string)
-	overlayRecords := s.overlaySnapshot()
+	overlayRecords := bridgeRecords(s.overlaySnapshot())
 	if len(overlayRecords) == 0 {
 		return s.offlineEnvelope(map[string]any{
 			"query":         query,

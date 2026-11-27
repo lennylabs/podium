@@ -393,25 +393,33 @@ export function DeprecatedBadge({ deprecated }: { deprecated?: boolean }) {
  * by side differ only in their fill, which is not enough to tell a warning
  * from the aside beside it, so a banner that has a neighbour takes a leading
  * glyph in its own gutter the way the register form's consequence and note do.
+ *
+ * A banner is a status region by default. A caller whose text is announced
+ * through a live region that stays mounted passes live={false}, because a
+ * status region mounted at the moment its text arrives is not announced, and
+ * keeping the role here as well would announce the text twice where it is.
  */
 export function Banner({
   tone = 'neutral',
   glyph,
+  live = true,
   children,
 }: {
   tone?: Tone;
   glyph?: string;
+  live?: boolean;
   children: ReactNode;
 }) {
+  const role = live ? 'status' : undefined;
   if (glyph === undefined) {
     return (
-      <div className={`banner banner-${tone}`} role="status">
+      <div className={`banner banner-${tone}`} role={role}>
         {children}
       </div>
     );
   }
   return (
-    <div className={`banner banner-${tone} banner-lead`} role="status">
+    <div className={`banner banner-${tone} banner-lead`} role={role}>
       <span className="banner-glyph" aria-hidden="true">
         {glyph}
       </span>

@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, and the refusal of names that resolve to .git or .podium, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, and the refusal of a start without the identity provider a registry ran with, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -59,6 +59,18 @@ From 0.8.0, Podium refuses a `.git` path segment, and a segment that a filesyste
 - The Python and TypeScript SDKs skip a workspace overlay that holds such a package, with a warning, and `materialize()` raises `MaterializeError` for a canonical ID or a resource path with a segment that names `.git`.
 - A rollback to 0.7.0 needs no step.
 
+### `mcp-server` artifacts through the MCP server
+
+From 0.8.0, `mcp-server` artifacts are left out of the MCP server's results, as the specification states. The registry applies the filter to every request whose `X-Podium-Client` name is `mcp`, and the MCP server applies it again to workspace-overlay artifacts, to records its content cache serves, and to a registry that does not filter. `search_artifacts` and the `load_domain` notable list leave them out, and `load_artifact` refuses one with `registry.not_found` and writes nothing. 0.7.0 listed them and wrote each loaded server's entry into the harness configuration, such as `.mcp.json` or `.codex/config.toml`.
+
+- A host or script that loads `mcp-server` artifacts through the MCP server receives `registry.not_found` after the upgrade. Deliver them with `podium sync`, which writes them into the harness configuration for the next session, or load them through an SDK.
+- The registry records the refusal as it records a load of an ID that does not exist: an `artifact.loaded` audit event of result size 0 and no load count in the usage report. The MCP server records no local `artifact.loaded` event for it. A search from the MCP server ranks only the other artifacts, so its `total_matched`, its `artifacts.searched` `context.results`, and its usage-report search hits name no `mcp-server` artifact.
+- The registry judges an artifact by the version a request resolves to. An artifact whose latest version is an `mcp-server` is left out of the MCP server's search and domain map even when an earlier version has another type, and a `load_artifact` pinned to that earlier version still loads it.
+- `search_artifacts`, `load_domain`, and `load_artifact` responses carry `Vary: X-Podium-Client`. A caching proxy in front of the registry keys its entries on that header.
+- The filter keys on the self-reported client name and is not access control. A program that sends `X-Podium-Client: name=mcp` loses `mcp-server` artifacts from its own results; send another name, such as `sdk`, to receive them.
+- An entry that an earlier `load_artifact` wrote stays in the harness configuration file. A `podium sync` that writes into the same file rewrites Podium's entries there and keeps the entry only when the synced selection includes that artifact. Otherwise, delete the entry by hand.
+- A rollback to 0.7.0 needs no step.
+
 ### Visibility entries that are empty or hold a control character
 
 From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that contain no control character, such as a line feed, a carriage return, or a tab. 0.7.0 accepted any string, and the SQLite and Postgres stores read an entry containing a line feed back as several entries.
@@ -68,6 +80,62 @@ From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that co
 - A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
 - White space around an entry is kept and matched as written, as in 0.7.0.
 - A rollback to 0.7.0 needs no step.
+
+### Skills whose `SKILL.md` is missing or does not parse
+
+From 0.8.0, an artifact whose `ARTIFACT.md` declares `type: skill` and whose directory holds no `SKILL.md` is refused on its own under the unparseable-manifest rule, as an artifact whose `SKILL.md` does not parse already was. 0.7.0 failed the whole layer instead.
+
+- Ingest stores the other artifacts of the layer and lists the skill in `rejected` with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`. The reason names `<id>/SKILL.md` and states that the file is missing. A script that watched for the layer's failed reingest reads `rejected` instead.
+- `podium lint` lists the skill among its refused artifacts and exits 1. A filesystem-source `podium sync` drops it, names it on standard error, writes the other artifacts, and exits 1, and by default keeps the output an earlier run wrote for it, as for any artifact whose manifest does not parse.
+
+Stored-row admission no longer serves a skill row from its `ARTIFACT.md` alone when the row's `SKILL.md` does not parse. 0.7.0 served such a row's sensitivity, deprecation flag, and replacement from the manifest. 0.8.0 serves the values the row stores, as it does for a row whose manifest does not parse. For such a row, the served type, sensitivity, deprecation flag, replacement, and `audit_redact` key set come from stored columns that no content hash or signature covers. A skill's fields resolve from both documents, so a row whose `SKILL.md` does not parse has no resolved value to serve from its bytes. Ingest refuses such a skill, so only a row that an earlier release stored is affected.
+
+- To find an affected skill, reingest each layer. A skill whose `SKILL.md` does not parse is listed in `rejected` with a reason that names its `SKILL.md`, and the registry keeps serving the version it stored.
+- To serve resolved values again, correct the `SKILL.md` and publish the skill at a new version.
+- A rollback to 0.7.0 needs no step.
+
+### Files of an unparseable package that cannot be read
+
+From 0.8.0, ingest, `podium lint`, and a filesystem-source `podium sync` read every file of a package whose manifest does not parse, because the package digest of every package in a layer covers its files. 0.7.0 refused such a package without reading its other files. A file of such a package that cannot be read, such as a symbolic link that leaves a `local` layer's directory, a dangling symbolic link, or a file without read permission, now fails the ingest of the whole layer, as an unreadable file of a package whose manifest parses already did in 0.7.0. 0.7.0 refused the unparseable artifact alone and ingested the rest of the layer. A symbolic link that leaves the directory fails with `ingest.source_unreachable`.
+
+- Before the upgrade, run `podium lint --registry <path>` on each filesystem layer and fix or remove each package it refuses as `manifest_unparseable`, or remove the unreadable files from it.
+- A rollback to 0.7.0 needs no step.
+
+### `ARTIFACT.md` below a dot-prefixed directory of a package
+
+From 0.8.0, a directory that carries an `ARTIFACT.md` below a dot-prefixed directory of a package, such as `.claude/ARTIFACT.md` or `.cache/tool/ARTIFACT.md`, belongs to the enclosing package, and its files are bundled resources. 0.7.0 left such a directory out of the enclosing package, and package discovery skipped it, so its files belonged to no artifact.
+
+- The content hash of an affected package changes at its next ingest. A package that declares its version is refused with `ingest.immutable_violation` at the version 0.7.0 stored, so publish it at a new version. A skill that declares no version receives a new registry-assigned version.
+- To keep such files out of the package, delete them before ingest. Podium reads no ignore file.
+- A rollback to 0.7.0 changes the content hash back. A package that 0.8.0 stored at a version with the newly bundled files is refused with `ingest.immutable_violation` when 0.7.0 ingests it again at that version, because 0.7.0 leaves those files out. After a rollback, publish each affected package at a new version, or remove the dot-prefixed directory's `ARTIFACT.md`.
+
+### Filesystem layer paths that are symbolic links
+
+From 0.8.0, a filesystem-source `podium sync`, `podium lint`, and the podium-mcp workspace overlay resolve a layer or overlay path that is a symbolic link to a directory and walk the directory it names, for its artifacts and its `DOMAIN.md` files. 0.7.0 found no artifact and no domain under such a path, while registry ingest of the same path read it.
+
+- A workspace whose overlay path is a symbolic link starts serving the overlay's artifacts and domains after the upgrade. Remove the link to keep the overlay empty.
+- A rollback to 0.7.0 needs no step.
+
+### Identity provider values the registry does not recognize
+
+From 0.8.0, the registry starts only with a `PODIUM_IDENTITY_PROVIDER` or `identity_provider.type` of `oidc-jwt`, `trusted-headers`, `injected-session-token`, `external`, or `none`, or with the value unset. Any other value, such as a free-form label like `oidc` or a mistyped `oidc-jwy`, refuses startup with `config.identity_provider_unverified`, and the message names the value. 0.7.0 started with such a value, verified no caller, showed every layer to every caller, and skipped the loopback-bind refusal.
+
+- Before the upgrade, check the value each registry sets. A registry that set a free-form label because a reverse proxy or gateway in front of it authenticates callers sets `PODIUM_IDENTITY_PROVIDER=external` instead. `external` behaves as the free-form label did in 0.7.0, apart from the bind rule below. [External authentication](../identity/#external-authentication) describes it.
+- A registry with `external` refuses a non-loopback bind with `config.public_bind_refused` unless `PODIUM_ALLOW_PUBLIC_BIND=true` or `--allow-public-bind` is set. A registry behind a proxy that binds `0.0.0.0` sets the variable.
+- A registry that set a mistyped provider name served with visibility unenforced. Correct the name; the registry then applies layer visibility, so a caller that saw every layer under 0.7.0 sees only the layers its identity admits.
+- A multi-tenant registry with an unrecognized value now fails with `config.identity_provider_unverified` rather than `config.multitenant_no_verifier`.
+- A rollback to 0.7.0 needs no step. 0.7.0 starts with `external` as it started with any free-form label.
+
+### Start without the identity provider a registry ran with
+
+From 0.8.0, each start under `oidc-jwt`, `trusted-headers`, or `injected-session-token` records in the metadata store that the registry runs with verified identity. A later start with no identity provider, with `PODIUM_IDENTITY_PROVIDER=external`, or in public mode exits with `config.identity_provider_removed` while the store holds the record. 0.7.0 started such a registry and showed every layer to every caller.
+
+- The first 0.8.0 start under a verified provider writes the record. A registry that has never started under one, such as a standalone registry or a `--layer-path` bootstrap without a provider, or the Docker Compose evaluation stack, holds no record and starts as before.
+- A deployment that intentionally drops its identity provider sets `PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL=true`, or passes `--allow-identity-provider-removal` to `podium serve`, for one start. That start deletes the record and logs a warning that names the removal. Remove the setting after that start, because while it stays set every later start without a verifier proceeds without the refusal. A Helm install sets the variable through `extraEnv`, and a later start on which the entry has no effect logs a warning to remove it.
+- The refused start writes nothing to the metadata store, so during a rolling update the pods that still run with the identity provider keep serving with their layer visibility unchanged.
+- `podium admin migrate-to-standard` copies the record from its source to its target.
+- A start that exits with the code after an upgrade, where no removal was intended, has lost an identity-provider setting. Restore it, as [Removing an identity provider](../identity/#removing-an-identity-provider) describes.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores the record and the variable.
 
 ## 0.7.0
 

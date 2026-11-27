@@ -282,6 +282,8 @@ def test_overlay_resource_set_matches_the_registry_walk(tmp_path):
         ".hidden-note",
         ".tooling/config.json",
         "references/SKILL.md",
+        ".nested/ARTIFACT.md",
+        ".nested/note.txt",
     }
     assert set(index.artifacts["outer/inner"].resources) == {"data.txt"}
 

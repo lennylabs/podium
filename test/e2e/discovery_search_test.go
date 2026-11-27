@@ -487,18 +487,6 @@ func TestSearch_SearchArtifactsNoBodies(t *testing.T) {
 	}
 }
 
-// mcp-server artifacts filtered from search via the MCP bridge.
-func TestSearch_McpServerFilteredFromSearch(t *testing.T) {
-	t.Parallel()
-	t.Skip("spec §5: mcp-server artifacts should be filtered from MCP-bridge results; the bridge does not filter them and no implementation-gap finding is filed")
-}
-
-// mcp-server artifacts filtered from load via the MCP bridge.
-func TestSearch_McpServerFilteredFromLoad(t *testing.T) {
-	t.Parallel()
-	t.Skip("spec §5: mcp-server artifacts should be blocked from load_artifact via the MCP bridge; the bridge does not block them and no implementation-gap finding is filed")
-}
-
 // ---- load_artifact ----------------------------------------------------------
 
 // load_artifact returns the manifest body inline and materializes.

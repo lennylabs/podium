@@ -594,10 +594,10 @@ func TestArtifactTypes_SkillNameConsecutiveHyphens(t *testing.T) {
 	}
 }
 
-// a skill without SKILL.md fails lint. The registry
-// walk rejects it before the lint rules run, so the error surfaces as
-// "<id>: type: skill missing SKILL.md" (exit 1) rather than a
-// lint.skill_md_compliance diagnostic.
+// a skill without SKILL.md fails lint. The registry walk refuses it per
+// artifact under the §4.1 unparseable-manifest rule before the lint rules
+// run, so the refusal names "<id>/SKILL.md: manifest: type: skill missing
+// SKILL.md" (exit 1) rather than a lint.skill_md_compliance diagnostic.
 func TestArtifactTypes_SkillMissingSkillMD(t *testing.T) {
 	t.Parallel()
 	reg := writeRegistry(t, map[string]string{
