@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, and the refusal of a start without the identity provider a registry ran with, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, and the refusal of a start without the identity provider a registry ran with, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -98,7 +98,14 @@ From 0.8.0, a directory that carries an `ARTIFACT.md` below a dot-prefixed direc
 
 - The content hash of an affected package changes at its next ingest. A package that declares its version is refused with `ingest.immutable_violation` at the version 0.7.0 stored, so publish it at a new version. A skill that declares no version receives a new registry-assigned version.
 - To keep such files out of the package, delete them before ingest. Podium reads no ignore file.
-- A rollback to 0.7.0 needs no step; 0.7.0 computes the old content hash again for a package it ingests.
+- A rollback to 0.7.0 changes the content hash back. A package that 0.8.0 stored at a version with the newly bundled files is refused with `ingest.immutable_violation` when 0.7.0 ingests it again at that version, because 0.7.0 leaves those files out. After a rollback, publish each affected package at a new version, or remove the dot-prefixed directory's `ARTIFACT.md`.
+
+### Filesystem layer paths that are symbolic links
+
+From 0.8.0, a filesystem-source `podium sync`, `podium lint`, and the podium-mcp workspace overlay resolve a layer or overlay path that is a symbolic link to a directory and walk the directory it names, for its artifacts and its `DOMAIN.md` files. 0.7.0 found no artifact and no domain under such a path, while registry ingest of the same path read it.
+
+- A workspace whose overlay path is a symbolic link starts serving the overlay's artifacts and domains after the upgrade. Remove the link to keep the overlay empty.
+- A rollback to 0.7.0 needs no step.
 
 ### Identity provider values the registry does not recognize
 
