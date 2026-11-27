@@ -52,8 +52,8 @@ func forgetPackageDigests(t *testing.T, sqlitePath string) {
 // package digest of the walk, a load serves it as package_digest, a start
 // over a store whose rows carry no digest and no completion record fills
 // each row with the digest ingest stored, and podium artifact show prints
-// the member on standard error and in its --json envelope, leaving the
-// manifest document alone on standard output.
+// the member on standard error in its default output, leaving the manifest
+// document alone on standard output, and in its --json envelope alone.
 func TestE2E_StoredPackageDigestIsFilledAndServed(t *testing.T) {
 	home := t.TempDir()
 	sqlitePath := filepath.Join(home, ".podium", "standalone", "podium.db")
@@ -88,7 +88,7 @@ func TestE2E_StoredPackageDigestIsFilledAndServed(t *testing.T) {
 	}
 	js := runPodium(t, "", cli, "artifact", "show", digestRowID, "--json")
 	var got map[string]any
-	if err := json.Unmarshal([]byte(js.Stdout), &got); err != nil || got["package_digest"] != want {
-		t.Errorf("artifact show --json = %v (%v), want package_digest %q", got, err, want)
+	if err := json.Unmarshal([]byte(js.Stdout), &got); err != nil || got["package_digest"] != want || strings.Contains(js.Stderr, "package_digest") {
+		t.Errorf("artifact show --json = %v (%v), stderr %q; want package_digest %q in the envelope alone", got, err, js.Stderr, want)
 	}
 }

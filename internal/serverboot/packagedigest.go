@@ -21,10 +21,12 @@ const (
 	// fillNoEntryList: the row's stored files give no entry list, so it
 	// keeps no digest. Ingest never stores such a row.
 	fillNoEntryList
-	// fillSuperseded: another writer changed the row's content hash or
-	// removed the row between the read and the write.
-	fillSuperseded
-	// fillFailed: the write failed, which holds the completion record back.
+	// fillRemoved: another writer removed the row between the read and the
+	// write, so it needs no digest.
+	fillRemoved
+	// fillFailed: the write failed, or the row's content hash changed again
+	// after the fill read it a second time, which holds the completion record
+	// back.
 	fillFailed
 )
 
@@ -40,12 +42,15 @@ type fillCounts [fillFailed + 1]int
 // §13.4 stored-row admission applies, so the stored digest frames the values
 // a load of the row serves. It reads no object store.
 //
-// A row whose write fails holds the completion record back, so the next
-// start runs the fill again; the start continues, because a row without a
-// digest is served without the package_digest member. A row another writer
-// changed or removed, and a row whose files give no entry list, do not hold
-// the record back. A failure to list the rows or to read or write the record
-// fails the start.
+// A row whose content hash another writer changed after the read, such as
+// through a second replica's content-hash rewrite, is read again and
+// computed from the bytes it then holds, because the bytes decide the
+// digest. A row whose write fails, or whose hash changes again, holds the
+// completion record back, so the next start runs the fill again; the start
+// continues, because a row without a digest is served without the
+// package_digest member. A row another writer removed, and a row whose files
+// give no entry list, do not hold the record back. A failure to list the rows
+// or to read or write the record fails the start.
 //
 // Spec: §13.4 — the package digest fill.
 func fillPackageDigests(ctx context.Context, st store.Store) error {
@@ -70,8 +75,8 @@ func fillPackageDigests(ctx context.Context, st store.Store) error {
 			counts[fillRow(ctx, st, rec)]++
 		}
 	}
-	log.Printf("package digest fill: %d written, %d already current, %d without an entry list, %d changed by another writer, %d in error",
-		counts[fillWritten], counts[fillCurrent], counts[fillNoEntryList], counts[fillSuperseded], counts[fillFailed])
+	log.Printf("package digest fill: %d written, %d already current, %d without an entry list, %d removed by another writer, %d in error",
+		counts[fillWritten], counts[fillCurrent], counts[fillNoEntryList], counts[fillRemoved], counts[fillFailed])
 	if counts[fillFailed] > 0 {
 		log.Printf("package digest fill: %d row(s) failed; the next start runs the fill again", counts[fillFailed])
 		return nil
@@ -82,34 +87,82 @@ func fillPackageDigests(ctx context.Context, st store.Store) error {
 	return nil
 }
 
-// fillRow computes and, when it differs from the stored value, writes the
+// fillRow fills one row. A write that finds the row's content hash changed
+// reads the row again and fills it once more from its current bytes, and a
+// second change holds the completion record back.
+func fillRow(ctx context.Context, st store.Store, rec store.ManifestRecord) fillOutcome {
+	outcome, err := fillOnce(ctx, st, rec)
+	if !errors.Is(err, store.ErrImmutableViolation) {
+		return settle(rec, outcome, err)
+	}
+	current, found, err := rereadRow(ctx, st, rec)
+	if err != nil {
+		log.Printf("package digest fill: %s: read again: %v", rowKey(rec), err)
+		return fillFailed
+	}
+	if !found {
+		return fillRemoved
+	}
+	outcome, err = fillOnce(ctx, st, current)
+	return settle(current, outcome, err)
+}
+
+// fillOnce computes and, when it differs from the stored value, writes the
 // package digest of one row under the row's stored content hash. A row whose
 // files give no entry list is written an empty digest, so no load serves a
-// digest its bytes do not give.
-func fillRow(ctx context.Context, st store.Store, rec store.ManifestRecord) fillOutcome {
-	key := fmt.Sprintf("%s/%s@%s", rec.TenantID, rec.ArtifactID, rec.Version)
+// digest its bytes do not give. It returns the write's error for settle or
+// fillRow to map.
+func fillOnce(ctx context.Context, st store.Store, rec store.ManifestRecord) (fillOutcome, error) {
 	outcome := fillWritten
 	digest, err := storedRowDigest(rec)
 	if err != nil {
-		log.Printf("package digest fill: %s keeps no package digest: %v", key, err)
+		log.Printf("package digest fill: %s keeps no package digest: %v", rowKey(rec), err)
 		outcome = fillNoEntryList
 	}
 	if digest == rec.PackageDigest {
 		if outcome == fillNoEntryList {
-			return outcome
+			return outcome, nil
 		}
-		return fillCurrent
+		return fillCurrent, nil
 	}
-	err = st.SetPackageDigest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, digest)
+	return outcome, st.SetPackageDigest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, digest)
+}
+
+// settle maps the write error of a row's last attempt to its outcome. A
+// removed row needs no digest. Any other error, a changed hash included,
+// holds the completion record back.
+func settle(rec store.ManifestRecord, outcome fillOutcome, err error) fillOutcome {
 	switch {
 	case err == nil:
 		return outcome
-	case errors.Is(err, store.ErrNotFound), errors.Is(err, store.ErrImmutableViolation):
-		return fillSuperseded
+	case errors.Is(err, store.ErrNotFound):
+		return fillRemoved
 	default:
-		log.Printf("package digest fill: %s: %v", key, err)
+		log.Printf("package digest fill: %s: %v", rowKey(rec), err)
 		return fillFailed
 	}
+}
+
+// rereadRow returns the row rec names as the store now holds it, a
+// soft-deleted row included, and false when the row is gone. The store reads
+// a soft-deleted row only through the tenant's full listing, and the fill
+// reaches this path only for a row another writer changed.
+func rereadRow(ctx context.Context, st store.Store, rec store.ManifestRecord) (store.ManifestRecord, bool, error) {
+	recs, err := st.ListManifestsIncludingDeleted(ctx, rec.TenantID)
+	if err != nil {
+		return store.ManifestRecord{}, false, err
+	}
+	for _, r := range recs {
+		if r.ArtifactID == rec.ArtifactID && r.Version == rec.Version {
+			return r, true, nil
+		}
+	}
+	return store.ManifestRecord{}, false, nil
+}
+
+// rowKey names a row in a log line by its coordinates.
+func rowKey(rec store.ManifestRecord) string {
+	return fmt.Sprintf("%s/%s@%s", rec.TenantID, rec.ArtifactID, rec.Version)
 }
 
 // storedRowDigest is the §4.7.6 package digest of a stored row, from its

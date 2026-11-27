@@ -281,9 +281,10 @@ func TestFillPackageDigests_LegacyRows(t *testing.T) {
 }
 
 // Spec: §13.4 — a failed write holds the completion record back and lets
-// the start continue, a row another writer changed does not hold it back,
-// and a failure to read the record, list the rows, or record completion
-// fails the start.
+// the start continue, and so does a row whose content hash still differs
+// when the fill writes it a second time. A row another writer removed does
+// not hold it back, and a failure to read the record, list the rows, or
+// record completion fails the start.
 func TestFillPackageDigests_Failures(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -298,7 +299,7 @@ func TestFillPackageDigests_Failures(t *testing.T) {
 		{"tenants", func(d *digestStore) { d.tenantsErr = boom }, true, false},
 		{"rows", func(d *digestStore) { d.rowsErr = boom }, true, false},
 		{"write", func(d *digestStore) { d.setErr = boom }, false, false},
-		{"superseded", func(d *digestStore) { d.setErr = store.ErrImmutableViolation }, false, true},
+		{"changed twice", func(d *digestStore) { d.setErr = store.ErrImmutableViolation }, false, false},
 		{"removed", func(d *digestStore) { d.setErr = store.ErrNotFound }, false, true},
 		{"record", func(d *digestStore) { d.setMarkErr = boom }, true, false},
 	}
@@ -334,5 +335,86 @@ func TestStoredRowDigest_MatchesThePackage(t *testing.T) {
 	}).PackageDigest
 	if err != nil || got != want || got == attest.PackageDigest(attest.Package{}) {
 		t.Errorf("storedRowDigest = %q, %v; want the walk digest %q", got, err, want)
+	}
+}
+
+// rewritingStore changes one row in the window between the fill's read and
+// its write, as a second replica's content-hash rewrite does, and can fail or
+// empty the fill's second read of that row.
+type rewritingStore struct {
+	store.Store
+	target   string
+	rewrite  func(ctx context.Context, s store.Store, rec store.ManifestRecord) error
+	lists    int
+	listErr  error // returned from every listing after the first
+	hideRows bool  // every listing after the first returns no row
+	rewrote  bool
+}
+
+func (r *rewritingStore) ListManifestsIncludingDeleted(ctx context.Context, tenantID string) ([]store.ManifestRecord, error) {
+	r.lists++
+	if r.lists > 1 && r.listErr != nil {
+		return nil, r.listErr
+	}
+	if r.lists > 1 && r.hideRows {
+		return nil, nil
+	}
+	return r.Store.ListManifestsIncludingDeleted(ctx, tenantID)
+}
+
+func (r *rewritingStore) SetPackageDigest(ctx context.Context, tenantID, artifactID, version, contentHash, digest string) error {
+	if artifactID == r.target && !r.rewrote {
+		r.rewrote = true
+		rec, err := r.GetManifest(ctx, tenantID, artifactID, version)
+		if err != nil {
+			return err
+		}
+		if err := r.rewrite(ctx, r.Store, rec); err != nil {
+			return err
+		}
+	}
+	return r.Store.SetPackageDigest(ctx, tenantID, artifactID, version, contentHash, digest)
+}
+
+// Spec: §13.4 — a row whose content hash another writer rewrote between the
+// fill's read and its write is read again and filled from its current bytes,
+// so it gets the digest ingest stored and the completion record is written.
+// A row the second read no longer finds needs no digest, and a second read
+// that fails holds the record back.
+func TestFillPackageDigests_RowRewrittenBetweenReadAndWrite(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	rehash := func(ctx context.Context, s store.Store, rec store.ManifestRecord) error {
+		return s.RehashManifest(ctx, rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Signature, rec.ContentHash+"-rewritten", rec.Signature)
+	}
+	cases := []struct {
+		name     string
+		arm      func(*rewritingStore)
+		want     func(ingested string) string
+		recorded bool
+	}{
+		{"filled from the current row", func(*rewritingStore) {}, func(d string) string { return d }, true},
+		{"gone on the second read", func(r *rewritingStore) { r.hideRows = true }, func(string) string { return "" }, true},
+		{"second read fails", func(r *rewritingStore) { r.listErr = errors.New("store down") }, func(string) string { return "" }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mem := store.NewMemory()
+			ingested := ingestCorpus(t, mem)
+			clearDigests(t, mem)
+			r := &rewritingStore{Store: mem, target: "forms/anchor", rewrite: rehash}
+			tc.arm(r)
+			if err := fillPackageDigests(ctx, r); err != nil {
+				t.Fatalf("fill: %v", err)
+			}
+			got := storedDigests(t, mem)
+			applied, _ := mem.DataMigrationApplied(ctx, store.DataMigrationPackageDigest)
+			want := tc.want(ingested["forms/anchor"])
+			if !r.rewrote || got["forms/anchor"] != want || got["forms/flow"] != ingested["forms/flow"] || applied != tc.recorded {
+				t.Errorf("rewrote %v, digest %q (want %q), other row %q, recorded %v (want %v)",
+					r.rewrote, got["forms/anchor"], want, got["forms/flow"], applied, tc.recorded)
+			}
+		})
 	}
 }

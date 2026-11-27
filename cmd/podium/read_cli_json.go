@@ -158,8 +158,9 @@ type packageDigestMember struct {
 }
 
 // printPackageDigest prints the package digest a load_artifact response
-// carries to w, which is standard error, so standard output keeps the
-// manifest document alone. A response without one prints nothing. The
+// carries to w, which is standard error in the default output, so standard
+// output keeps the manifest document alone. Under --json the envelope carries
+// the member and nothing is printed. A response without one prints nothing. The
 // registry asserts the value, and the read CLI runs no check on it.
 //
 // Spec: §7.6.1, §7.2

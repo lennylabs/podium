@@ -1522,16 +1522,18 @@ func artifactShow(args []string) int {
 	// spec: §7.6.1, §4.7.4 — the deprecation warning goes to standard error
 	// in both output modes.
 	warnDeprecation(os.Stderr, body)
-	// spec: §7.6.1, §7.2 — the registry-asserted package digest goes to
-	// standard error too, so standard output stays the manifest document.
-	printPackageDigest(os.Stderr, body)
 	if *asJSON {
 		// spec: §7.6.1 — emit the documented {id, version, content_hash,
 		// frontmatter, body} schema. The wire response keys the manifest text
-		// "manifest_body" and delivers frontmatter as a raw string.
+		// "manifest_body" and delivers frontmatter as a raw string. The
+		// envelope carries package_digest, so standard error does not repeat it.
 		emitArtifactShowJSON(body)
 		return 0
 	}
+	// spec: §7.6.1, §7.2 — in the default output the registry-asserted
+	// package digest goes to standard error, so standard output stays the
+	// manifest document.
+	printPackageDigest(os.Stderr, body)
 	printArtifactHuman(body)
 	return 0
 }
