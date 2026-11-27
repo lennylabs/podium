@@ -28,7 +28,7 @@ var (
 // longHistory returns an in-memory repository whose main branch is a linear
 // history of longHistoryCommits commits over one empty tree, and its head. It
 // is built once per test binary and only read afterwards.
-func longHistory(t *testing.T) (*git.Repository, plumbing.Hash) {
+func longHistory(t testing.TB) (*git.Repository, plumbing.Hash) {
 	t.Helper()
 	longHistoryOnce.Do(func() {
 		longHistoryRepo, longHistoryHead, longHistoryErr = buildLinearHistory(longHistoryCommits)

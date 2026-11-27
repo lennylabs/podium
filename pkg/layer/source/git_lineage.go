@@ -159,11 +159,13 @@ func (q *lineageQuery) answer(ctx context.Context, walks *walkCache, refWalk *co
 	if c == q.base {
 		return InLineage, nil
 	}
-	cWalk, err := walks.from(ctx, c)
+	// The question is asked from c. The memo gives the answer of the walk
+	// from c with one pass over the history for every commit of the round.
+	descent, err := walks.descentFrom(ctx, c, q.base)
 	if err != nil {
 		return "", err
 	}
-	switch cWalk.ancestorOrSelf(q.base) {
+	switch descent {
 	case ancestryYes:
 		return InLineage, nil
 	case ancestryNo:

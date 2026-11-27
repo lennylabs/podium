@@ -618,6 +618,24 @@ func TestGitLineage_RefMovesAfterTheSnapshot(t *testing.T) {
 	}
 }
 
+// Spec: §7.3.1 (Git fetch: Truncation, Lineage query) — a walk whose starting
+// commit the repository lacks is truncated rather than complete. At depth 1
+// the clone holds the reference alone, so the attested commit is in the
+// history only as the parent it names, and the walk from it reads nothing. An
+// absent starting commit counted as a complete walk would answer
+// not_descendant; it is undecided, the source deepens, and the next round
+// decides in_lineage.
+func TestGitLineage_AbsentStartingCommitIsTruncated(t *testing.T) {
+	t.Parallel()
+	r := newDiskRepo(t)
+	main := r.chain(plumbing.ZeroHash, 10)
+	r.setRef("refs/heads/main", main[9])
+	remote := &fakeRemote{}
+	wantAnswers(t, Git{FetchDepth: 1}, mainLayer(r.remote(t, remote)), main[9].String(), main[7].String(),
+		hashes(main[8]), InLineage)
+	wantRounds(t, remote, 1, 4)
+}
+
 // Spec: §9.1 (Lineage query) — a reference that is not a full hexadecimal
 // commit name is in no history, so the query fails as ingest.source_unreachable
 // with no fetch, and a request that breaks a member limit is refused with

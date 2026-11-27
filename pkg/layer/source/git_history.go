@@ -115,10 +115,23 @@ func (w *commitWalk) ancestorOrSelf(x plumbing.Hash) ancestry {
 type walkCache struct {
 	repo  *git.Repository
 	walks map[plumbing.Hash]*commitWalk
+	// descent answers the descent questions of the round about one base
+	// commit, created on the first question.
+	descent *descentMemo
 }
 
 func newWalkCache(repo *git.Repository) *walkCache {
 	return &walkCache{repo: repo, walks: map[plumbing.Hash]*commitWalk{}}
+}
+
+// descentFrom answers whether base is c or an ancestor of c, as the walk from
+// c answers it, from the round's memo of descent answers. Every question of a
+// query names the same base, the request's.
+func (c *walkCache) descentFrom(ctx context.Context, commit, base plumbing.Hash) (ancestry, error) {
+	if c.descent == nil || c.descent.base != base {
+		c.descent = newDescentMemo(c.repo, base)
+	}
+	return c.descent.ancestorOrSelf(ctx, commit)
 }
 
 // from returns the walk from start, walking the history on the first request.
