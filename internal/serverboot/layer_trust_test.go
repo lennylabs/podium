@@ -202,3 +202,39 @@ func TestLogUnrequiredTrustLayers(t *testing.T) {
 		t.Errorf("lines = %q", lines)
 	}
 }
+
+// failingTenantsStore fails the tenant list.
+type failingTenantsStore struct{ store.Store }
+
+func (failingTenantsStore) ListTenants(context.Context) ([]store.Tenant, error) {
+	return nil, errors.New("store down")
+}
+
+// Spec: §7.3.1 (Layer trust policy) — the seed paths fail closed: a declared
+// policy that breaks a rule fails the seed even when validate was skipped, a
+// requirement that is no mapping fails its decode, a failed read of a stored
+// --layer-path layer aborts the re-seed, and a failed tenant list falls back
+// to the bound tenant for the start warning.
+func TestLayerTrust_SeedPathsFailClosed(t *testing.T) {
+	cfg := &Config{declaredLayers: []yamlLayerEntry{{ID: "finance", TrustMode: "require",
+		Source: yamlLayerSource{Local: &yamlLocalSource{Path: declaredLocalTree(t, "policy")}}}}}
+	if _, err := bootstrapDeclaredLayers(newMemoryStoreWithTenant(t), "default", cfg, nil, nil, false, collocatedVectorIngest{}); err == nil ||
+		!strings.Contains(err.Error(), "config.invalid_layer_trust: declared layer finance") {
+		t.Errorf("seed of an invalid declared policy = %v", err)
+	}
+	if err := loadTrustConfig(t, trustYAMLLayer("      trust_requirements: [notamapping]\n"), "").validate(); err == nil ||
+		!strings.Contains(err.Error(), "config.invalid_layer_trust") {
+		t.Errorf("a requirement that is no mapping = %v", err)
+	}
+	if !(&Config{}).trustInstanceKnown("public-good") || (&Config{}).trustInstanceKnown("github") {
+		t.Error("trustInstanceKnown without sigstore.instances")
+	}
+	root := t.TempDir()
+	testharness.WriteTree(t, root, testharness.WriteTreeOption{Path: "a/ARTIFACT.md", Content: artifactBody})
+	if _, err := bootstrapLayerPath(failingGetStore{newMemoryStoreWithTenant(t)}, "default", root, layer.Visibility{Public: true}, 0, true, nil, "", nil, false, collocatedVectorIngest{}, false, nil); err == nil {
+		t.Error("a failed read of the stored layer did not abort the re-seed")
+	}
+	if got := trustLogTenants(context.Background(), failingTenantsStore{newMemoryStoreWithTenant(t)}, true, "default"); len(got) != 1 || got[0] != "default" {
+		t.Errorf("tenants after a failed list = %v", got)
+	}
+}

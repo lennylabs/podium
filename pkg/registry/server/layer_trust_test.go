@@ -378,3 +378,23 @@ func TestLayerTrust_ReorderAndRestoreKeepPolicy(t *testing.T) {
 		t.Errorf("policy after reorder and restore = %q %+v %q order %d", got.TrustMode, got.TrustRequirements, got.TrustLayerRoot, got.Order)
 	}
 }
+
+// Spec: §7.3.1 (Patch semantics on the update body) — a trust member of the
+// wrong JSON type is refused with 400 registry.invalid_argument and writes
+// nothing.
+func TestLayerTrust_UpdateRefusesMistypedMembers(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, nil)
+	if resp, body := mustPost(t, h.base, "/v1/layers", gitTrustBody(nil)); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d %s", resp.StatusCode, body)
+	}
+	for _, body := range []string{`{"trust_mode":1}`, `{"trust_requirements":"x"}`, `{"trust_layer_root":true}`} {
+		resp, out := putRaw(t, h.base, "/v1/layers/update?id=finance", body)
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(out), "registry.invalid_argument") {
+			t.Errorf("%s: %d %s", body, resp.StatusCode, out)
+		}
+	}
+	if got := h.stored(t, "finance"); got.TrustMode != "" || got.TrustRequirements != nil || got.TrustLayerRoot != "" {
+		t.Errorf("a refused update stored a policy: %+v", got)
+	}
+}
