@@ -311,6 +311,8 @@ func readFirstSubject(p string, f attest.Format) (string, bool) {
 	}
 	defer func() { _ = file.Close() }()
 	after, err := file.Stat()
+	// This branch runs only when the entry is replaced between Lstat and
+	// open, a race no test arranges deterministically.
 	if err != nil || !after.Mode().IsRegular() || !os.SameFile(before, after) {
 		return "", false
 	}

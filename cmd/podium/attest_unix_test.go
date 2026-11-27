@@ -57,6 +57,19 @@ func TestAttest_NonRegularOutEntriesStayUnread(t *testing.T) {
 		}
 	}
 
+	// A regular file the run cannot open stays, and the run replaces its own
+	// file 3 around it.
+	if os.Geteuid() != 0 {
+		locked := filepath.Join(out, "podium-subjects-4.sha256")
+		if err := os.WriteFile(locked, []byte("x\n"), 0o000); err != nil {
+			t.Fatal(err)
+		}
+		_, stdout, _ := runAttestT(t, dir, "--out", out)
+		if _, err := os.Lstat(locked); err != nil || !strings.HasSuffix(stdout, "podium-subjects-3.sha256\n") {
+			t.Errorf("unreadable file: lstat %v, stdout %q, want it kept and file 3 rewritten", err, stdout)
+		}
+	}
+
 	// The statement format skips the link that holds its first name.
 	_, stdout, _ := runAttestT(t, dir, "--out", out, "--format", "statement")
 	if !strings.HasSuffix(stdout, "podium-statement-2.json\n") {
