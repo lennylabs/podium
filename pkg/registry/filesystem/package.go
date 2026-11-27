@@ -43,11 +43,13 @@ func NewPackageRecord(id string, l Layer, hasArtifact, hasSkill bool, files map[
 		SkillMD:       files[manifest.SkillFile],
 		HasSkillMD:    hasSkill,
 	})
-	digest := attest.PackageDigest(attest.NewPackage(res, fileSums(files)))
+	sums := fileSums(files)
+	digest := attest.PackageDigest(attest.NewPackage(res, sums))
 	pathErr := entryPathError(files)
 	if !res.Resolved {
 		rec := UnparseableRecord(id, l, res.FailedFile, res.Err)
 		rec.PackageDigest = digest
+		rec.FileSums = sums
 		rec.entryPathErr = pathErr
 		return rec
 	}
@@ -61,6 +63,8 @@ func NewPackageRecord(id string, l Layer, hasArtifact, hasSkill bool, files map[
 		VersionAssigned: isSkill && res.Artifact.Version == "",
 		AuthoredVersion: res.Artifact.Version,
 		PackageDigest:   digest,
+		Fields:          res.Fields,
+		FileSums:        sums,
 		entryPathErr:    pathErr,
 	}
 	for p, b := range files {

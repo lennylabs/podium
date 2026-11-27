@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -47,6 +48,14 @@ type ArtifactRecord struct {
 	// sha256:<hex>. Both walks set it on every record, an unparseable one
 	// included, so the layer digest lists every package discovery finds.
 	PackageDigest string
+	// Fields are the §4.7.6 resolved fields the package digest frames. They
+	// are the zero value for an unresolved package, which Unparseable marks.
+	Fields manifest.ResolvedFields
+	// FileSums holds the SHA-256 digest of each file of the package under
+	// its slash path relative to the package root, the files the package
+	// digest was computed from. `podium attest check --commit` compares
+	// them between a working tree and a commit.
+	FileSums map[string]attest.Sum
 	// entryPathErr is the attest.CheckEntryPath error of a package that holds
 	// a file whose path is not valid UTF-8, which leaves it with no subject
 	// name. NewPackageRecord sets it.
