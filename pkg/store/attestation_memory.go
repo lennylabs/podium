@@ -120,6 +120,7 @@ func (s *Memory) ListAttestationLinks(_ context.Context, tenantID string, f Link
 			if mkey(tenantID, l.ArtifactID, l.Version) != vk || !s.linkMatchesLocked(tenantID, l, f) {
 				continue
 			}
+			l.AttestedAt = s.attestationTables().bundles[[2]string{tenantID, l.Digest}].AttestedAt
 			out = append(out, l)
 		}
 	}

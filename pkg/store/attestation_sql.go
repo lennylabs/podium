@@ -314,8 +314,9 @@ func (d attSQL) listAttestations(ctx context.Context, ex sqlExec, tenantID strin
 // listLinks reads the tenant's links that f selects.
 func (d attSQL) listLinks(ctx context.Context, ex sqlExec, tenantID string, f LinkFilter) ([]AttestationLink, error) {
 	query := `SELECT l.artifact_id, l.version, l.predicate_type, l.instance, l.signer_issuer, l.signer_identity,
-			l.digest, l.verdict, l.verified_under, l.linked_at
-		FROM artifact_attestations l WHERE l.tenant_id = ?`
+			l.digest, l.verdict, l.verified_under, l.linked_at, a.attested_at
+		FROM artifact_attestations l LEFT JOIN attestations a ON a.tenant_id = l.tenant_id AND a.digest = l.digest
+		WHERE l.tenant_id = ?`
 	args := []any{tenantID}
 	for _, c := range []struct{ col, val string }{{"l.artifact_id", f.ArtifactID}, {"l.version", f.Version}, {"l.digest", f.Digest}} {
 		if c.val != "" {
@@ -336,12 +337,12 @@ func (d attSQL) listLinks(ctx context.Context, ex sqlExec, tenantID string, f Li
 	var out []AttestationLink
 	for rows.Next() {
 		var l AttestationLink
-		var linked timeCol
+		var linked, attested timeCol
 		if err := rows.Scan(&l.ArtifactID, &l.Version, &l.PredicateType, &l.Instance, &l.SignerIssuer, &l.SignerIdentity,
-			&l.Digest, &l.Verdict, &l.VerifiedUnder, &linked); err != nil {
+			&l.Digest, &l.Verdict, &l.VerifiedUnder, &linked, &attested); err != nil {
 			return nil, err
 		}
-		l.LinkedAt = linked.t
+		l.LinkedAt, l.AttestedAt = linked.t, attested.t
 		out = append(out, l)
 	}
 	if err := rows.Err(); err != nil {

@@ -218,8 +218,8 @@ func attestationStorage(t *testing.T, s store.Store) {
 		Bundles: []store.StoredAttestation{bundle("d1", "M", nil)},
 		Versions: []store.VersionAttestations{
 			{ArtifactID: "a", Version: "1.0.0", Links: []store.AttestationLink{link("public-good", "d2", "verified", "k2")},
-				Updates:   []store.AttestationLink{link("github", "d1", "verified", "x"), link("github", "d2", "verified", "k3")},
-				Outcome:   &store.VersionOutcome{Outcome: store.OutcomeNotEvaluated}, OutcomeIf: store.OutcomeFailed},
+				Updates: []store.AttestationLink{link("github", "d1", "verified", "x"), link("github", "d2", "verified", "k3")},
+				Outcome: &store.VersionOutcome{Outcome: store.OutcomeNotEvaluated}, OutcomeIf: store.OutcomeFailed},
 			{ArtifactID: "b", Version: "1.0.0", ReplaceLinks: true, Links: []store.AttestationLink{link("public-good", "d1", "verified", "k1")},
 				Outcome: &store.VersionOutcome{Outcome: store.OutcomeVerified, EvaluatedAt: &at}, OutcomeIf: store.OutcomeFailed},
 			{ArtifactID: "absent", Version: "1.0.0", Outcome: &verified},

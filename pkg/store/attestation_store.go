@@ -178,6 +178,9 @@ type AttestationLink struct {
 	// link that a process behind a root record wrote.
 	VerifiedUnder string
 	LinkedAt      time.Time
+	// AttestedAt is the attested time of the linked bundle, which a read
+	// fills from the stored bundle; a write does not read it.
+	AttestedAt time.Time
 }
 
 // LinkKey is the key a version holds one link for: the predicate type and
@@ -275,7 +278,7 @@ func sortLinks(links []AttestationLink) {
 		case a.Version != b.Version:
 			return a.Version < b.Version
 		case a.Verdict != b.Verdict:
-			return a.Verdict < b.Verdict
+			return a.Verdict == VerdictVerified
 		case a.PredicateType != b.PredicateType:
 			return a.PredicateType < b.PredicateType
 		case a.Instance != b.Instance:
