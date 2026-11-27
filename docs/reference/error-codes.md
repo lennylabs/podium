@@ -237,6 +237,28 @@ The code applies when `PODIUM_AUDIT_ANCHOR_INTERVAL_SECONDS` is above 0 and the 
 | `ingest.collision` | Another registry-side layer already contributes this canonical artifact ID. Ingest drops the incoming artifact. Rename the artifact, or remove the other copy first and then ingest the replacement. A filesystem-source `podium sync` drops the higher-precedence copy, materializes the rest, and exits 1. |
 | `ingest.sign_failed` | The configured signer rejected the artifact's content hash at ingest (§7.3.1). The rejection covers that one artifact, and the rest of the batch is accepted. |
 | `ingest.resource_store_failed` | A bundled resource could not be persisted to the object store, so the manifest was not committed. |
+| `ingest.attestation_missing` | Under a layer trust policy, no accepted bundle lists the layer subject or an artifact. See [attestation codes](#attestation-codes). |
+| `ingest.attestation_mismatch` | Under a layer trust policy, no accepted bundle carries the snapshot's layer digest, or an artifact's subject differs. See [attestation codes](#attestation-codes). |
+| `ingest.attestation_stale` | Under a layer trust policy, the layer subject is older than the attestation mark or its commit is outside the layer's lineage. See [attestation codes](#attestation-codes). |
+| `ingest.attestation_invalid` | Under a layer trust policy, the attestation directory exceeds its limits or a package ID cannot be named by a subject. See [attestation codes](#attestation-codes). |
+| `ingest.attestation_policy_invalid` | The layer's trust policy resolves to `warn` or `require` with no requirement, or names a Sigstore instance the registry does not configure. Update it with `podium layer update`. |
+| `ingest.attestation_root_stale` | The policy names the `public-good` instance, and its trusted root is older than `PODIUM_SIGSTORE_ROOT_MAX_AGE`. The envelope is retryable: a later refresh clears it. |
+
+#### Attestation codes
+
+A cycle of a layer under `require` is refused with one of these codes, answered with `422`, and a cycle under `warn` records it. The code and its `details` are also the layer's `attestation_status` and `attestation_details`, and `podium layer show <id>` prints the next step for each.
+
+| Code | `details.constraint` | Cause |
+|:--|:--|:--|
+| `ingest.attestation_missing` | `no_bundle` | The attestation directory holds no bundle. |
+| `ingest.attestation_missing` | `no_accepted_bundle` | No bundle is accepted by a signer of the requirement. `details.bundles` lists up to 5 with their refusal reasons. |
+| `ingest.attestation_missing` | `no_layer_subject` | The accepted bundles list no layer subject for this layer's root. |
+| `ingest.attestation_missing` | `incomplete` | Accepted bundles list the layer subject, and the listed artifacts have no subject. |
+| `ingest.attestation_mismatch` | `layer_digest` | No accepted bundle carries the snapshot's layer digest. `details` lists the differing subjects, and `subjects_agree: true` places the difference in a `DOMAIN.md` or `.layer-config`. |
+| `ingest.attestation_stale` | `mark` | The newest layer subject is older than the attestation mark. |
+| `ingest.attestation_stale` | `not_in_history`, `not_descendant` | The signed commit is outside the history of the tracked ref, or does not descend from the recorded commit. |
+| `ingest.attestation_invalid` | `limits`, `subject_name` | The directory exceeds `PODIUM_ATTESTATION_MAX_BUNDLES` or `PODIUM_ATTESTATION_MAX_BYTES`, or a package ID holds a character no subject name allows. |
+| `ingest.attestation_policy_invalid` | `no_requirements`, `unknown_instance`, `policy_rule` | The layer's trust policy cannot be applied. |
 
 #### ingest.invalid_artifact causes
 

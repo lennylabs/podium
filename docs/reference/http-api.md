@@ -1011,6 +1011,7 @@ Every endpoint in this section that returns a layer returns the same object, wit
 | `trust_mode` | string | Trust mode: `none`, `warn`, `require`, or empty, which takes `PODIUM_LAYER_TRUST_DEFAULT`. See [Layer trust policy](../deployment/content/layers#layer-trust-policy). |
 | `trust_requirements` | array | The trust requirement, at most one, with any source binding members the registry derived. `null` when the layer has none. |
 | `trust_layer_root` | string | For a `local` layer, the `root` under which its content was signed. |
+| `attestation_mark`, `attested_commit`, `attestation_status`, `attestation_details`, `attestation_dropped`, `attestation_checked_at` | mixed | The layer's [attestation record](../deployment/content/layers#ingest-verification), read-only: the attested time of the last accepted layer subject, its signed commit, `ok` or the code of the last cycle's attestation failure, that failure's `details`, the number of artifacts the last cycle's artifact step dropped, and the time of the last record write. Each is absent until a cycle writes it, and a register or update body that carries one changes nothing. |
 | `last_ingested_at` | string | RFC 3339 timestamp of the most recent completed ingest. Absent until the layer has ingested once. |
 | `last_ingested_ref` | string | The commit SHA of the most recent completed ingest for a `git` source. |
 | `created_at` | string | RFC 3339 timestamp of the layer's registration. |
@@ -1301,11 +1302,14 @@ POST /v1/layers/reingest?id={id}
 
 **Authorization.** [Layer write authorization](#layer-write-authorization): a tenant admin for an admin-defined layer, and the owner or a tenant admin for a user-defined layer. A caller authorized by neither arm is rejected with `auth.forbidden` before any Git fetch runs. On a layer that names a filesystem path on the registry host, [local-source authorization](#local-source-authorization) additionally requires the `admin` role.
 
-**Body.** Optional. It carries a break-glass override during a freeze window:
+**Body.** Optional. It carries a break-glass override during a freeze window, and the [mark reset](../deployment/content/layers#ingest-verification) of a layer under a trust policy:
 
 ```json
 { "break_glass": true, "justification": "...", "approvers": ["...", "..."] }
+{ "reset_attestation_mark": true, "to_commit": "<full commit name>" }
 ```
+
+`reset_attestation_mark` clears the layer's attestation mark and recorded commit in the write that claims the layer for this cycle, and `to_commit` records that commit in place of none. A `to_commit` without `reset_attestation_mark`, on a layer whose source answers no lineage query such as a `local` layer, longer than 128 bytes, or that is not 40 or 64 hexadecimal digits is refused with `400 registry.invalid_argument` before the cycle runs.
 
 **Response.** A `200` response reports the cycle's results:
 
@@ -1329,6 +1333,7 @@ An artifact whose `ARTIFACT.md` or `SKILL.md` frontmatter does not parse is reje
 | `404 registry.not_found` | The layer is not registered, including a layer unregistered while the reingest waited for an earlier ingest of it to finish. |
 | `409 ingest.immutable_violation` | The cycle accepted no artifact, classified none unchanged, and has a same-version conflict. `details.conflicts` carries the entries the `conflicts` field describes. |
 | `422 ingest.lint_failed` | The cycle accepted no artifact, classified none unchanged, and has a lint failure and no conflict. |
+| `422 ingest.attestation_*` | The layer's [trust policy](../deployment/content/layers#ingest-verification) refused the cycle under `require`, or the policy is invalid. The envelope carries the refusal's `details`, and the cycle stored and removed nothing. The [error codes](error-codes#attestation-codes) list each code. |
 
 Neither the `409` nor the `422` envelope carries a `rejected` array, so it reports none of the cycle's other drops and no `details`.
 
