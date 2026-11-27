@@ -347,8 +347,9 @@ func openTargetStore(kind, postgresDSN, sqlitePath string) (store.Store, func(),
 
 // pumpStore writes the plan to the target one tenant at a time, in the
 // ascending ID order the plan holds, after clearing the target's record of the
-// content-hash rewrite and copying the source's verified-identity record. The order is deterministic, so an error names the
-// tenant the run stopped in, and a re-run rewrites every record idempotently.
+// content-hash rewrite and copying the source's verified-identity record. The
+// order is deterministic, so an error names the tenant the run stopped in, and
+// a re-run rewrites every record idempotently.
 //
 // Spec: §13.10
 func pumpStore(ctx context.Context, plan *migrationPlan, target store.Store) error {

@@ -59,6 +59,15 @@ type identityRemovalCheck struct {
 // the record and is unaffected. The guard targets a registry restarted after
 // a dropped environment variable or Helm value removed its provider.
 //
+// A provider the registry recognises but does not verify at request time,
+// such as oauth-device-code or an imported provider with no verifier, is
+// refused here with identityVisibilityGuard's config.identity_provider_unverified,
+// whether or not the store holds the record. Acknowledging a removal cannot
+// admit that start, so the removal code would send the operator to a remedy
+// that ends in the second refusal. The refusal comes before the bootstrap for
+// the same reason as the removal check. identityVisibilityGuard still runs
+// after the verifier phase as the backstop for the same condition.
+//
 // An unreadable record fails closed, because the start cannot tell whether it
 // drops verified identity.
 //
@@ -66,6 +75,9 @@ type identityRemovalCheck struct {
 func refuseIdentityProviderRemoval(ctx context.Context, st identityRecordStore, cfg *Config) (identityRemovalCheck, error) {
 	if expectsRequestVerifier(cfg) {
 		return identityRemovalCheck{}, nil
+	}
+	if identity.Default.Has(cfg.identityProvider) && !cfg.publicMode {
+		return identityRemovalCheck{}, identityVisibilityGuard(cfg.identityProvider, true, cfg.publicMode, false)
 	}
 	recorded, err := st.DataMigrationApplied(ctx, store.DeploymentMarkerVerifiedIdentity)
 	if err != nil {

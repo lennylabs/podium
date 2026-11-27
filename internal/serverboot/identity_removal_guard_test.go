@@ -383,3 +383,51 @@ func TestRun_RefusedStartLeavesStoreAndLiveReplicaUnchanged(t *testing.T) {
 			statusBefore, statusAfter, before != after, before, after)
 	}
 }
+
+// Spec: §13.10 (Identity provider removed between starts), §6.3.2 — a
+// provider the registry recognises but does not verify at request time is
+// refused with config.identity_provider_unverified whether or not the store
+// holds the record, because acknowledging a removal cannot admit it. The
+// refusal reads and writes nothing.
+func TestRefuseIdentityProviderRemoval_UnverifiedProviderTakesPrecedence(t *testing.T) {
+	t.Parallel()
+	for _, recorded := range []bool{true, false} {
+		st := &recordStore{recorded: recorded}
+		cfg := &Config{identityProvider: "oauth-device-code", allowIdentityProviderRemoval: true}
+		_, err := refuseIdentityProviderRemoval(context.Background(), st, cfg)
+		if err == nil || !strings.Contains(err.Error(), "config.identity_provider_unverified") || strings.Contains(err.Error(), "config.identity_provider_removed") || len(st.writes) != 0 {
+			t.Errorf("record %v: err = %v, writes %v; want config.identity_provider_unverified and no write", recorded, err, st.writes)
+		}
+	}
+}
+
+// Spec: §13.10 (Identity provider removed between starts), §6.3.2 — after a
+// verified start, a start naming oauth-device-code over the same store is
+// refused with config.identity_provider_unverified before its bootstrap, so
+// the tenants, the layer configuration, the admin grants, and the record are
+// unchanged.
+func TestRun_UnverifiedProviderOverRecordedStoreWritesNothing(t *testing.T) {
+	f := newBootFixture(t)
+	pinIdentityEnv(t)
+	t.Setenv("PODIUM_IDENTITY_PROVIDER", "trusted-headers")
+	if _, err := f.boot(t); err != nil {
+		t.Fatalf("trusted-headers start: %v", err)
+	}
+	st := f.openStoreDirect(t)
+	before := storeSnapshot(t, st)
+
+	t.Setenv("PODIUM_IDENTITY_PROVIDER", "oauth-device-code")
+	t.Setenv("PODIUM_BOOTSTRAP_ADMINS", "bob@acme.com")
+	_, refused := f.boot(t)
+
+	recorded, err := st.DataMigrationApplied(context.Background(), store.DeploymentMarkerVerifiedIdentity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if refused == nil || !strings.Contains(refused.Error(), "config.identity_provider_unverified") {
+		t.Fatalf("oauth-device-code start = %v, want config.identity_provider_unverified", refused)
+	}
+	if after := storeSnapshot(t, st); after != before || !recorded {
+		t.Errorf("record kept %v; store changed = %v\nbefore:\n%s\nafter:\n%s", recorded, after != before, before, after)
+	}
+}
