@@ -23,6 +23,7 @@ import (
 	"github.com/lennylabs/podium/pkg/layer/webhook"
 	"github.com/lennylabs/podium/pkg/registry/core"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
+	"github.com/lennylabs/podium/pkg/spi"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -2601,6 +2602,13 @@ func writeReingestError(w http.ResponseWriter, err error, res *ingest.Result) {
 	case errors.Is(err, ingest.ErrPublicModeSensitive):
 		writeError(w, http.StatusUnprocessableEntity, "ingest.public_mode_rejects_sensitive", err.Error())
 	case errors.Is(err, source.ErrSourceUnreachable):
+		// Spec: §7.3.1 (Git fetch: Deadline). A Git call that reached its
+		// fetch deadline carries details naming the setting, the operation,
+		// and the depth of the round that was running.
+		if e, ok := spi.AsError(err); ok && len(e.Details) > 0 {
+			writeErrorDetails(w, http.StatusBadGateway, "ingest.source_unreachable", err.Error(), e.Details)
+			return
+		}
 		writeError(w, http.StatusBadGateway, "ingest.source_unreachable", err.Error())
 	case errors.Is(err, source.ErrInvalidConfig):
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())

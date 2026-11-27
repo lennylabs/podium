@@ -138,6 +138,11 @@ func generateAttestationFile(t *testing.T) bundleCorpusFile {
 		return string(h.DSSEBundle(payload, append([]sh.BundleOpt{sh.WithTimestamp(sh.TSAPrimary)}, opts...)...))
 	}
 	leaf := func(opts ...sh.LeafOpt) sh.BundleOpt { return sh.WithLeaf(opts...) }
+	// logged is a transparency-log bundle with an SCT, an RFC 3161
+	// timestamp, and the one log entry opts describe.
+	logged := func(payload []byte, opts ...sh.RekorOpt) string {
+		return string(h.DSSEBundle(payload, sh.WithSCT(), sh.WithTimestamp(sh.TSAPrimary), sh.WithRekorV1Entry(opts...)))
+	}
 	actions := leaf(sh.GitHubActionsLeaf(vecWorkflow, vecSource()))
 	clock := h.Clock().UTC().Format(time.RFC3339)
 	listed := []subjectCheck{{Name: vecArtifact, SHA256: vecDigest, Listed: true}}
@@ -159,6 +164,26 @@ func generateAttestationFile(t *testing.T) bundleCorpusFile {
 			Bundle: pg(std, leaf(sh.LeafWithoutEKU())), Signer: emailVecSigner(), Reason: "chain"},
 		{Name: "leaf with only the any-purpose usage on a transparency-log instance", Category: "bundle", Instance: "public-good",
 			Bundle: pg(std, leaf(sh.LeafAnyUsageOnly())), Signer: emailVecSigner(), Reason: "chain"},
+		{Name: "log entry whose kindVersion label differs from its body", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithKindVersionLabel("intoto", "0.0.2")), Signer: emailVecSigner(), Reason: "log_entry"},
+		{Name: "Rekor v2 body for another digest under a Rekor v1 checkpoint", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithRekorV2BodyForOther(), sh.WithV1Checkpoint()), Signer: emailVecSigner(), Reason: "log_entry"},
+		{Name: "Rekor v2 body for the bundle under a Rekor v1 checkpoint", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithRekorV2Body(), sh.WithV1Checkpoint()), Signer: emailVecSigner(), Reason: "log_entry"},
+		{Name: "Rekor v2 entry bound to the bundle", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithRekorV2Body()), Signer: emailVecSigner(), Accepted: true, AttestedTime: clock},
+		{Name: "log entry with no promise inside the log key window", Category: "bundle", Instance: "public-good",
+			Bundle: logged(std, sh.WithoutSET()), Signer: emailVecSigner(), Accepted: true, AttestedTime: clock},
+		{Name: "log entry with no promise under an expired log key", Category: "bundle", Instance: "public-good-expired-log",
+			Bundle: logged(std, sh.WithoutSET()), Signer: emailVecSigner(), Reason: "time"},
+		{Name: "log entry with no promise under a log key not yet valid", Category: "bundle", Instance: "public-good-future-log",
+			Bundle: logged(std, sh.WithoutSET()), Signer: emailVecSigner(), Reason: "time"},
+		{Name: "Rekor v2 entry under an expired log key", Category: "bundle", Instance: "public-good-expired-log",
+			Bundle: logged(std, sh.WithRekorV2Body()), Signer: emailVecSigner(), Reason: "time"},
+		{Name: "Rekor v2 entry under a log key not yet valid", Category: "bundle", Instance: "public-good-future-log",
+			Bundle: logged(std, sh.WithRekorV2Body()), Signer: emailVecSigner(), Reason: "time"},
+		{Name: "log entry with a promise under an expired log key", Category: "bundle", Instance: "public-good-expired-log",
+			Bundle: pg(std), Signer: emailVecSigner(), Reason: "time"},
 		{Name: "subject digest in uppercase", Category: "bundle", Instance: "github",
 			Bundle: gh(stmt(sh.Subject{Name: vecArtifact, SHA256: upper})), Signer: emailVecSigner(), Accepted: true,
 			AttestedTime: clock, Subjects: []subjectCheck{{Name: vecArtifact, SHA256: vecDigest}, {Name: vecArtifact, SHA256: upper}}},
@@ -195,19 +220,29 @@ func generateAttestationFile(t *testing.T) bundleCorpusFile {
 	}
 	cases = append(cases, sampleCases(t)...)
 	pgRoot := h.TrustedRootJSON(sh.WithCTLogKey())
+	window := func(from, to time.Duration) sh.Window {
+		start, end := h.Clock().Add(from), h.Clock().Add(to)
+		return sh.Window{Start: &start, End: &end}
+	}
+	expiredRoot := h.TrustedRootJSON(sh.WithCTLogKey(), sh.WithLogValidFor(window(-48*time.Hour, -24*time.Hour)))
+	futureRoot := h.TrustedRootJSON(sh.WithCTLogKey(), sh.WithLogValidFor(window(24*time.Hour, 48*time.Hour)))
 	ghRoot := h.TrustedRootJSON(sh.GitHubStyleRoot()...)
 	return bundleCorpusFile{
 		Description: bundleCorpusDescription,
 		Roots: map[string]json.RawMessage{
 			"public-good": compactJSON(t, pgRoot), "github": compactJSON(t, ghRoot),
-			"sample-public-good": compactJSON(t, readSample(t, "public-good.trusted_root.json")),
-			"sample-github":      compactJSON(t, readSample(t, "github.trusted_root.json")),
+			"public-good-expired-log": compactJSON(t, expiredRoot),
+			"public-good-future-log":  compactJSON(t, futureRoot),
+			"sample-public-good":      compactJSON(t, readSample(t, "public-good.trusted_root.json")),
+			"sample-github":           compactJSON(t, readSample(t, "github.trusted_root.json")),
 		},
 		Instances: map[string]attestationInstance{
-			"public-good":        {Root: "public-good", TransparencyLog: true, CertificateTransparency: true},
-			"github":             {Root: "github"},
-			"sample-public-good": {Root: "sample-public-good", TransparencyLog: true, CertificateTransparency: true},
-			"sample-github":      {Root: "sample-github"},
+			"public-good":             {Root: "public-good", TransparencyLog: true, CertificateTransparency: true},
+			"github":                  {Root: "github"},
+			"public-good-expired-log": {Root: "public-good-expired-log", TransparencyLog: true, CertificateTransparency: true},
+			"public-good-future-log":  {Root: "public-good-future-log", TransparencyLog: true, CertificateTransparency: true},
+			"sample-public-good":      {Root: "sample-public-good", TransparencyLog: true, CertificateTransparency: true},
+			"sample-github":           {Root: "sample-github"},
 		},
 		Cases: sortByName(cases, func(c attestationCase) string { return c.Name }),
 	}

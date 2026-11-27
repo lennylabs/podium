@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/asn1"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -95,8 +96,11 @@ func VerifyAttestationBundle(ctx context.Context, raw []byte, inst AttestationIn
 	if err != nil {
 		return nil, err
 	}
-	v := &bundleVerification{bundle: b, root: ar.material, inst: inst, sig: pb.GetDsseEnvelope().GetSignatures()[0].GetSig()}
-	if err := v.run(); err != nil {
+	v := &bundleVerification{
+		bundle: b, root: ar.material, inst: inst, sig: pb.GetDsseEnvelope().GetSignatures()[0].GetSig(),
+		integratedTime: inst.TransparencyLog,
+	}
+	if err := v.run(v.attestationSteps()...); err != nil {
 		return nil, err
 	}
 	return &VerifiedAttestation{
@@ -109,25 +113,39 @@ func VerifyAttestationBundle(ctx context.Context, raw []byte, inst AttestationIn
 	}, nil
 }
 
-// bundleVerification carries one bundle through the staged checks.
+// bundleVerification carries one bundle through the staged checks. The
+// §4.7.11 attestation path and the §4.7.9 keyless path share it: an
+// attestation carries a DSSE envelope, and a keyless signature carries a
+// message signature over artifactDigest.
 type bundleVerification struct {
-	bundle       *bundle.Bundle
-	root         *root.TrustedRoot
-	inst         AttestationInstance
-	sig          []byte
-	leaf         *x509.Certificate
-	times        []time.Time
-	rsaNonSHA256 bool
-	fields       CertificateFields
+	bundle *bundle.Bundle
+	root   *root.TrustedRoot
+	inst   AttestationInstance
+	sig    []byte
+	// artifactDigest is the SHA-256 digest a message signature covers. It
+	// is nil for a DSSE bundle, whose signature covers the payload.
+	artifactDigest []byte
+	// integratedTime admits the integrated time of a log entry with a
+	// signed entry timestamp as a verified time. §4.7.11 admits it on an
+	// instance with a transparency log; §4.7.9 admits RFC 3161 times only.
+	integratedTime bool
+	leaf           *x509.Certificate
+	times          []time.Time
+	rsaNonSHA256   bool
+	fields         CertificateFields
 }
 
-// run applies the conditions in the §4.7.11 reason order, so the first
-// failure is the reason reported.
-func (v *bundleVerification) run() error {
-	steps := []func() error{
+// attestationSteps lists the §4.7.11 conditions in the reason order, so
+// the first failure is the reason reported.
+func (v *bundleVerification) attestationSteps() []func() error {
+	return []func() error{
 		v.checkTimes, v.checkLeafValidity, v.checkChain, v.checkLog, v.checkSignature,
 		v.checkCertificateFields, v.checkWholeBundle,
 	}
+}
+
+// run applies steps in order and returns the first failure.
+func (v *bundleVerification) run(steps ...func() error) error {
 	for _, step := range steps {
 		if err := step(); err != nil {
 			return err
@@ -145,7 +163,7 @@ func (v *bundleVerification) checkTimes() error {
 		return err
 	}
 	times := ev.times
-	if v.inst.TransparencyLog {
+	if v.integratedTime {
 		if t, ok := signedEntryTime(v.bundle, v.root); ok {
 			times = append(times, t)
 		}
@@ -245,6 +263,20 @@ func (v *bundleVerification) checkLog() error {
 	if err != nil || len(entries) != 1 || !entries[0].HasInclusionProof() {
 		return refuse(ReasonLogEntry, "the bundle carries no log entry with an inclusion proof", err)
 	}
+	// The library's choice of path does not by itself tie the entry to the
+	// bundle, so the body and checkpoint forms are fixed first.
+	if err := checkLogEntryForm(entries[0], v.root.RekorLogs()); err != nil {
+		return refuse(ReasonLogEntry, "the log entry is in no accepted form", err)
+	}
+	// A log key window that excludes a verified time is reported as time,
+	// as a signed entry timestamp outside the window is; an entry whose log
+	// the root does not list is a log_entry refusal.
+	if err := checkLogKeyWindow(entries[0], v.root.RekorLogs(), v.times); err != nil {
+		if errors.Is(err, errLogKeyWindow) {
+			return refuse(ReasonTime, "a verified time falls outside the log key's validity window", err)
+		}
+		return refuse(ReasonLogEntry, "the entry names no log of the trusted root", err)
+	}
 	if _, err := verify.VerifyTlogEntry(v.bundle, v.root, 1, true); err != nil {
 		return refuse(ReasonLogEntry, "the log entry does not verify", err)
 	}
@@ -264,7 +296,12 @@ func (v *bundleVerification) checkSignature() error {
 	if err != nil {
 		return refuse(ReasonParse, "the leaf certificate does not parse", err)
 	}
-	if err := verify.VerifySignature(sigContent, vc, v.root); err != nil {
+	if v.artifactDigest != nil {
+		err = verify.VerifySignatureWithArtifactDigests(sigContent, vc, v.root, []verify.ArtifactDigest{{Algorithm: "sha256", Digest: v.artifactDigest}})
+	} else {
+		err = verify.VerifySignature(sigContent, vc, v.root)
+	}
+	if err != nil {
 		return refuse(ReasonSignature, "the signature does not verify under the leaf's key", err)
 	}
 	return nil
@@ -278,7 +315,10 @@ func (v *bundleVerification) checkSignature() error {
 func (v *bundleVerification) checkWholeBundle() error {
 	opts := []verify.VerifierOption{verify.WithoutStatementPredicate()}
 	if v.inst.TransparencyLog {
-		opts = append(opts, verify.WithTransparencyLog(1), verify.WithObserverTimestamps(1))
+		opts = append(opts, verify.WithTransparencyLog(1))
+	}
+	if v.integratedTime {
+		opts = append(opts, verify.WithObserverTimestamps(1))
 	} else {
 		opts = append(opts, verify.WithSignedTimestamps(1))
 	}
@@ -289,7 +329,11 @@ func (v *bundleVerification) checkWholeBundle() error {
 	if err != nil {
 		return fmt.Errorf("attestation: configure verifier: %w", err)
 	}
-	policy := verify.NewPolicy(verify.WithoutArtifactUnsafe(), verify.WithoutIdentitiesUnsafe())
+	artifact := verify.WithoutArtifactUnsafe()
+	if v.artifactDigest != nil {
+		artifact = verify.WithArtifactDigest("sha256", v.artifactDigest)
+	}
+	policy := verify.NewPolicy(artifact, verify.WithoutIdentitiesUnsafe())
 	if _, err := verifier.Verify(v.bundle, policy); err != nil {
 		return refuse(ReasonSignature, "the library refused the bundle", err)
 	}

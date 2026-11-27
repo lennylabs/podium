@@ -107,6 +107,29 @@ func isLowerHex64(s string) bool {
 //
 // Spec: §4.7.11.
 func parseAttestationBundle(raw []byte) (*bundle.Bundle, *protobundle.Bundle, error) {
+	b, pb, err := parseSigstoreBundle(raw)
+	if err != nil {
+		return nil, nil, err
+	}
+	env := pb.GetDsseEnvelope()
+	switch {
+	case env == nil:
+		return nil, nil, refuse(ReasonPayload, "the bundle carries no DSSE envelope", nil)
+	case env.GetPayloadType() != inTotoPayloadType:
+		return nil, nil, refuse(ReasonPayload, "the DSSE payload type is not the in-toto type", nil)
+	case len(env.GetSignatures()) != 1:
+		return nil, nil, refuse(ReasonPayload, "the DSSE envelope does not carry exactly one signature", nil)
+	}
+	return b, pb, nil
+}
+
+// parseSigstoreBundle applies the bundle conditions that the §4.7.11
+// attestation and the §4.7.9 keyless signature share: the §4.7.10 JSON
+// rule, the version 0.3 media type read by exact member name, and the
+// library's bundle parse.
+//
+// Spec: §4.7.9, §4.7.11.
+func parseSigstoreBundle(raw []byte) (*bundle.Bundle, *protobundle.Bundle, error) {
 	// protojson also accepts the protobuf field name media_type, so the
 	// media type is read by exact member name before it runs. A bundle
 	// that names its media type only as media_type has none.
@@ -124,15 +147,6 @@ func parseAttestationBundle(raw []byte) (*bundle.Bundle, *protobundle.Bundle, er
 	b, err := bundle.NewBundle(pb)
 	if err != nil {
 		return nil, nil, refuse(ReasonParse, "the bundle is not a valid version 0.3 bundle", err)
-	}
-	env := pb.GetDsseEnvelope()
-	switch {
-	case env == nil:
-		return nil, nil, refuse(ReasonPayload, "the bundle carries no DSSE envelope", nil)
-	case env.GetPayloadType() != inTotoPayloadType:
-		return nil, nil, refuse(ReasonPayload, "the DSSE payload type is not the in-toto type", nil)
-	case len(env.GetSignatures()) != 1:
-		return nil, nil, refuse(ReasonPayload, "the DSSE envelope does not carry exactly one signature", nil)
 	}
 	return b, pb, nil
 }

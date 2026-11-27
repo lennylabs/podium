@@ -147,8 +147,8 @@ func WithoutTLogs() RootOpt { return func(c *rootConfig) { c.noTLogs = true } }
 // WithEd25519LogKey adds the Ed25519 log key beside the P-256 key.
 func WithEd25519LogKey() RootOpt { return func(c *rootConfig) { c.edKey = true } }
 
-// WithUnsupportedLogKey adds an RSA log key with an RSA keyDetails value,
-// which the §4.7.9 verifier skips.
+// WithUnsupportedLogKey adds an RSA log key with an RSA keyDetails value.
+// sigstore-go loads it, and no generated entry names it.
 func WithUnsupportedLogKey() RootOpt { return func(c *rootConfig) { c.unsupported = true } }
 
 // WithExtraTLog adds an unrelated P-256 log key.
@@ -181,7 +181,7 @@ func WithMalformedJSON() RootOpt { return func(c *rootConfig) { c.malformed = tr
 
 // WithForeignCA replaces the certificate authorities with an unrelated
 // root and intermediate. The timestamp authority and log key stay, so a
-// default envelope fails only at the leaf's chain check.
+// default bundle fails only at the leaf's chain check.
 func WithForeignCA() RootOpt { return func(c *rootConfig) { c.foreignCA = true } }
 
 // TrustedRootJSON returns a Sigstore trusted_root.json with one

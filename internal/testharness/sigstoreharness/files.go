@@ -2,22 +2,27 @@ package sigstoreharness
 
 import (
 	"crypto/sha256"
+	"encoding/asn1"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"path/filepath"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
 )
 
-// Names of the envelopes WriteFiles writes.
+// Names of the signatures WriteFiles writes.
 const (
-	// EnvelopeValid is a default envelope for DefaultSAN and DefaultIssuer.
+	// EnvelopeValid is a default keyless bundle for DefaultSAN and
+	// DefaultIssuer.
 	EnvelopeValid = "valid"
-	// EnvelopeForeignSAN is an envelope whose leaf SAN is bob@acme.com.
+	// EnvelopeForeignSAN is a keyless bundle whose leaf SAN is bob@acme.com.
 	EnvelopeForeignSAN = "foreign-san"
-	// EnvelopeLegacy is an envelope in the format that predates the tlog
-	// object: cert, signature, and a top-level log_index.
+	// EnvelopeLegacy is the default signature in the keyless envelope
+	// format of 0.7.0, which 0.8.0 refuses: the members cert, signature,
+	// tlog, and timestamp.
 	EnvelopeLegacy = "legacy"
 )
 
@@ -25,14 +30,14 @@ const (
 type Files struct {
 	// TrustedRoot is the path of trusted_root.json.
 	TrustedRoot string
-	// ContentHash is the "sha256:hex" content hash every envelope signs.
+	// ContentHash is the "sha256:hex" content hash every signature signs.
 	ContentHash string
-	// Envelopes maps an envelope name to the path of its JSON file.
+	// Envelopes maps a signature name to the path of its JSON file.
 	Envelopes map[string]string
 }
 
 // WriteFiles writes the default trusted root as trusted_root.json and the
-// named envelopes as <name>.json under dir, for tests that drive the
+// named signatures as <name>.json under dir, for tests that drive the
 // podium binary.
 //
 // Spec: §4.7.9, §6.2.
@@ -40,11 +45,12 @@ func (h *Harness) WriteFiles(t testing.TB, dir string) Files {
 	t.Helper()
 	sum := sha256.Sum256([]byte("acme sigstore harness content"))
 	contentHash := "sha256:" + hex.EncodeToString(sum[:])
-	valid := h.Envelope(t, contentHash)
+	valid, parts, err := h.buildKeyless(contentHash, defaultEnvConfig())
+	must(t, err)
 	envelopes := map[string]string{
-		EnvelopeValid:      valid,
-		EnvelopeForeignSAN: h.Envelope(t, contentHash, WithSAN("bob@acme.com")),
-		EnvelopeLegacy:     legacyEnvelope(t, valid),
+		EnvelopeValid:      string(valid),
+		EnvelopeForeignSAN: h.KeylessBundle(t, contentHash, WithSAN("bob@acme.com")),
+		EnvelopeLegacy:     legacyEnvelope(t, parts),
 	}
 	files := Files{
 		TrustedRoot: filepath.Join(dir, "trusted_root.json"),
@@ -60,16 +66,33 @@ func (h *Harness) WriteFiles(t testing.TB, dir string) Files {
 	return files
 }
 
-// legacyEnvelope rewrites a current envelope into the pre-tlog format.
-func legacyEnvelope(t testing.TB, current string) string {
+// legacyEnvelope writes the parts of a keyless bundle in the 0.7.0
+// envelope format: the PEM chain, the base64 signature, the tlog object
+// with the log index, entry body, audit path, and checkpoint, and the
+// base64 timestamp token.
+func legacyEnvelope(t testing.TB, p keylessParts) string {
 	t.Helper()
-	var env envelopeJSON
-	must(t, json.Unmarshal([]byte(current), &env))
-	out, err := json.Marshal(struct {
-		Cert      string `json:"cert"`
-		Signature string `json:"signature"`
-		LogIndex  int64  `json:"log_index"`
-	}{env.Cert, env.Signature, 7})
+	var resp struct {
+		Status asn1.RawValue
+		Token  asn1.RawValue
+	}
+	_, err := asn1.Unmarshal(p.tsr, &resp)
+	must(t, err)
+	hashes := make([]string, len(p.entry.InclusionProof.Hashes))
+	for i, h := range p.entry.InclusionProof.Hashes {
+		hashes[i] = base64.StdEncoding.EncodeToString(h)
+	}
+	out, err := json.Marshal(map[string]any{
+		"cert":      string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: p.leaf.cert.Raw})),
+		"signature": base64.StdEncoding.EncodeToString(p.leaf.sig),
+		"tlog": map[string]any{
+			"log_index":  p.entry.LogIndex,
+			"body":       base64.StdEncoding.EncodeToString(p.entry.CanonicalizedBody),
+			"hashes":     hashes,
+			"checkpoint": p.entry.InclusionProof.Checkpoint.Envelope,
+		},
+		"timestamp": base64.StdEncoding.EncodeToString(resp.Token.FullBytes),
+	})
 	must(t, err)
 	return string(out)
 }
