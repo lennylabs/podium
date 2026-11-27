@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/lennylabs/podium/internal/testharness"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/store"
@@ -267,6 +269,12 @@ func TestValidate_DeclaredTrustAliasesAndLayerKeys(t *testing.T) {
 			`holds the key "<<"`},
 		{"dashed layer key", "registry:\n" + layerHead + "      trust-mode: require\n", `the key "trust-mode" (line 8) is not a trust policy member`},
 		{"case layer key", "registry:\n" + layerHead + "      Trust_Mode: require\n", `the key "Trust_Mode"`},
+		{"entry merge key",
+			"registry:\n  x-anchors:\n    c: &c {trust_mod: require}\n" + layerHead + "      <<: *c\n",
+			`the key "trust_mod" (line 3)`},
+		{"entry merge key list",
+			"registry:\n  x-anchors:\n    a: &a {ref_note: x}\n    b: &b {base: &n {trust-layer-root: x}}\n    c: &c {<<: *n}\n" + layerHead + "      <<: [*a, *c]\n",
+			`the key "trust-layer-root"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := loadTrustConfig(t, tc.body, "").validate()
@@ -290,5 +298,21 @@ func TestIsDeclaredLayer(t *testing.T) {
 	is := c.isDeclaredLayer("default")
 	if !is("default", "finance") || is("default", "other") || is("globex", "finance") {
 		t.Error("isDeclaredLayer")
+	}
+}
+
+// Spec: §7.3.1 (Layer trust policy) — entryKeys follows merge keys to a
+// bounded depth.
+func TestEntryKeys_BoundsMergeDepth(t *testing.T) {
+	inner := &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "trust_mod"}, {Kind: yaml.ScalarNode, Value: "x"}}}
+	m := inner
+	for range maxMergeDepth + 2 {
+		m = &yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, m}}
+	}
+	if keys := entryKeys(m, 0); len(keys) != 0 {
+		t.Errorf("entryKeys past the depth bound = %d keys", len(keys))
+	}
+	if keys := entryKeys(&yaml.Node{Kind: yaml.MappingNode, Content: []*yaml.Node{{Kind: yaml.ScalarNode, Value: "<<"}, inner}}, 0); len(keys) != 1 || keys[0].Value != "trust_mod" {
+		t.Errorf("entryKeys of one merge = %v", keys)
 	}
 }

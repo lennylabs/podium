@@ -258,17 +258,47 @@ func (e *yamlLayerEntry) UnmarshalYAML(value *yaml.Node) error {
 	if err := value.Decode((*plain)(e)); err != nil {
 		return err
 	}
-	if m := resolveAlias(value); m.Kind == yaml.MappingNode {
-		for i := 0; i+1 < len(m.Content); i += 2 {
-			key := m.Content[i]
-			if layer.IsTrustLikeName(key.Value) && !slices.Contains(layer.TrustMemberNames, key.Value) {
-				e.trustKeyErr = fmt.Errorf("the key %q (line %d) is not a trust policy member; the members are %s",
-					key.Value, key.Line, strings.Join(layer.TrustMemberNames, ", "))
-				break
-			}
+	for _, key := range entryKeys(resolveAlias(value), 0) {
+		if layer.IsTrustLikeName(key.Value) && !slices.Contains(layer.TrustMemberNames, key.Value) {
+			e.trustKeyErr = fmt.Errorf("the key %q (line %d) is not a trust policy member; the members are %s",
+				key.Value, key.Line, strings.Join(layer.TrustMemberNames, ", "))
+			break
 		}
 	}
 	return nil
+}
+
+// maxMergeDepth bounds the merge keys entryKeys follows, so a document that
+// nests merges deeply cannot recurse without limit. yaml.v3 refuses an
+// alias cycle before this runs.
+const maxMergeDepth = 16
+
+// entryKeys returns the keys of a mapping node, including the keys it takes
+// through a merge key (<<), whose value is a mapping, an alias of one, or a
+// sequence of them. The trust-prefix rule reads merged keys, because the
+// decode applies them as if written in place.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func entryKeys(m *yaml.Node, depth int) []*yaml.Node {
+	if m == nil || m.Kind != yaml.MappingNode || depth > maxMergeDepth {
+		return nil
+	}
+	var keys []*yaml.Node
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		key, val := m.Content[i], resolveAlias(m.Content[i+1])
+		if key.Value != "<<" {
+			keys = append(keys, key)
+			continue
+		}
+		sources := []*yaml.Node{val}
+		if val.Kind == yaml.SequenceNode {
+			sources = val.Content
+		}
+		for _, src := range sources {
+			keys = append(keys, entryKeys(resolveAlias(src), depth+1)...)
+		}
+	}
+	return keys
 }
 
 // yamlLayerSource is the §4.6 `source:` block. Exactly one of git or
