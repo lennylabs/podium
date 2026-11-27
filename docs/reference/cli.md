@@ -314,7 +314,7 @@ podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-s
 | Flag | Effect |
 |:--|:--|
 | `<dir>` | Directory the layer root is resolved from. Default: the current directory. |
-| `--root <subpath>` | The layer's registered `root` below `<dir>`. Leading and trailing `/` characters are removed. A value with an empty, `.`, or `..` segment, a white space character, a control character, or a backslash is a usage error. |
+| `--root <subpath>` | The layer's registered `root` below `<dir>`. Leading and trailing `/` characters are removed. A value with an empty, `.`, or `..` segment, a white space character, a control character, or a backslash is a usage error. Where the command reads the layer root on disk, a segment below `<dir>` that is a symbolic link or no directory exits 1, because a `git` layer's tree holds such a link as a link entry. `<dir>` and its ancestors are not checked. `podium attest import` and `podium attest check` apply the same rule. |
 | `--commit <rev>` | Read the layer from the tree of this commit in the Git object database, such as `HEAD`, a branch name, or a commit hash. |
 | `--out <dir>` | Directory the files are written to, created when absent. Default: the current directory. |
 | `--max-subjects <n>` | Most subjects in one file, the layer subject included. At least 2. Default: 1024, the limit of GitHub's attestation action. |
