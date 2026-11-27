@@ -139,6 +139,12 @@ type LayerEndpoint struct {
 	// trustInstances reports the Sigstore instances the registry configures,
 	// which the §4.7.11 policy rules read. Nil knows public-good alone.
 	trustInstances layer.TrustInstances
+	// trustDefault is PODIUM_LAYER_TRUST_DEFAULT, which the no-requirement
+	// rule reads at the endpoints. Empty is none.
+	trustDefault string
+	// declaredLayer reports whether a layer is declared in registry.yaml,
+	// whose declaration alone sets its trust policy. Nil declares none.
+	declaredLayer func(tenantID, id string) bool
 }
 
 // NotificationFunc delivers one §9.1 operational notification. It mirrors
@@ -1654,6 +1660,12 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// unchecked, so a policy a later configuration made invalid does not
 	// refuse an update of another member.
 	if trustP.carried() {
+		// spec: §7.3.1 (Layer trust policy) — a declared layer's policy is
+		// set in registry.yaml, which the next start re-applies.
+		if e.isDeclared(cfg.TenantID, cfg.ID) {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", declaredTrustRefusal(cfg.ID))
+			return
+		}
 		if msg := e.trustPolicyError(trustP.applyTo(cfg)); msg != "" {
 			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 			return
@@ -1763,8 +1775,21 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	if e.refuseWithoutOperatorToken(w, r) {
 		return
 	}
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	var req LayerRegisterRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	// spec: §7.3.1 (Layer trust policy) — the trust members are read by the
+	// same case-insensitive, presence-based decoder update uses, which also
+	// refuses a misspelled trust member and a null string member.
+	trustP, err := decodeTrustPatch(body)
+	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
@@ -1808,15 +1833,20 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 (Layer trust policy) — the policy the request carries, with
 	// the source binding derived from the request's repo, is checked with the
 	// request's own fields, before the stored layer is read.
-	trust := store.LayerConfig{
-		SourceType:        req.SourceType,
-		TrustMode:         req.TrustMode,
-		TrustRequirements: layer.DeriveSourceBinding(req.SourceType, req.Repo, nilIfNoRequirement(req.TrustRequirements)),
-		TrustLayerRoot:    req.TrustLayerRoot,
-	}
-	if msg := e.trustPolicyError(trust); msg != "" {
-		writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+	// A declared layer's policy is set in registry.yaml: a trust member is
+	// refused, and a registration without one keeps the declared policy
+	// below, which the declaration already passed at start.
+	declared := e.isDeclared(tenantID, req.ID)
+	if declared && trustP.carried() {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", declaredTrustRefusal(req.ID))
 		return
+	}
+	trust := trustP.applyTo(store.LayerConfig{SourceType: req.SourceType, Repo: req.Repo})
+	if !declared {
+		if msg := e.trustPolicyError(trust); msg != "" {
+			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+			return
+		}
 	}
 	// spec: §7.3.1 — the layer-write authorization rule, on the path that
 	// reads as a creation. PutLayerConfig below is an upsert keyed on
@@ -1969,6 +1999,9 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(registered, sql.NullString{})
 	case exists && keepsStoredRemote(stored, req, cfg):
 		cfg.Repo, cfg.RegisteredRepo = store.SplitLayerRepo(stored.CloneRepo(), sql.NullString{})
+	}
+	if declared && exists {
+		cfg.TrustMode, cfg.TrustRequirements, cfg.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
 	}
 
 	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity

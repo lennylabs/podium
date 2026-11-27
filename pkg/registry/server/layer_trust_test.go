@@ -398,3 +398,111 @@ func TestLayerTrust_UpdateRefusesMistypedMembers(t *testing.T) {
 		t.Errorf("a refused update stored a policy: %+v", got)
 	}
 }
+
+// Spec: §7.3.1 (Layer trust policy) — the trust members of a register and an
+// update body match without regard to letter case, so update applies what
+// register applies; a member carried under two spellings, a misspelled
+// trust-prefixed member, and a null trust_mode or trust_layer_root are
+// refused with 400 registry.invalid_argument and change nothing. Other
+// unknown members are still ignored, so an echoed layer object is admitted.
+func TestLayerTrust_MemberNames(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, nil)
+	if resp, body := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"TRUST_MODE": "warn", "trust_requirements": requirement(ownSigner())})); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d %s", resp.StatusCode, body)
+	}
+	if got := h.stored(t, "finance"); got.TrustMode != "warn" {
+		t.Fatalf("register stored mode %q", got.TrustMode)
+	}
+	if resp, body := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"Trust_Mode": "require"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("update: %d %s", resp.StatusCode, body)
+	}
+	if got := h.stored(t, "finance"); got.TrustMode != "require" {
+		t.Fatalf("a case-variant member on update stored mode %q", got.TrustMode)
+	}
+	for _, tc := range []struct{ body, want string }{
+		{`{"trust_mode":"warn","Trust_Mode":"none"}`, "more than once"},
+		{`{"trust_mod":"none"}`, `"trust_mod" is not a trust policy member`},
+		{`{"trust-mode":"none"}`, `"trust-mode" is not a trust policy member`},
+		{`{"trust_mode":null}`, "trust_mode is null"},
+		{`{"trust_layer_root":null}`, "trust_layer_root is null"},
+	} {
+		resp, out := putRaw(t, h.base, "/v1/layers/update?id=finance", tc.body)
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(refusalEnvelope(t, out).Message, tc.want) {
+			t.Errorf("update %s: %d %s, want %q", tc.body, resp.StatusCode, out, tc.want)
+		}
+	}
+	resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"id": "other", "trust_mod": "require"}))
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(refusalEnvelope(t, out).Message, `"trust_mod" is not a trust policy member`) {
+		t.Errorf("register with a misspelled member: %d %s", resp.StatusCode, out)
+	}
+	if got := h.stored(t, "finance"); got.TrustMode != "require" {
+		t.Errorf("a refused update changed the mode to %q", got.TrustMode)
+	}
+	if resp, out := putRaw(t, h.base, "/v1/layers/update?id=finance", `{"ref":"main","order":5,"created_at":"x"}`); resp.StatusCode != http.StatusOK {
+		t.Errorf("an echoed member was refused: %d %s", resp.StatusCode, out)
+	}
+}
+
+// Spec: §7.3.1 (Layer trust policy) — the policy of a layer declared in
+// registry.yaml is set in the declaration: an update or a registration that
+// carries a trust member for it is refused, naming registry.yaml, and a
+// registration under its ID that carries none keeps the declared policy.
+func TestLayerTrust_DeclaredLayerRefusesTrustMembers(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, func(e *server.LayerEndpoint) *server.LayerEndpoint {
+		return e.WithDeclaredLayers(func(tenant, id string) bool { return tenant == "t" && id == "finance" })
+	})
+	declared := store.LayerConfig{TenantID: "t", ID: "finance", SourceType: "git", Repo: trustRepo, Ref: "main", TrustMode: "warn",
+		TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: trustIssuer, Identity: "alice@acme.com"}}}}}
+	if err := h.st.PutLayerConfig(context.Background(), declared); err != nil {
+		t.Fatal(err)
+	}
+	for _, send := range []func() (*http.Response, []byte){
+		func() (*http.Response, []byte) {
+			return mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_mode": "require"})
+		},
+		func() (*http.Response, []byte) {
+			return mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"trust_mode": "none"}))
+		},
+	} {
+		resp, out := send()
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(out), "is declared in registry.yaml") {
+			t.Errorf("trust member on a declared layer: %d %s", resp.StatusCode, out)
+		}
+	}
+	if resp, out := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"ref": "release"}); resp.StatusCode != http.StatusOK {
+		t.Errorf("an update of another member: %d %s", resp.StatusCode, out)
+	}
+	if resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(nil)); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("re-registration without a trust member: %d %s", resp.StatusCode, out)
+	}
+	if got := h.stored(t, "finance"); !layer.TrustPolicyEqual(got, declared) {
+		t.Errorf("declared policy after the re-registration = %q %+v", got.TrustMode, got.TrustRequirements)
+	}
+}
+
+// Spec: §4.7.11 (Policy rules) — at the endpoints the no-requirement rule
+// reads the resolved mode: with PODIUM_LAYER_TRUST_DEFAULT at require, a
+// registration with no policy, and an update that empties the mode of a
+// layer with no requirement, are refused; a policy with a requirement, and
+// an explicit none, are admitted.
+func TestLayerTrust_DefaultRequiresAPolicy(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, func(e *server.LayerEndpoint) *server.LayerEndpoint {
+		return e.WithTrustDefault("require")
+	})
+	resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(nil))
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(out), "resolves to require through PODIUM_LAYER_TRUST_DEFAULT") {
+		t.Fatalf("registration without a policy: %d %s", resp.StatusCode, out)
+	}
+	if resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"trust_mode": "none"})); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("explicit none: %d %s", resp.StatusCode, out)
+	}
+	if resp, out := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_mode": ""}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("emptying the mode with no requirement: %d %s", resp.StatusCode, out)
+	}
+	if resp, out := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"id": "signed", "trust_requirements": requirement(ownSigner())})); resp.StatusCode != http.StatusCreated {
+		t.Errorf("a policy with a requirement: %d %s", resp.StatusCode, out)
+	}
+}

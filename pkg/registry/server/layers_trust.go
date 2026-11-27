@@ -1,8 +1,10 @@
 package server
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/store"
@@ -19,10 +21,42 @@ func (e *LayerEndpoint) WithTrustInstances(fn layer.TrustInstances) *LayerEndpoi
 	return e
 }
 
-// trustPatch is the §7.3.1 trust policy half of an update body, resolved by
-// presence: a member the body carries is applied, and a member it omits keeps
-// the stored value. Presence is what lets "trust_mode": "" return a layer to
-// the deployment default and "trust_requirements": [] remove the
+// WithTrustDefault installs PODIUM_LAYER_TRUST_DEFAULT, which the §4.7.11
+// no-requirement rule reads at the endpoints: with it at warn or require, a
+// registration or an update that leaves a layer with an empty mode and no
+// requirement is refused.
+//
+// Spec: §4.7.11 (Policy rules)
+func (e *LayerEndpoint) WithTrustDefault(mode string) *LayerEndpoint {
+	e.trustDefault = mode
+	return e
+}
+
+// WithDeclaredLayers installs the predicate that reports whether a layer of
+// a tenant is declared in registry.yaml, whose declaration sets its trust
+// policy at each start.
+//
+// Spec: §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) WithDeclaredLayers(fn func(tenantID, id string) bool) *LayerEndpoint {
+	e.declaredLayer = fn
+	return e
+}
+
+// isDeclared reports whether id is a declared layer of tenantID.
+func (e *LayerEndpoint) isDeclared(tenantID, id string) bool {
+	return e.declaredLayer != nil && e.declaredLayer(tenantID, id)
+}
+
+// declaredTrustRefusal is the message of a trust member sent for a declared
+// layer.
+func declaredTrustRefusal(id string) string {
+	return fmt.Sprintf("the trust policy of layer %s is declared in registry.yaml; change it in the declaration, which the registry applies at its next start", id)
+}
+
+// trustPatch is the §7.3.1 trust policy half of a register or update body,
+// resolved by presence: a member the body carries is applied, and a member it
+// omits keeps the stored value. Presence is what lets "trust_mode": "" return
+// a layer to the deployment default and "trust_requirements": [] remove the
 // requirement, which the non-empty-replaces reading of the other members
 // cannot express.
 //
@@ -33,39 +67,77 @@ type trustPatch struct {
 	root *string
 }
 
-// decodeTrustPatch reads the trust policy members out of an update body by
-// exact key. A requirement or signer that holds an unknown member fails its
-// decode (store.TrustRequirement.UnmarshalJSON), which the caller refuses.
+// decodeTrustPatch reads the trust policy members out of a register or update
+// body. A member matches without regard to letter case, as encoding/json
+// matches the flat request, so both operations read the same member. A body
+// that carries one member under two spellings, a member whose name reads as
+// a trust member and is none (layer.IsTrustLikeName), and a null trust_mode
+// or trust_layer_root are refused. A requirement or signer that holds an
+// unknown member fails its decode (store.TrustRequirement.UnmarshalJSON).
 //
-// Spec: §7.3.1 (Patch semantics on the update body)
+// Spec: §7.3.1 (Layer trust policy), §7.3.1 (Patch semantics on the update body)
 func decodeTrustPatch(body []byte) (trustPatch, error) {
 	var raw map[string]json.RawMessage
 	if err := json.Unmarshal(body, &raw); err != nil {
-		return trustPatch{}, fmt.Errorf("layer update: decode body: %w", err)
+		return trustPatch{}, fmt.Errorf("layer request: decode body: %w", err)
+	}
+	found := map[string]json.RawMessage{}
+	for key, v := range raw {
+		member, ok := trustMember(key)
+		if !ok {
+			if layer.IsTrustLikeName(key) {
+				return trustPatch{}, fmt.Errorf("layer request: %q is not a trust policy member; the members are %s", key, strings.Join(layer.TrustMemberNames, ", "))
+			}
+			continue
+		}
+		if _, dup := found[member]; dup {
+			return trustPatch{}, fmt.Errorf("layer request: %s is carried more than once under different letter case", member)
+		}
+		found[member] = v
 	}
 	var p trustPatch
-	if v, ok := raw["trust_mode"]; ok {
-		var m string
-		if err := json.Unmarshal(v, &m); err != nil {
-			return trustPatch{}, fmt.Errorf("layer update: trust_mode: %w", err)
-		}
-		p.mode = &m
+	var err error
+	if p.mode, err = trustString(found, "trust_mode"); err != nil {
+		return trustPatch{}, err
 	}
-	if v, ok := raw["trust_requirements"]; ok {
+	if p.root, err = trustString(found, "trust_layer_root"); err != nil {
+		return trustPatch{}, err
+	}
+	if v, ok := found["trust_requirements"]; ok {
 		var reqs []store.TrustRequirement
 		if err := json.Unmarshal(v, &reqs); err != nil {
-			return trustPatch{}, fmt.Errorf("layer update: trust_requirements: %w", err)
+			return trustPatch{}, fmt.Errorf("layer request: trust_requirements: %w", err)
 		}
 		p.reqs = &reqs
 	}
-	if v, ok := raw["trust_layer_root"]; ok {
-		var root string
-		if err := json.Unmarshal(v, &root); err != nil {
-			return trustPatch{}, fmt.Errorf("layer update: trust_layer_root: %w", err)
-		}
-		p.root = &root
-	}
 	return p, nil
+}
+
+// trustMember returns the trust member key names without regard to case.
+func trustMember(key string) (string, bool) {
+	for _, m := range layer.TrustMemberNames {
+		if strings.EqualFold(key, m) {
+			return m, true
+		}
+	}
+	return "", false
+}
+
+// trustString decodes the string member name of found, refusing null, which
+// neither trust_mode nor trust_layer_root holds.
+func trustString(found map[string]json.RawMessage, name string) (*string, error) {
+	v, ok := found[name]
+	if !ok {
+		return nil, nil
+	}
+	if string(bytes.TrimSpace(v)) == "null" {
+		return nil, fmt.Errorf("layer request: %s is null; send a string, such as \"\" for the default", name)
+	}
+	var out string
+	if err := json.Unmarshal(v, &out); err != nil {
+		return nil, fmt.Errorf("layer request: %s: %w", name, err)
+	}
+	return &out, nil
 }
 
 // carried reports whether the body carried a trust policy member.
@@ -106,7 +178,7 @@ func nilIfNoRequirement(reqs []store.TrustRequirement) []store.TrustRequirement 
 //
 // Spec: §4.7.11 (Policy rules), §7.3.1 (Layer trust policy)
 func (e *LayerEndpoint) trustPolicyError(cfg store.LayerConfig) string {
-	if err := layer.CheckTrustPolicy(cfg, e.trustInstances); err != nil {
+	if err := layer.CheckTrustPolicy(cfg, e.trustInstances, e.trustDefault); err != nil {
 		return err.Error()
 	}
 	return ""
