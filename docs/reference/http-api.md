@@ -1036,13 +1036,13 @@ When `repo_credential` is present:
 
 #### Unapplied-visibility warning
 
-A registry with no request-time identity verifier, and a registry in public mode, verify no caller and apply no layer visibility. On such a registry, a successful registration, update, or restore whose layer sets no `public` grant carries a `warnings` array of strings beside its other members. Each string names the layer and its declared visibility, states that every caller sees the layer, and states that the declaration takes effect once an identity provider is configured. A layer with no visibility filters is reported as private. The member is absent from every other response, so a client that does not read it is unaffected:
+A registry with no request-time identity verifier, and a registry in public mode, verify no caller and apply no layer visibility. On such a registry, a successful registration, update, or restore whose layer sets no `public` grant carries a `warnings` array of strings beside its other members. Each string names the layer and its declared visibility, with each `groups` and `users` entry in double quotes, and states that every caller sees the layer. On a registry with no identity provider, where every caller passes the admin rule, the string also states that every caller can update or unregister the layer and that the declaration takes effect once an identity provider is configured. On a registry in public mode, it states that the registry runs in public mode and that the declaration takes effect once public mode is turned off and an identity provider is configured. A layer with no visibility filters is reported as private. The member is absent from every other response, so a client that does not read it is unaffected:
 
 ```json
 {
   "layer": { "id": "alice-personal", "user_defined": true, "owner": "alice@acme.com", "users": ["alice@acme.com"] },
   "warnings": [
-    "layer \"alice-personal\" declares visibility users: [alice@acme.com], but this registry applies no layer visibility because it verifies no caller, so every caller sees the layer; the declaration takes effect once an identity provider is configured"
+    "layer \"alice-personal\" declares visibility users: [\"alice@acme.com\"], but this registry verifies no caller and applies no layer visibility, so every caller sees the layer and can update or unregister it; the declaration takes effect once an identity provider is configured"
   ]
 }
 ```

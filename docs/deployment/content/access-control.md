@@ -202,11 +202,17 @@ A registry without a request-time identity verifier, and a registry in public mo
 
 The registry reports this in two places:
 
-- A `podium layer register`, `podium layer update`, or `podium layer restore` that stores a layer with no `public` grant succeeds, and its response carries a `warnings` array. The CLI writes each warning to standard error with a `warning: ` prefix and keeps the response body on standard output. A layer with no visibility filters, which `PODIUM_DEFAULT_LAYER_VISIBILITY=private` stores, is reported as private, and the warning states that the private declaration applies once an identity provider is added.
-- At startup, after it seeds the layers declared in `registry.yaml` and the `--layer-path` layers, the registry logs one warning line. The line counts the stored layers that have no `public` grant and lists up to 20 of their IDs, followed by `and N more` when there are more. On a store that holds more than one tenant, each ID names its tenant. A registry in public mode logs the line after its public-mode banner.
+- A `podium layer register`, `podium layer update`, or `podium layer restore` that stores a layer with no `public` grant succeeds, and its response carries a `warnings` array. The warning names the layer and its declared visibility, with each `groups` and `users` entry in double quotes. The CLI writes each warning to standard error with a `warning: ` prefix and keeps the response body on standard output, and the web UI shows it beside the outcome of the registration, the update, or the restore. A layer with no visibility filters, which `PODIUM_DEFAULT_LAYER_VISIBILITY=private` stores, is reported as private.
+- At startup, after it seeds the layers declared in `registry.yaml` and the `--layer-path` layers, the registry logs one warning line. The line counts the layers with no `public` grant in the tenant the registry serves and lists up to 20 of their IDs, followed by `and N more` when there are more. A registry in public mode logs the line in addition to its public-mode banner.
+
+The wording depends on why the registry applies no visibility:
+
+- On a registry with no identity provider, every caller also passes the admin rule, so the response warning states that every caller can update or unregister the layer. The declaration takes effect once an identity provider is configured.
+- On a registry in public mode, the warnings state that the registry runs in public mode. Public mode refuses an identity provider, so the declaration takes effect once public mode is turned off and an identity provider is configured.
 
 ```text
-warning: 1 stored layer(s) declare visibility other than public, but this registry applies no layer visibility because it verifies no caller, so every caller sees them; their declarations take effect once an identity provider is configured: alice-personal
+warning: layer "alice-personal" declares visibility users: ["alice@acme.com"], but this registry verifies no caller and applies no layer visibility, so every caller sees the layer and can update or unregister it; the declaration takes effect once an identity provider is configured
+warning: 1 stored layer(s) declare visibility other than public, but this registry verifies no caller and applies no layer visibility, so every caller sees them; their declarations take effect once an identity provider is configured: alice-personal
 ```
 
 ---
