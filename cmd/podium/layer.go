@@ -177,6 +177,7 @@ func layerUpdate(args []string) int {
 		return 1
 	}
 	fmt.Println(string(out))
+	writeResponseWarnings(os.Stderr, out)
 	return 0
 }
 
@@ -346,7 +347,27 @@ func layerRegister(args []string) int {
 	if err := json.Unmarshal(out, &reg); err == nil && reg.WebhookURL != "" {
 		fmt.Fprintf(os.Stderr, "webhook URL: %s\n", reg.WebhookURL)
 	}
+	writeResponseWarnings(os.Stderr, out)
 	return 0
+}
+
+// writeResponseWarnings writes each entry of a layer write response's
+// warnings member to w on its own line prefixed "warning: ". It writes to
+// standard error so standard output keeps the response body a caller decodes.
+// A body that is not a JSON object, or that carries no warnings, writes
+// nothing.
+//
+// Spec: §7.3.1 (Unapplied-visibility warning)
+func writeResponseWarnings(w io.Writer, body []byte) {
+	var resp struct {
+		Warnings []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return
+	}
+	for _, msg := range resp.Warnings {
+		_, _ = fmt.Fprintf(w, "warning: %s\n", msg)
+	}
 }
 
 func layerList(args []string) int {
@@ -453,6 +474,7 @@ func layerRestore(args []string) int {
 		return 1
 	}
 	fmt.Println(string(out))
+	writeResponseWarnings(os.Stderr, out)
 	return 0
 }
 
