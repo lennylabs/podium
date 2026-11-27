@@ -887,7 +887,7 @@ podium layer register --id finance --repo https://github.com/acme/finance --ref 
   --trust-source-repository-ref refs/heads/main
 ```
 
-A policy that breaks a rule is refused with `400 registry.invalid_argument` and a message that names the member and the rule, and the command exits 1.
+A policy that breaks a rule is refused with `400 registry.invalid_argument` and a message that names the member and the rule, and the command exits 1. While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, a registration without `--trust` and `--trust-signer` leaves the layer with no requirement and is refused; `--trust none` registers it with no policy.
 
 #### Webhooks
 
@@ -1089,6 +1089,8 @@ podium layer update --id <id>
 - A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored one.
 - `--clear-trust-requirements` removes the requirement. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
 - An update that carries no trust flag leaves the stored policy as it is.
+- A trust flag on a layer declared in `registry.yaml` is refused with `registry.invalid_argument` and a message stating that the layer's trust policy is declared in `registry.yaml`, because the next start re-applies the declaration. Change the declaration instead.
+- While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, an update that leaves the layer with no `trust_mode` and no requirement is refused, and so is a registration without trust flags.
 - Changing the policy of an admin-defined layer requires the per-tenant `admin` role, and the owner of a user-defined layer can change its own.
 
 #### Repository credential updates
@@ -1109,7 +1111,7 @@ The visibility flags withdraw as well as grant, because the update endpoint appl
 - Combining `--clear-groups` with `--group`, or `--clear-users` with `--user`, is refused before any request is sent. The command prints `error: --group cannot be combined with --clear-groups, and --user cannot be combined with --clear-users` and exits 2.
 - Withdrawing every axis leaves a layer that the visibility evaluator reports visible to no caller the registry resolves to a subject. Re-granting one axis restores it.
 - An unauthenticated registry keeps every layer visible, so a withdrawal applied there takes effect once an identity provider is configured.
-- A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility and repository credential included. A withdrawal or a credential change applied to a declared layer reverts at the next start. Make the change in the declaration to make it durable.
+- A layer declared in `registry.yaml` is re-seeded from that declaration at every start, visibility, repository credential, and trust policy included. A withdrawal or a credential change applied to a declared layer reverts at the next start. Make the change in the declaration to make it durable. A trust flag on a declared layer is refused instead, as [Trust policy updates](#trust-policy-updates) states.
 
 #### User-defined layers
 

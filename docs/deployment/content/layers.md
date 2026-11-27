@@ -185,19 +185,21 @@ A layer registered at runtime takes the policy from the [trust policy flags](../
 
 A workflow in the layer's own repository needs no explicit binding. When a signer of a `git` layer has a URI identity that begins with the layer's repository URL followed by `/.github/workflows/`, and names no source binding and no `any_source`, the registry sets `source_repository` to the repository URL. When the signer also names no ref binding, the registry sets `source_repository_ref` to the part of the identity after its last `@`. The stored policy holds the derived members, and `podium layer show` prints them.
 
-The registry derives the binding only from a repository URL of the form `https://<host>/<owner>/<repo>`, optionally followed by `.git` or `/`, with no user information, port, query, or fragment. An SSH URL or an scp-like address derives nothing, so a signer of such a layer names its binding. A URL whose letter case differs from the repository's name on the host derives a binding that matches no certificate.
+The registry derives the binding only from a repository URL of the form `https://<host>/<owner>/<repo>`, optionally followed by `.git` or `/` but not both, with no user information, port or empty port, query, fragment, or percent-escape, and with a host that does not end with a dot. An SSH URL or an scp-like address derives nothing, so a signer of such a layer names its binding. A URL whose letter case differs from the repository's name on the host derives a binding that matches no certificate.
 
 ### Policy rules
 
 A registration or an update whose policy breaks one of these rules is refused with `registry.invalid_argument`, and a declared layer whose policy breaks one refuses the registry start with `config.invalid_layer_trust`:
 
-- A `trust_mode` of `warn` or `require` needs a requirement, and a requirement needs at least one signer.
+- A `trust_mode` of `warn` or `require` needs a requirement, and a requirement needs at least one signer. At the layer endpoints an empty `trust_mode` counts as `PODIUM_LAYER_TRUST_DEFAULT`, so while the default is `warn` or `require`, a registration or an update that leaves a layer with no mode and no requirement is refused. A declared layer in that state starts, and the start log names it.
 - A policy holds at most one requirement.
 - A signer names an `issuer` and an `identity`, and the binding rules above hold after the derivation.
 - A signer that sets `any_source` names no source binding member, and one that sets `any_ref` names no `source_repository_ref`.
 - A signer's `instance` is one the registry configures.
-- A `git` layer sets no `trust_layer_root`. A `trust_layer_root` neither begins nor ends with `/` and holds no empty, `.`, or `..` segment, and no white space, control character, or backslash.
-- A requirement or a signer holds no member of another name.
+- A `git` layer sets no `trust_layer_root`. A `trust_layer_root` neither begins nor ends with `/` and holds no empty, `.`, or `..` segment, and is valid UTF-8 with no white space, control character, or backslash.
+- A requirement or a signer holds no member of another name, including one reached through a YAML alias.
+- A request body or a `registry.yaml` layer entry holds no member that reads as a trust member and is none, such as `trust_mod` or `trust-mode`: a member whose name, with letters folded to lower case and each `-` read as `_`, begins with `trust`. A request body matches `trust_mode`, `trust_requirements`, and `trust_layer_root` without regard to letter case and refuses one carried twice, and `trust_mode` and `trust_layer_root` refuse `null`.
+- The layer endpoints refuse a trust member for a layer declared in `registry.yaml`, whose declaration sets its policy at each start. A registration under a declared ID without trust members keeps the declared policy.
 
 An update that changes no trust member does not re-check the stored policy, so a policy whose instance was later removed from `registry.yaml` does not block an unrelated update. A layer whose empty mode `PODIUM_LAYER_TRUST_DEFAULT` resolves to `warn` or `require` and that has no requirement is logged as a warning at each start.
 

@@ -208,7 +208,7 @@ Each entry of `layers` takes these keys:
 | `trust_requirements` | list | At most one requirement, each with `signers` and an optional `predicate_type`. [Layer trust policy](../deployment/content/layers#layer-trust-policy) lists the signer keys. |
 | `trust_layer_root` | string | For a `local` entry, the `root` under which the layer's content was signed. |
 
-An entry that sets both sources or neither, or that omits a required key, refuses startup. An entry whose trust policy breaks a [policy rule](../deployment/content/layers#policy-rules), including a requirement or signer key the policy does not define, refuses startup with `config.invalid_layer_trust`, in an error that names the layer and the rule.
+An entry that sets both sources or neither, or that omits a required key, refuses startup. An entry whose trust policy breaks a [policy rule](../deployment/content/layers#policy-rules), including a requirement or signer key the policy does not define, written in place or through a YAML alias, and an entry key such as `trust-mode` that reads as a trust key and is none, refuses startup with `config.invalid_layer_trust`, in an error that names the layer and the rule.
 
 ### Discovery
 
