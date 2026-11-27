@@ -114,7 +114,7 @@ func TestLayerTrust_StartRefusals(t *testing.T) {
 	}{
 		{"declared require without requirement", "      trust_mode: require\n", "", "declared layer finance: layer trust policy: trust_mode require needs a requirement"},
 		{"declared root with ..", "      trust_layer_root: a/../b\n", "", `declared layer finance: layer trust policy: trust_layer_root "a/../b" holds the segment ".."`},
-		{"declared misspelled signer key", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com, instanse: github}]\n", "", `holds the key "instanse"`},
+		{"declared misspelled signer key", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com, instance_name: github}]\n", "", `holds the key "instance_name"`},
 		{"invalid default", "", "enforce", `PODIUM_LAYER_TRUST_DEFAULT must be none, warn, or require, got "enforce"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

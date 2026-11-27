@@ -12,7 +12,7 @@ import (
 func TestTrustPolicy_DecodeRefusesUnknownMembers(t *testing.T) {
 	t.Parallel()
 	for _, body := range []string{
-		`[{"signers":[{"issuer":"i","identity":"a@b","instanse":"github"}]}]`,
+		`[{"signers":[{"issuer":"i","identity":"a@b","instance_name":"github"}]}]`,
 		`[{"signers":[{"issuer":"i","identity":"a@b"}],"optional":true}]`,
 		`[{"signers":[{"issuer":"i","identity":"a@b"}],"covers_layer":true}]`,
 		`[{"signers":[{"issuer":1}]}]`,

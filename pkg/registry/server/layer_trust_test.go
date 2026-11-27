@@ -162,7 +162,7 @@ func TestLayerTrust_RegisterRefusals(t *testing.T) {
 		{"unknown instance", gitTrustBody(map[string]any{"trust_requirements": requirement(map[string]any{"issuer": trustIssuer, "identity": "alice@acme.com", "instance": "github"})}), `instance "github"`},
 		{"root on git", gitTrustBody(map[string]any{"trust_layer_root": "skills"}), "applies to a local layer"},
 		{"local root", map[string]any{"id": "finance", "source_type": "local", "local_path": t.TempDir(), "trust_layer_root": "a/../b"}, `segment ".."`},
-		{"unknown member", gitTrustBody(map[string]any{"trust_requirements": requirement(map[string]any{"issuer": trustIssuer, "identity": "alice@acme.com", "instanse": "x"})}), `unknown field "instanse"`},
+		{"unknown member", gitTrustBody(map[string]any{"trust_requirements": requirement(map[string]any{"issuer": trustIssuer, "identity": "alice@acme.com", "instance_name": "x"})}), `unknown field "instance_name"`},
 		{"covers_layer", gitTrustBody(map[string]any{"trust_requirements": []any{map[string]any{"signers": []any{ownSigner()}, "covers_layer": true}}}), `unknown field "covers_layer"`},
 	} {
 		resp, body := mustPost(t, h.base, "/v1/layers", tc.body)
