@@ -136,7 +136,7 @@ Set `PODIUM_PUBLIC_URL` in the secret to the external URL, such as `https://podi
 A registry started with `PODIUM_MULTI_TENANT=true` fails to start with `config.multitenant_no_verifier` in the following cases, unless another startup check refuses the configuration first:
 
 - It configures no identity provider.
-- It names a provider value the registry does not recognize.
+- It sets the provider to `external`.
 - It runs in public mode with no identity provider.
 
 On this chart, `config.publicMode` reaches the `config.multitenant_no_verifier` refusal only in one combination. The other combinations fail with a different code:

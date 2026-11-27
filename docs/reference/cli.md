@@ -174,7 +174,7 @@ Each flag overrides the matching `PODIUM_*` environment variable for the lifetim
 | `--bind <addr>` | Bind address. Overrides `PODIUM_BIND`. |
 | `--layer-path <path>` | Standalone: register layers rooted at this path, as described in the notes. Equivalent to `PODIUM_LAYER_PATH` and to the `layer_path` key under the top-level `registry:` mapping in `registry.yaml`. Precedence: CLI flag, then environment variable, then config file. |
 | `--public-mode` | Bypass authentication and visibility filtering. Mutually exclusive with an identity provider. Overrides `PODIUM_PUBLIC_MODE`. |
-| `--allow-public-bind` | Allow a non-loopback bind in public mode, with no identity provider configured, or with trusted headers, typically behind an authenticated reverse proxy. Without it, a registry in public mode or with no identity provider refuses a non-loopback bind with `config.public_bind_refused`. Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
+| `--allow-public-bind` | Allow a non-loopback bind in public mode, with no identity provider configured, with `PODIUM_IDENTITY_PROVIDER=external`, or with trusted headers, typically behind an authenticated reverse proxy. Without it, a registry in public mode or with no identity provider refuses a non-loopback bind with `config.public_bind_refused`. Overrides `PODIUM_ALLOW_PUBLIC_BIND`. |
 | `--no-embeddings` | Disable embeddings and fall back to BM25-only search. Overrides `PODIUM_NO_EMBEDDINGS`. |
 | `--presign-ttl-seconds <n>` | Presigned-URL TTL in seconds. Overrides `PODIUM_PRESIGN_TTL_SECONDS` and the `object_store.presign_ttl_seconds` key in `registry.yaml`. |
 | `--sign <mode>` | Ingest signing mode: `registry-key` (the default) or `none`. Overrides `PODIUM_SIGN`. The notes describe each mode. |

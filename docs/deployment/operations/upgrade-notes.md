@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, and the refusal of an empty or control-character visibility entry, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the refusal of an empty or control-character visibility entry, and the refusal of an unrecognized identity provider value, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -38,6 +38,16 @@ From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that co
 - A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
 - White space around an entry is kept and matched as written, as in 0.7.0.
 - A rollback to 0.7.0 needs no step.
+
+### Identity provider values the registry does not recognize
+
+From 0.8.0, the registry starts only with a `PODIUM_IDENTITY_PROVIDER` or `identity_provider.type` of `oidc-jwt`, `trusted-headers`, `injected-session-token`, `external`, or `none`, or with the value unset. Any other value, such as a free-form label like `oidc` or a mistyped `oidc-jwy`, refuses startup with `config.identity_provider_unverified`, and the message names the value. 0.7.0 started with such a value, verified no caller, showed every layer to every caller, and skipped the loopback-bind refusal.
+
+- Before the upgrade, check the value each registry sets. A registry that set a free-form label because a reverse proxy or gateway in front of it authenticates callers sets `PODIUM_IDENTITY_PROVIDER=external` instead. `external` behaves as the free-form label did in 0.7.0, apart from the bind rule below. [External authentication](../identity/#external-authentication) describes it.
+- A registry with `external` refuses a non-loopback bind with `config.public_bind_refused` unless `PODIUM_ALLOW_PUBLIC_BIND=true` or `--allow-public-bind` is set. A registry behind a proxy that binds `0.0.0.0` sets the variable.
+- A registry that set a mistyped provider name served with visibility unenforced. Correct the name; the registry then applies layer visibility, so a caller that saw every layer under 0.7.0 sees only the layers its identity admits.
+- A multi-tenant registry with an unrecognized value now fails with `config.identity_provider_unverified` rather than `config.multitenant_no_verifier`.
+- A rollback to 0.7.0 needs no step. 0.7.0 starts with `external` as it started with any free-form label.
 
 ## 0.7.0
 

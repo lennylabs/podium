@@ -34,7 +34,7 @@ Each `groups` and `users` entry is a non-empty string with no control character,
 The registry enforces visibility on every call. A call that visibility rejects returns the `visibility.denied` outcome, which mirrors a not-found result, so the rejection does not reveal that a hidden artifact exists. The [audit log](../operations/observability#audit-log) records each denial, and the `podium_visibility_denied_total` metric counts them.
 
 > [!IMPORTANT]
-> A registry with no identity provider, a catalog read from a filesystem source, and a registry in public mode do not enforce visibility. [When visibility is not enforced](#when-visibility-is-not-enforced) lists each case.
+> A registry with no identity provider, a registry with `PODIUM_IDENTITY_PROVIDER=external`, a catalog read from a filesystem source, and a registry in public mode do not enforce visibility. [When visibility is not enforced](#when-visibility-is-not-enforced) lists each case.
 
 ### Where group membership comes from
 
@@ -49,7 +49,7 @@ SCIM is recommended once group-based visibility gates artifacts that matter, bec
 | Registry state | Default for an admin-defined layer with no declaration |
 |:--|:--|
 | No identity provider | `public` |
-| An identity provider is configured | `private`, meaning no visibility filters, so only an explicit grant reaches it |
+| An identity provider is configured, including `external` | `private`, meaning no visibility filters, so only an explicit grant reaches it |
 
 The default changes when identity is turned on so that admin-defined layers do not stay open by accident.
 
@@ -193,6 +193,7 @@ The registry skips visibility enforcement in these cases:
 | Case | Behavior |
 |:--|:--|
 | No identity provider | A registry that boots without `PODIUM_IDENTITY_PROVIDER` treats every caller as anonymous, and the evaluator admits every layer. Configure an identity provider to make visibility meaningful. See [Identity](../identity/). |
+| `PODIUM_IDENTITY_PROVIDER=external` | The registry verifies no caller and leaves authentication to a proxy or gateway in front of it, so every caller is anonymous and the evaluator admits every layer. See [External authentication](../identity/#external-authentication). |
 | Filesystem-source catalog | `podium sync` reading a directory has no registry process to enforce anything, so the evaluator returns `true` for every layer. The declarations stay in layer config, so the same catalog is portable to a server-backed deployment mode. |
 | Public mode | [Public mode](../modes/single-node#public-mode) bypasses both authentication and the visibility model. It refuses ingest of `sensitivity: medium` and `sensitivity: high` artifacts. It records `caller.identity = "system:public"` in the [audit log](../operations/observability#audit-log), so the audit trail shows that anonymous access was intended. |
 
