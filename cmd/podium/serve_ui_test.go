@@ -8,8 +8,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/lennylabs/podium/internal/serverboot"
 )
 
 // Spec: §13.10 — when PODIUM_WEB_UI=true, the server mounts the
@@ -28,28 +26,24 @@ func TestServe_WebUIServedWhenEnabled(t *testing.T) {
 	t.Setenv("PODIUM_VECTOR_BACKEND", "")
 	t.Setenv("PODIUM_WEB_UI", "true")
 
-	go func() { _ = serverboot.Run() }()
+	bootServer(t, port)
 
-	url := fmt.Sprintf("http://127.0.0.1:%d/app/", port)
-	deadline := time.Now().Add(5 * time.Second)
-	var body []byte
-	var err error
-	for time.Now().Before(deadline) {
-		ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-		req, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		resp, err2 := http.DefaultClient.Do(req)
-		cancel()
-		if err2 == nil {
-			body, _ = io.ReadAll(resp.Body)
-			_ = resp.Body.Close()
-			err = nil
-			break
-		}
-		err = err2
-		time.Sleep(50 * time.Millisecond)
-	}
+	// /healthz answering means the listener serves the full mux, so one
+	// request to /app/ is enough.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/app/", port), nil)
 	if err != nil {
-		t.Fatalf("UI never came up: %v", err)
+		t.Fatalf("build request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET /app/: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read /app/ body: %v", err)
 	}
 	if !strings.Contains(string(body), "<title>Podium</title>") {
 		t.Errorf("UI response missing index marker: %.200s", body)

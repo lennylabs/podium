@@ -846,7 +846,18 @@ func (s *Server) replicationLagSeconds(ctx context.Context) int {
 	return 0
 }
 
+// varyByClient marks a response whose content depends on the §7.2.2 client
+// name: the §5 filter leaves mcp-server artifacts out of the MCP bridge's
+// search_artifacts, load_domain, and load_artifact, so a shared cache must not
+// serve one client's answer to another.
+//
+// Spec: §5, §7.2.2
+func varyByClient(w http.ResponseWriter) {
+	w.Header().Add("Vary", audit.ClientHeader)
+}
+
 func (s *Server) handleLoadDomain(w http.ResponseWriter, r *http.Request) {
+	varyByClient(w)
 	q := r.URL.Query()
 	res, err := s.core.LoadDomain(r.Context(), s.identity(r), q.Get("path"),
 		core.LoadDomainOptions{Depth: atoiOr(q.Get("depth"), 0)})
@@ -948,6 +959,7 @@ func (s *Server) handleSearchDomains(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSearchArtifacts(w http.ResponseWriter, r *http.Request) {
+	varyByClient(w)
 	if !s.quota.AllowSearch(s.core.TenantFor(r.Context()), tenantQuotaFrom(r.Context())) {
 		writeQuotaError(w, "quota.search_qps_exceeded", "tenant search QPS budget exhausted")
 		return
@@ -1133,6 +1145,7 @@ func (s *Server) handleScopePreview(w http.ResponseWriter, r *http.Request) {
 const DeprecationWarningHeader = "X-Podium-Deprecation-Warning"
 
 func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
+	varyByClient(w)
 	// §6.5: GET materializes; HEAD revalidates the MCP resolution cache by
 	// returning the resolved content hash in a header without a body.
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {

@@ -18,9 +18,12 @@ import os
 import re
 from dataclasses import dataclass, field
 
-from . import _skill_document
+from . import _reserved_names, _skill_document
 
 _OVERLAY_SUBDIR = os.path.join(".podium", "overlay")
+# The version-control data a package can hold (§4.4): a Git repository
+# directory, or the .git file of a submodule or a linked worktree.
+_VERSION_CONTROL_NAME = ".git"
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
@@ -744,6 +747,7 @@ class LocalOverlay:
                 continue
             if not has_artifact and not (has_skill and not _within_package(packages, canonical)):
                 continue
+            _check_canonical_id(canonical)
             packages.add(canonical)
             if has_artifact:
                 art = self._read_package(dirpath, canonical)
@@ -880,6 +884,25 @@ class LocalOverlay:
         return self.artifacts.get(artifact_id)
 
 
+class OverlayRefused(ValueError):
+    """Raised when the overlay holds a package Podium refuses to load (§6.4)."""
+
+
+def _check_canonical_id(canonical: str) -> None:
+    """Refuse a package whose canonical ID names ``.git`` or ``.podium``.
+
+    Spec: §4.2, §6.4, §7.5.3 — the canonical-ID rules apply to an overlay
+    package, and no segment of a canonical ID names ``.git`` or ``.podium``
+    under the aliasing rule. Discovery skips a dot-prefixed directory, but a
+    filesystem resolves ``GIT~1``, or ``.git`` preceded by U+200C, to
+    ``.git``, and materialize() writes the ID as a path. The overlay fails to
+    load, as filesystem.ValidateCanonicalID makes it fail in the Go consumers.
+    """
+    for seg in canonical.split("/"):
+        if _reserved_names.names_dot_git(seg) or _reserved_names.names_dot_podium(seg):
+            raise OverlayRefused(f"canonical ID segment {seg!r} names .git or .podium on some filesystem")
+
+
 def _has_artifact_manifest(dirpath: str) -> bool:
     """Report whether dirpath directly contains an ARTIFACT.md (§4.4).
 
@@ -927,8 +950,15 @@ def _collect_resources(dirpath: str, skip: set[str]) -> dict[str, object]:
         # spec §4.4 — the files of a nested package are not resources of the
         # enclosing one, so the walk stops at a subdirectory that directly
         # contains an ARTIFACT.md.
-        dirs[:] = [d for d in dirs if not _has_artifact_manifest(os.path.join(sub, d))]
+        # spec §4.4 — a directory or file named exactly .git is
+        # version-control data, left out of the set and never read, as
+        # filesystem.SkipVersionControl leaves it out in the Go walks.
+        dirs[:] = [
+            d for d in dirs if d != _VERSION_CONTROL_NAME and not _has_artifact_manifest(os.path.join(sub, d))
+        ]
         for name in files:
+            if name == _VERSION_CONTROL_NAME:
+                continue
             full = os.path.join(sub, name)
             relname = os.path.relpath(full, dirpath).replace(os.sep, "/")
             if relname in skip:

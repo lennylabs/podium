@@ -659,7 +659,7 @@ func TestWriteLock_Error(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(workdir, ".podium"), []byte("x"), 0o644); err != nil {
 		t.Fatalf("write blocker: %v", err)
 	}
-	err := writeLock(workdir, map[string]bool{"a.md": true}, map[string]string{"a.md": ""})
+	err := writeLock(workdir, map[string]bool{"a.md": true}, map[string]string{"a.md": ""}, nil)
 	if err == nil {
 		t.Fatalf("writeLock must error when the lock directory cannot be created")
 	}

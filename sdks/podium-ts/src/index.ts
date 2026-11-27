@@ -23,6 +23,7 @@ import {
 import { RegistryError, RegistryReadOnly, registryErrorFromEnvelope } from "./errors.js";
 import {
   LocalOverlay,
+  OverlayRefused,
   resolveOverlayPath,
   rrfFuse,
   fallbackDescription,
@@ -42,6 +43,7 @@ import {
   type DeviceCodeErrorReason,
   type Tokens,
 } from "./oauth.js";
+import { namesDotGit } from "./reserved_names.js";
 import { isSynthesizedSkillDocument } from "./skill_document.js";
 
 export { DeviceCodeError, PendingLogin, type DeviceCodeErrorReason, type Tokens };
@@ -433,6 +435,37 @@ export class MaterializeError extends Error {
   }
 }
 
+// loadOverlayOrWarn loads the workspace overlay at overlayPath.
+//
+// Spec: §6.4, §6.9 — an overlay that holds a package whose canonical ID names
+// .git or .podium fails to load. The SDK skips the overlay with a warning
+// naming the path, as the MCP server does, and serves none of its packages.
+async function loadOverlayOrWarn(overlayPath: string): Promise<LocalOverlay | null> {
+  try {
+    return await LocalOverlay.load(overlayPath);
+  } catch (err) {
+    if (!(err instanceof OverlayRefused)) throw err;
+    globalThis.process?.emitWarning(
+      `workspace overlay path ${JSON.stringify(overlayPath)} unavailable (${err.message}); overlay disabled`,
+    );
+    return null;
+  }
+}
+
+// refuseDotGit rejects a path below the destination, the canonical ID or a
+// resource path, when a segment names .git, literally or under the aliasing
+// rule, because a filesystem resolves it to a .git directory where a written
+// config can set a command Git runs. The caller's destination is not checked.
+//
+// Spec: §7.5.3, §7.6
+function refuseDotGit(rel: string): void {
+  for (const seg of rel.replace(/\\/g, "/").split("/")) {
+    if (namesDotGit(seg)) {
+      throw new MaterializeError(`path segment ${JSON.stringify(seg)} of ${JSON.stringify(rel)} names .git`);
+    }
+  }
+}
+
 // materializeCanonical writes one artifact to disk in the canonical
 // (`none`-adapter) layout under `<to>/<id>/` (spec §6.6, §6.7): ARTIFACT.md
 // unless it equals the §4.3.4 synthesized document, SKILL.md for skills
@@ -462,12 +495,14 @@ async function materializeCanonical(args: {
   const fs = await import("node:fs/promises");
   const path = await import("node:path");
 
+  refuseDotGit(args.id);
   const rootAbs = path.resolve(args.to);
   const safeJoin = (rel: string): string => {
     const parts = rel
       .replace(/\\/g, "/")
       .split("/")
       .filter((p) => p !== "" && p !== ".");
+    refuseDotGit(rel);
     const target = path.resolve(rootAbs, args.id, ...parts);
     const base = path.resolve(rootAbs, args.id);
     if (target !== base && !target.startsWith(base + path.sep)) {
@@ -1070,7 +1105,7 @@ export class Client {
       undefined,
       process.cwd(),
     );
-    let index: LocalOverlay | null = path ? await LocalOverlay.load(path) : null;
+    let index: LocalOverlay | null = path ? await loadOverlayOrWarn(path) : null;
     if (index && index.artifacts.size === 0) index = null;
     if (sessionID) this.overlayCache.set(sessionID, index);
     return index;
@@ -1357,7 +1392,7 @@ export class Client {
   // domains still composes onto the registry tree (§4.5.4).
   private async overlayForDomain(): Promise<LocalOverlay | null> {
     const overlayPath = await resolveOverlayPath(this.overlayPath, undefined, process.cwd());
-    return overlayPath ? LocalOverlay.load(overlayPath) : null;
+    return overlayPath ? loadOverlayOrWarn(overlayPath) : null;
   }
 
   async searchDomains(

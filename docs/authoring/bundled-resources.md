@@ -299,7 +299,7 @@ A skill's prose finds its files at the package-relative paths it names, because 
 
 ## Which files are bundled
 
-Every file under the artifact's directory ships, dot-files included, except the package's own manifest files and the files of a nested package. Podium reads no ignore file, so delete a file before ingest to keep it out of the package.
+Every file under the artifact's directory ships, dot-files included, except the package's own manifest files, the files of a nested package, and version-control data in a directory or file named `.git`. Podium reads no ignore file, so delete a file before ingest to keep it out of the package.
 
 These cases sit at the edges of that rule:
 
@@ -307,6 +307,9 @@ These cases sit at the edges of that rule:
 |:--|:--|
 | A dot-prefixed file, such as `.DS_Store` or an editor swap file | Bundled. |
 | A dot-prefixed directory inside the package with no `ARTIFACT.md` of its own | Bundled, together with every file below it outside a nested package. |
+| A directory or a file named exactly `.git` at any depth, such as the repository of a skill directory that is a Git clone, or the `.git` file of a submodule | Left out, together with every file below it. Podium does not read it, and it enters no content hash. |
+| A directory or a file whose name a filesystem resolves to `.git` without being `.git`, such as `.GIT`, `GIT~1`, or `.git.` | Refused. `lint.resource_path_reserved` reports one error for the artifact, and ingest refuses it. Rename or remove the directory before ingest. |
+| A package whose directory, or a directory between it and the layer or overlay root, has a name that a filesystem resolves to `.git` or `.podium`, such as `GIT~1` or `PODIUM~1` | Refused. The walk of the layer or overlay fails, as it does for a manifest at the layer root. |
 | A file named `SKILL.md` in a subfolder, such as `references/SKILL.md` | Bundled as an ordinary resource. It starts no package. |
 | A subdirectory with its own `ARTIFACT.md` | Excluded from the enclosing package and discovered as a separate artifact that owns its files. |
 | A nested package whose own name, or the name of a directory between it and the layer or overlay root, begins with a dot | Excluded from the enclosing package and never discovered. Its files ship nowhere and enter no content hash. |

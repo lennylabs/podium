@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // staleAttack is a target directory, a directory beside it that the target's
@@ -84,8 +86,9 @@ func newStaleAttack(t *testing.T, target string) *staleAttack {
 	return a
 }
 
-// seedLock appends the hostile entries and the valid stale entry to the lock
-// at the target.
+// seedLock appends the hostile entries and the valid stale entries to the lock
+// at the target. The valid entries record the file hash of the bytes at their
+// paths, so the §7.5.3 hash check admits their removal.
 func (a *staleAttack) seedLock(t *testing.T) {
 	t.Helper()
 	lock, err := ReadLock(a.target)
@@ -94,8 +97,8 @@ func (a *staleAttack) seedLock(t *testing.T) {
 	}
 	lock.Artifacts = append(lock.Artifacts, a.entries...)
 	lock.Artifacts = append(lock.Artifacts,
-		LockArtifact{ID: "old/stale", MaterializedPath: "stale/a/b/file.md"},
-		LockArtifact{ID: "old/stale", MaterializedPath: "inlink/stale.md"},
+		LockArtifact{ID: "old/stale", MaterializedPath: "stale/a/b/file.md", FileHash: materialize.FileHash([]byte("stale\n"))},
+		LockArtifact{ID: "old/stale", MaterializedPath: "inlink/stale.md", FileHash: materialize.FileHash([]byte("stale\n"))},
 	)
 	if err := WriteLock(a.target, lock); err != nil {
 		t.Fatalf("WriteLock: %v", err)
@@ -210,7 +213,7 @@ func TestReconcile_RefusesUnfilteredHostilePaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadLock: %v", err)
 	}
-	stderr := captureStderr(t, func() { Reconcile(checkout, PriorMergeKinds(raw), map[string]bool{}) })
+	stderr := captureStderr(t, func() { Reconcile(checkout, PriorPaths(raw), map[string]bool{}) })
 	for path, want := range attack.survivors {
 		if got, err := os.ReadFile(path); err != nil || string(got) != want {
 			t.Errorf("%s = (%q, %v), want %q unchanged", path, got, err, want)

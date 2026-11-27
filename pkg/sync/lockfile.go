@@ -62,9 +62,14 @@ type LockScope struct {
 // config-merge, "inject" for a marker-based inject, empty for a standalone
 // file). Stale-file cleanup uses it: a standalone path is deleted when no
 // longer written, but a config-merge path is shared with the operator, so it
-// is reconciled (Podium's entries stripped) rather than removed. Type records
-// the artifact type the run's §7.5.1 type filter judged, so a later run can
-// judge the filter for an artifact whose manifest no longer parses (§13.11.3).
+// is reconciled (Podium's entries stripped) rather than removed. FileHash
+// records, for a standalone path, the materialize.FileHash of the bytes sync
+// left on disk; the cleanup deletes the path only while its bytes still hash
+// to it, so a forged entry or an operator's edit keeps the file. A
+// config-merge path records none, because the cleanup never deletes it. Type
+// records the artifact type the run's §7.5.1 type filter judged, so a later
+// run can judge the filter for an artifact whose manifest no longer parses
+// (§13.11.3).
 type LockArtifact struct {
 	ID               string `yaml:"id"`
 	Version          string `yaml:"version,omitempty"`
@@ -72,6 +77,7 @@ type LockArtifact struct {
 	ContentHash      string `yaml:"content_hash,omitempty"`
 	Layer            string `yaml:"layer,omitempty"`
 	MaterializedPath string `yaml:"materialized_path,omitempty"`
+	FileHash         string `yaml:"file_hash,omitempty"`
 	Merge            string `yaml:"merge,omitempty"`
 }
 

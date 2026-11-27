@@ -69,14 +69,14 @@ func TestRemoveStale_RemovesFileAndPrunesEmptyParents(t *testing.T) {
 		"skills/old/nested/SKILL.md": "x",
 		"skills/other/SKILL.md":      "y",
 	})
-	if err := RemoveStale(dest, "skills/old/nested/SKILL.md"); err != nil {
+	if err := RemoveStale(dest, "skills/old/nested/SKILL.md", FileHash([]byte("x"))); err != nil {
 		t.Fatalf("RemoveStale: %v", err)
 	}
 	wantGone(t, filepath.Join(dest, "skills", "old"))
 	wantExists(t, filepath.Join(dest, "skills", "other", "SKILL.md"))
 
 	// The last file below the root prunes up to, and not including, the root.
-	if err := RemoveStale(dest, "skills/other/SKILL.md"); err != nil {
+	if err := RemoveStale(dest, "skills/other/SKILL.md", FileHash([]byte("y"))); err != nil {
 		t.Fatalf("RemoveStale: %v", err)
 	}
 	wantGone(t, filepath.Join(dest, "skills"))
@@ -91,14 +91,14 @@ func TestRemoveStale_AbsentFile(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(dest, "a", "b"), 0o755); err != nil {
 		t.Fatalf("MkdirAll: %v", err)
 	}
-	if err := RemoveStale(dest, "a/b/gone.md"); err != nil {
+	if err := RemoveStale(dest, "a/b/gone.md", ""); err != nil {
 		t.Fatalf("RemoveStale: %v", err)
 	}
 	wantGone(t, filepath.Join(dest, "a"))
-	if err := RemoveStale(filepath.Join(dest, "missing"), "a/b.md"); err != nil {
+	if err := RemoveStale(filepath.Join(dest, "missing"), "a/b.md", ""); err != nil {
 		t.Errorf("RemoveStale on a missing destination = %v, want nil", err)
 	}
-	if err := RemoveStale(dest, "missing-dir/x/y.md"); err != nil {
+	if err := RemoveStale(dest, "missing-dir/x/y.md", ""); err != nil {
 		t.Errorf("RemoveStale below a missing directory = %v, want nil", err)
 	}
 }
@@ -148,7 +148,7 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 		{"a/./b", ErrUnsafeRecordedPath, ""},
 	}
 	for _, tc := range cases {
-		err := RemoveStale(dest, tc.rel)
+		err := RemoveStale(dest, tc.rel, FileHash([]byte("s")))
 		if !errors.Is(err, tc.wantErr) {
 			t.Errorf("RemoveStale(%q) = %v, want %v", tc.rel, err, tc.wantErr)
 		}
@@ -159,7 +159,7 @@ func TestRemoveStale_RefusesUnconfinedPaths(t *testing.T) {
 	for _, link := range []string{"claude/link", "leaflink", "gitlink", ".podium"} {
 		wantExists(t, filepath.Join(dest, filepath.FromSlash(link)))
 	}
-	if err := RemoveStale("", "a.txt"); !errors.Is(err, ErrEmptyDestination) {
+	if err := RemoveStale("", "a.txt", ""); !errors.Is(err, ErrEmptyDestination) {
 		t.Errorf("RemoveStale with an empty destination = %v, want ErrEmptyDestination", err)
 	}
 }
@@ -176,18 +176,18 @@ func TestRemoveStale_FollowsInRootDirectoryLink(t *testing.T) {
 		"vendor-pack/b/c/ARTIFACT.md": "b",
 	})
 	mustSymlink(t, "vendor-pack", filepath.Join(dest, "pack"))
-	if err := RemoveStale(dest, "pack/b/c/ARTIFACT.md"); err != nil {
+	if err := RemoveStale(dest, "pack/b/c/ARTIFACT.md", FileHash([]byte("b"))); err != nil {
 		t.Fatalf("RemoveStale through an in-root link: %v", err)
 	}
 	wantGone(t, filepath.Join(dest, "vendor-pack", "b"))
 	wantExists(t, filepath.Join(dest, "vendor-pack", "a", "ARTIFACT.md"))
-	if err := RemoveStale(dest, "pack/a/ARTIFACT.md"); err != nil {
+	if err := RemoveStale(dest, "pack/a/ARTIFACT.md", FileHash([]byte("a"))); err != nil {
 		t.Fatalf("RemoveStale of the last file behind the link: %v", err)
 	}
 	wantGone(t, filepath.Join(dest, "vendor-pack", "a"))
 	wantExists(t, filepath.Join(dest, "vendor-pack"))
 	wantExists(t, filepath.Join(dest, "pack"))
-	if err := RemoveStale(dest, "pack/gone/x.md"); err != nil {
+	if err := RemoveStale(dest, "pack/gone/x.md", ""); err != nil {
 		t.Errorf("RemoveStale below a missing directory behind the link = %v, want nil", err)
 	}
 }
@@ -201,7 +201,7 @@ func TestRemoveStale_SymlinkedRoot(t *testing.T) {
 	confinedFixture(t, realDir, map[string]string{"a/b.md": "x"})
 	link := filepath.Join(base, "link")
 	mustSymlink(t, realDir, link)
-	if err := RemoveStale(link, "a/b.md"); err != nil {
+	if err := RemoveStale(link, "a/b.md", FileHash([]byte("x"))); err != nil {
 		t.Fatalf("RemoveStale through a symlinked root: %v", err)
 	}
 	wantGone(t, filepath.Join(realDir, "a"))

@@ -111,28 +111,32 @@ func FetchRecords(opts Options) ([]Record, []layer.Drop, error) {
 
 // Reconcile removes from target every materialized path the prior lock recorded
 // that the current render did not write, reusing the §7.5 stale-file cleanup: a
-// standalone path is deleted and its empty parents pruned, and a §6.7
-// config-merge path (the PodiumOwnedKey JSON manifests, the inject blocks) is
-// reconciled in place so the operator's other entries survive. It is the
-// exported form of the internal sync cleanup so the marketplace render
-// reconciles a marketplace tree on re-render through the same code path
-// `podium sync` uses, giving an idempotent re-render and stale-file removal
-// (§7.8 reconciliation).
+// standalone path is deleted and its empty parents pruned when its bytes still
+// match the file_hash the entry records, and a §6.7 config-merge path (the
+// PodiumOwnedKey JSON manifests, the inject blocks) is reconciled in place so
+// the operator's other entries survive. It is the exported form of the internal
+// sync cleanup so the marketplace render reconciles a marketplace tree on
+// re-render through the same code path `podium sync` uses, giving an idempotent
+// re-render and stale-file removal (§7.8 reconciliation).
 //
-// prior maps each prior materialized path to its config-merge kind ("json",
-// "inject", or "" for a standalone file), as PriorMergeKinds returns from a
-// lock. current is the set of paths the render wrote this time.
-func Reconcile(target string, prior map[string]string, current map[string]bool) {
+// prior maps each prior materialized path to the lock entry that records it, as
+// PriorPaths returns from a lock; the cleanup reads the entry's Merge and
+// FileHash. current is the set of paths the render wrote this time. The result
+// lists each stale standalone file the file-hash check left in place, which the
+// render turns into a failure (ErrStaleFilesKept).
+//
+// Spec: §7.5.3, §7.8
+func Reconcile(target string, prior map[string]LockArtifact, current map[string]bool) []StaleFileKept {
 	// A marketplace lock records no artifact IDs, so no previous output is
 	// kept (§13.11.3 applies to a target lock that records the artifact).
-	removeStalePaths(target, prior, current, keptOutput{})
+	return removeStalePaths(target, prior, current, keptOutput{})
 }
 
-// PriorMergeKinds returns the materialized paths a lock recorded, each mapped to
-// its §6.7 config-merge kind, for the Reconcile prior argument. A nil lock
-// returns an empty map.
-func PriorMergeKinds(lock *LockFile) map[string]string {
-	return lockMergeKinds(lock)
+// PriorPaths returns the materialized paths a lock recorded, each mapped to the
+// entry that records it, for the Reconcile prior argument. A nil lock returns an
+// empty map.
+func PriorPaths(lock *LockFile) map[string]LockArtifact {
+	return lockPriorPaths(lock)
 }
 
 // MergeKindForOp maps an adapter.FileOp to the lock's config-merge kind string
