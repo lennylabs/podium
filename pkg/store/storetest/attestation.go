@@ -136,3 +136,154 @@ func layerAttestationMigration(t *testing.T, s store.Store) {
 		t.Errorf("copies:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
 	}
 }
+
+// linksView renders links in one comparable string.
+func linksView(links []store.AttestationLink) string {
+	var parts []string
+	for _, l := range links {
+		parts = append(parts, fmt.Sprintf("%s@%s %s/%s/%s/%s=%s:%s:%s", l.ArtifactID, l.Version,
+			l.PredicateType, l.Instance, l.SignerIssuer, l.SignerIdentity, l.Digest, l.Verdict, l.VerifiedUnder))
+	}
+	return "[" + strings.Join(parts, " ") + "]"
+}
+
+// outcomeView renders the attestation outcome of a stored version.
+func outcomeView(s store.Store, tenant, id, version string) string {
+	rec, err := s.GetManifest(context.Background(), tenant, id, version)
+	if err != nil {
+		return err.Error()
+	}
+	f, at := "-", "-"
+	if p := rec.AttestationFailure; p != nil {
+		f = fmt.Sprintf("%s/%s/%s", p.Code, p.Scope, p.Constraint)
+		if p.Requirement != nil {
+			f += fmt.Sprintf("/%d", *p.Requirement)
+		}
+	}
+	if rec.AttestationEvaluatedAt != nil {
+		at = rec.AttestationEvaluatedAt.UTC().Format(time.RFC3339Nano)
+	}
+	return rec.AttestationOutcome + " " + f + " " + at
+}
+
+// attestationStorage covers the §4.7.11 storage: the outcome members of a
+// version and their default, bundles stored once per tenant and digest, links
+// replaced by key and in full, the conditional link and outcome updates, the
+// claim, the link filters, links of two instances under one issuer and
+// identity, the root record replacement rule, tenant isolation, and the
+// sweep of a purge.
+//
+// Spec: §4.7.11 (Attestation outcome, Attestation storage, Root record), §8.4
+func attestationStorage(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	mustCreateTenant(t, s, "u")
+	at := time.Date(2026, 11, 20, 9, 14, 2, 123456789, time.UTC)
+	must(t, s.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x"}))
+	_, _, err := s.ClaimLayerIngest(ctx, "t", "L", "c1")
+	must(t, err)
+	two := 2
+	manifest := func(tenant, id string, o store.VersionOutcome) store.ManifestRecord {
+		return store.ManifestRecord{TenantID: tenant, ArtifactID: id, Version: "1.0.0", ContentHash: "sha256:" + id,
+			Type: "skill", Layer: "L", IngestedAt: at, AttestationOutcome: o.Outcome, AttestationFailure: o.Failure,
+			AttestationEvaluatedAt: o.EvaluatedAt}
+	}
+	must(t, s.PutManifest(ctx, manifest("t", "a", store.VersionOutcome{})))
+	must(t, s.PutManifest(ctx, manifest("t", "b", store.VersionOutcome{Outcome: store.OutcomeFailed, EvaluatedAt: &at,
+		Failure: &store.AttestationFailure{Code: "ingest.attestation_mismatch", Scope: "artifact", Constraint: "digest", Requirement: &two}})))
+	must(t, s.PutManifest(ctx, manifest("u", "a", store.VersionOutcome{Outcome: store.OutcomeVerified})))
+	idx := int64(7)
+	bundle := func(digest, layer string, log *int64) store.StoredAttestation {
+		return store.StoredAttestation{Digest: digest, Bundle: []byte("bytes-" + digest), LayerID: layer, SourceRef: "ref",
+			PredicateType: "p", Instance: "public-good", SourceRepository: "r", SourceRepositoryOwner: "o",
+			SourceRepositoryRef: "refs/heads/main", SignerIssuer: "iss", SignerIdentity: "id", LogIndex: log,
+			AttestedAt: at, StoredAt: at}
+	}
+	link := func(instance, digest, verdict, key string) store.AttestationLink {
+		return store.AttestationLink{PredicateType: "p", Instance: instance, SignerIssuer: "iss", SignerIdentity: "id",
+			Digest: digest, Verdict: verdict, VerifiedUnder: key, LinkedAt: at}
+	}
+	verified := store.VersionOutcome{Outcome: store.OutcomeVerified, EvaluatedAt: &at}
+	var got []string
+	note := func(label string, err error) { got = append(got, fmt.Sprintf("%s: %v", label, err)) }
+	note("other claim", s.WriteAttestations(ctx, "t", "L", "c0", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
+	note("write", s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{
+		Bundles: []store.StoredAttestation{bundle("d1", "L", &idx), bundle("d2", "L", nil)},
+		Versions: []store.VersionAttestations{{ArtifactID: "a", Version: "1.0.0", Outcome: &verified,
+			Links: []store.AttestationLink{link("public-good", "d1", "verified", "k1"), link("github", "d2", "unverified", "dropped")}}},
+	}))
+	note("again", s.WriteAttestations(ctx, "u", "", "", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "U", nil)}}))
+	note("upsert", s.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{
+		Bundles: []store.StoredAttestation{bundle("d1", "M", nil)},
+		Versions: []store.VersionAttestations{
+			{ArtifactID: "a", Version: "1.0.0", Links: []store.AttestationLink{link("public-good", "d2", "verified", "k2")},
+				Updates:   []store.AttestationLink{link("github", "d1", "verified", "x"), link("github", "d2", "verified", "k3")},
+				Outcome:   &store.VersionOutcome{Outcome: store.OutcomeNotEvaluated}, OutcomeIf: store.OutcomeFailed},
+			{ArtifactID: "b", Version: "1.0.0", ReplaceLinks: true, Links: []store.AttestationLink{link("public-good", "d1", "verified", "k1")},
+				Outcome: &store.VersionOutcome{Outcome: store.OutcomeVerified, EvaluatedAt: &at}, OutcomeIf: store.OutcomeFailed},
+			{ArtifactID: "absent", Version: "1.0.0", Outcome: &verified},
+		},
+	}))
+	got = append(got, outcomeView(s, "t", "a", "1.0.0"), outcomeView(s, "t", "b", "1.0.0"), outcomeView(s, "u", "a", "1.0.0"))
+	for _, f := range []store.LinkFilter{{}, {LayerID: "L", Digest: "d1"}, {ArtifactID: "a", Version: "1.0.0"}, {LayerID: "M"}} {
+		links, err := s.ListAttestationLinks(ctx, "t", f)
+		must(t, err)
+		got = append(got, linksView(links))
+	}
+	a, err := s.GetAttestation(ctx, "t", "d1")
+	must(t, err)
+	got = append(got, fmt.Sprintf("%s %s %s %s %s %d %s", a.Digest, a.Bundle, a.LayerID, a.SourceRepositoryRef, a.SignerIdentity, *a.LogIndex,
+		a.AttestedAt.Format(time.RFC3339Nano)))
+	_, err = s.GetAttestation(ctx, "u", "d2")
+	note("other tenant", err)
+	// Root records.
+	r1 := store.RootRecord{Instance: "public-good", RootDigest: "sha256:1", RootTime: at}
+	r2 := store.RootRecord{Instance: "public-good", RootDigest: "sha256:2", RootTime: at.Add(time.Hour)}
+	for _, step := range []struct {
+		prev *store.RootRecord
+		next store.RootRecord
+	}{{nil, r1}, {nil, r2}, {&r2, r1}, {&r1, r2}} {
+		ok, err := s.ReplaceRootRecord(ctx, step.prev, step.next)
+		must(t, err)
+		got = append(got, fmt.Sprint(ok))
+	}
+	roots, err := s.ListRootRecords(ctx)
+	must(t, err)
+	for _, r := range roots {
+		got = append(got, r.Instance+" "+r.RootDigest+" "+r.RootTime.Format(time.RFC3339Nano))
+	}
+	// A purge deletes the links of the versions it removes and then each
+	// bundle no version links.
+	must(t, s.SoftDeleteArtifacts(ctx, "t", "L", []string{"b"}, at, ""))
+	_, err = s.PurgeExpiredLayerDeletions(ctx, at.Add(time.Hour))
+	must(t, err)
+	left, err := s.ListAttestations(ctx, "t")
+	must(t, err)
+	links, err := s.ListAttestationLinks(ctx, "t", store.LinkFilter{})
+	must(t, err)
+	got = append(got, fmt.Sprint(len(left), " ", left[0].Digest), linksView(links))
+	ts := "2026-11-20T09:14:02.123456Z"
+	want := []string{
+		"other claim: " + store.ErrIngestSuperseded.Error(),
+		"write: <nil>",
+		"again: <nil>",
+		"upsert: <nil>",
+		"verified - " + ts,
+		"verified - " + ts,
+		"verified - -",
+		"[a@1.0.0 p/github/iss/id=d2:verified:k3 a@1.0.0 p/public-good/iss/id=d2:verified:k2 b@1.0.0 p/public-good/iss/id=d1:verified:k1]",
+		"[b@1.0.0 p/public-good/iss/id=d1:verified:k1]",
+		"[a@1.0.0 p/github/iss/id=d2:verified:k3 a@1.0.0 p/public-good/iss/id=d2:verified:k2]",
+		"[]",
+		"d1 bytes-d1 L refs/heads/main id 7 " + ts,
+		"other tenant: " + store.ErrNotFound.Error(),
+		"true", "false", "false", "true",
+		"public-good sha256:2 2026-11-20T10:14:02.123456Z",
+		"1 d2",
+		"[a@1.0.0 p/github/iss/id=d2:verified:k3 a@1.0.0 p/public-good/iss/id=d2:verified:k2]",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("attestation storage:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
