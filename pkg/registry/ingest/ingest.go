@@ -1001,6 +1001,7 @@ func (p *manifestPlacer) attempt(ctx context.Context, rows []store.ManifestRecor
 	switch {
 	case err == nil:
 		if existing.ContentHash == mr.ContentHash {
+			p.fillPackageDigest(ctx, existing)
 			return placement{idempotent: true}, false, nil
 		}
 		return placement{conflict: &ConflictReport{
@@ -1028,6 +1029,27 @@ func (p *manifestPlacer) attempt(ctx context.Context, rows []store.ManifestRecor
 		return placement{}, false, err
 	}
 	return placement{}, false, nil
+}
+
+// fillPackageDigest stores the record's package digest on an unchanged
+// stored row that holds none, which is a row a process on an earlier release
+// stored after the §13.4 fill completed. The row and the record hold one
+// content hash, so the digest the walk computed is the row's digest. The
+// write is conditional on that hash and changes no other column. A failure
+// is logged and leaves the version served without the member, because the
+// cycle's placement of the version does not depend on it.
+//
+// Spec: §13.4 — an ingest that finds such a version unchanged stores its
+// package digest.
+func (p *manifestPlacer) fillPackageDigest(ctx context.Context, existing store.ManifestRecord) {
+	if existing.PackageDigest != "" || p.mr.PackageDigest == "" {
+		return
+	}
+	err := p.st.SetPackageDigest(ctx, p.req.TenantID, existing.ArtifactID, existing.Version, existing.ContentHash, p.mr.PackageDigest)
+	if err != nil {
+		log.Printf("ingest: tenant=%s layer=%s artifact=%s@%s: store the package digest: %v",
+			p.req.TenantID, p.req.LayerID, existing.ArtifactID, existing.Version, err)
+	}
 }
 
 // commitConflict describes a version the commit refused although the
@@ -1396,11 +1418,21 @@ func packageFiles(fsys fs.FS, dir string) (map[string][]byte, error) {
 //
 // Spec: §4.7.6
 func LayerContent(fsys fs.FS) (attest.Layer, error) {
-	records, err := walkLayer(fsys, "")
+	records, err := LayerRecords(fsys)
 	if err != nil {
 		return attest.Layer{}, err
 	}
 	return filesystem.LayerDigestInput(records, fsys)
+}
+
+// LayerRecords walks the snapshot fsys with the registry ingest walk and
+// returns every package discovery finds, before the §4.1 and §4.6 refusals
+// that Ingest applies. `podium attest --commit` reads a commit's tree through
+// it, so the packages it lists are the ones ingest lists for that commit.
+//
+// Spec: §4.2, §4.7.6, §7.3.5
+func LayerRecords(fsys fs.FS) ([]filesystem.ArtifactRecord, error) {
+	return walkLayer(fsys, "")
 }
 
 // manifestRecordFor canonicalizes one ArtifactRecord into a ManifestRecord
@@ -1448,6 +1480,11 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		// captured the raw bytes in rec.SkillBytes; empty for non-skills.
 		SkillRaw:  append([]byte(nil), rec.SkillBytes...),
 		Resources: resourceRefsFor(rec),
+		// Spec: §4.7.6, §13.4 — the package digest the walk computed from
+		// the files it read, which the stored manifest, SKILL.md, and
+		// resource refs reproduce, so the §13.4 fill computes the same value
+		// from this row.
+		PackageDigest: rec.PackageDigest,
 	}, nil
 }
 

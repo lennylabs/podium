@@ -147,6 +147,36 @@ func LayerSubjectName(root string) (string, error) {
 	return layerSubject + "/" + trimmed, nil
 }
 
+// ErrLayerRoot reports a layer root that `podium attest` refuses: one that,
+// after its leading and trailing / characters are removed, holds an empty, a
+// ".", or a ".." segment. The registry applies no such normalization, so a
+// layer registered with such a root finds no layer subject, and the command
+// refuses to write one.
+var ErrLayerRoot = errors.New("attest: layer root")
+
+// CheckLayerRoot returns root with its leading and trailing / characters
+// removed, the form LayerSubjectName builds the layer subject name from. It
+// returns an error wrapping ErrLayerRoot when that form holds an empty, ".",
+// or ".." segment, and one wrapping ErrNoSubjectName when it holds a
+// character the subject name rule excludes.
+//
+// Spec: §4.7.6, §7.3.5
+func CheckLayerRoot(root string) (string, error) {
+	trimmed := strings.Trim(root, "/")
+	if trimmed == "" {
+		return "", nil
+	}
+	for _, seg := range strings.Split(trimmed, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", fmt.Errorf("%w %q holds the segment %q", ErrLayerRoot, root, seg)
+		}
+	}
+	if err := CheckSubjectNameCharacters(trimmed); err != nil {
+		return "", err
+	}
+	return trimmed, nil
+}
+
 // IsLayerSubjectName reports whether name is in the form of a layer subject
 // name: .podium/layer, or .podium/layer/ followed by a non-empty root.
 //
