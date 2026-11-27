@@ -261,3 +261,17 @@ func TestNewPackageRecord_NonUTF8PathHasNoSubjectName(t *testing.T) {
 		t.Errorf("SubjectName with a UTF-8 path = %q, %v", name, err)
 	}
 }
+
+// Spec: §4.2 — discovery visits the root and every directory below it whose
+// path has no dot-prefixed segment.
+func TestDiscoverable(t *testing.T) {
+	t.Parallel()
+	for dir, want := range map[string]bool{
+		".": true, "": true, "a": true, "a/b.c/d": true,
+		".claude": false, "a/.claude": false, "a/.cfg/inner": false,
+	} {
+		if got := filesystem.Discoverable(dir); got != want {
+			t.Errorf("Discoverable(%q) = %v, want %v", dir, got, want)
+		}
+	}
+}
