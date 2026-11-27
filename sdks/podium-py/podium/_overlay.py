@@ -943,18 +943,26 @@ def _collect_resources(dirpath: str, skip: set[str]) -> dict[str, object]:
     """Return every file under the package root dirpath as a resource.
 
     The keys are package-relative paths. The root files named in skip and the
-    files of a nested package are left out.
+    files of a nested package that discovery finds are left out.
     """
     resources: dict[str, object] = {}
     for sub, dirs, files in os.walk(dirpath):
-        # spec §4.4 — the files of a nested package are not resources of the
-        # enclosing one, so the walk stops at a subdirectory that directly
-        # contains an ARTIFACT.md.
+        # spec §4.2, §4.4 — the files of a nested package are not resources
+        # of the enclosing one, so the walk stops at a subdirectory that
+        # discovery finds as a package: it directly contains an ARTIFACT.md
+        # and no segment of its path begins with a dot, as
+        # filesystem.Discoverable states in the Go walks. A directory below a
+        # dot-prefixed one stays part of this package.
+        rel_sub = os.path.relpath(sub, dirpath)
+        hidden = rel_sub != "." and any(seg.startswith(".") for seg in rel_sub.split(os.sep))
         # spec §4.4 — a directory or file named exactly .git is
         # version-control data, left out of the set and never read, as
         # filesystem.SkipVersionControl leaves it out in the Go walks.
         dirs[:] = [
-            d for d in dirs if d != _VERSION_CONTROL_NAME and not _has_artifact_manifest(os.path.join(sub, d))
+            d
+            for d in dirs
+            if d != _VERSION_CONTROL_NAME
+            and (hidden or d.startswith(".") or not _has_artifact_manifest(os.path.join(sub, d)))
         ]
         for name in files:
             if name == _VERSION_CONTROL_NAME:

@@ -28,7 +28,7 @@ var (
 // longHistory returns an in-memory repository whose main branch is a linear
 // history of longHistoryCommits commits over one empty tree, and its head. It
 // is built once per test binary and only read afterwards.
-func longHistory(t *testing.T) (*git.Repository, plumbing.Hash) {
+func longHistory(t testing.TB) (*git.Repository, plumbing.Hash) {
 	t.Helper()
 	longHistoryOnce.Do(func() {
 		longHistoryRepo, longHistoryHead, longHistoryErr = buildLinearHistory(longHistoryCommits)
@@ -109,61 +109,60 @@ func (b *historyBuilder) open(head plumbing.Hash) (*git.Repository, error) {
 	return git.Open(b.st, nil)
 }
 
-// unreachablePrior names a commit the long history does not hold, so the
-// force-push walk covers the whole history.
+// unreachablePrior names a commit the long history does not hold, so a walk
+// that looks for it covers the whole history.
 var unreachablePrior = plumbing.NewHash("0123456789012345678901234567890123456789")
 
-// wantSnapshotEnded fails the test unless err is the source-unreachable
-// failure of a snapshot whose context ended.
-func wantSnapshotEnded(t *testing.T, err error, what string) {
+// wantCallEnded fails the test unless err is the source-unreachable failure
+// of a call whose context ended.
+func wantCallEnded(t *testing.T, err error, what string) {
 	t.Helper()
 	if !errors.Is(err, ErrSourceUnreachable) || !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
 		t.Fatalf("%s = %v, want the source-unreachable failure of an ended context", what, err)
 	}
 }
 
-// Spec: §7.3.1 (Source unreachable), §13.12 — the force-push walk over a
-// history that does not hold the prior reference stops when the snapshot's
+// Spec: §7.3.1 (Source unreachable, Git fetch: Walk), §13.12 — a walk over a
+// history that does not hold the commit it looks for stops when the call's
 // context ends, rather than walk the whole history for a result no caller
-// reads. A walk under a live context still covers the history.
-func TestIsAncestor_StopsWhenTheSnapshotEnds(t *testing.T) {
+// reads. A walk under a live context covers the history and is complete.
+func TestWalkFrom_StopsWhenTheCallEnds(t *testing.T) {
 	t.Parallel()
 	repo, head := longHistory(t)
 
-	reachable, err := isAncestor(context.Background(), repo, unreachablePrior, head)
-	if err != nil || reachable {
-		t.Fatalf("isAncestor under a live context = %v, %v; want false, nil", reachable, err)
+	w, err := walkFrom(context.Background(), repo, head)
+	if err != nil || w.ancestorOrSelf(unreachablePrior) != ancestryNo || w.truncated {
+		t.Fatalf("walkFrom under a live context = %+v, %v; want a complete walk without the commit", w, err)
 	}
 
 	ended, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err = isAncestor(ended, repo, unreachablePrior, head)
-	wantSnapshotEnded(t, err, "isAncestor under an ended context")
+	_, err = walkFrom(ended, repo, head)
+	wantCallEnded(t, err, "walkFrom under an ended context")
 }
 
-// Spec: §7.3.1 (Source unreachable), §13.12 — reading a clone whose snapshot
-// context already ended stops before the first step.
-func TestReadSnapshot_StopsWhenTheSnapshotEnds(t *testing.T) {
+// Spec: §7.3.1 (Source unreachable), §13.12 — reading the tree of a clone
+// whose call context already ended stops before the first step.
+func TestReadSnapshotTree_StopsWhenTheCallEnds(t *testing.T) {
 	t.Parallel()
 	repo, _ := longHistory(t)
 	ended, cancel := context.WithCancel(context.Background())
 	cancel()
-	_, err := readSnapshot(ended, repo, LayerConfig{Ref: "main", PriorRef: unreachablePrior.String()})
-	wantSnapshotEnded(t, err, "readSnapshot under an ended context")
+	_, _, err := readSnapshotTree(ended, repo, LayerConfig{Ref: "main"})
+	wantCallEnded(t, err, "readSnapshotTree under an ended context")
 }
 
-// Spec: §7.3.1 (Source unreachable), §13.12 — a snapshot whose deadline passes
-// while it walks a long history for a prior reference the history does not
-// hold ends its work promptly after the deadline, in well under the time the
-// whole walk takes, so a walk that ignored the deadline would fail the test.
-func TestReadSnapshot_WalkEndsPromptlyAfterTheDeadline(t *testing.T) {
+// Spec: §7.3.1 (Source unreachable), §13.12 — a call whose deadline passes
+// while it walks a long history for a commit the history does not hold ends
+// its work promptly after the deadline, in well under the time the whole walk
+// takes, so a walk that ignored the deadline would fail the test.
+func TestWalkFrom_EndsPromptlyAfterTheDeadline(t *testing.T) {
 	t.Parallel()
 	repo, head := longHistory(t)
-	cfg := LayerConfig{Ref: "main", PriorRef: unreachablePrior.String()}
 
 	start := time.Now()
-	if snap, err := readSnapshot(context.Background(), repo, cfg); err != nil || !snap.HistoryRewritten || snap.Reference != head.String() {
-		t.Fatalf("readSnapshot under a live context = %+v, %v; want the head with a rewritten history", snap, err)
+	if _, err := walkFrom(context.Background(), repo, head); err != nil {
+		t.Fatalf("walkFrom under a live context: %v", err)
 	}
 	full := time.Since(start)
 
@@ -176,29 +175,37 @@ func TestReadSnapshot_WalkEndsPromptlyAfterTheDeadline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), deadline)
 	defer cancel()
 	start = time.Now()
-	_, err := readSnapshot(ctx, repo, cfg)
+	_, err := walkFrom(ctx, repo, head)
 	elapsed := time.Since(start)
-	wantSnapshotEnded(t, err, "readSnapshot past its deadline")
+	wantCallEnded(t, err, "walkFrom past its deadline")
 	if elapsed > full/2 {
-		t.Errorf("readSnapshot ended %v after it started with a %v deadline, want under half the %v a full walk takes",
+		t.Errorf("walkFrom ended %v after it started with a %v deadline, want under half the %v a full walk takes",
 			elapsed, deadline, full)
 	}
 }
 
-// Spec: §7.3.1 (Source unreachable) — a clone that holds no commit at the
-// configured ref or no directory at the configured root fails as
-// ingest.source_unreachable, and a force-push walk from a commit the clone
-// does not hold reports the prior reference unreachable.
-func TestReadSnapshot_MissingRefRootAndCommit(t *testing.T) {
+// Spec: §7.3.1 (Source unreachable, Git fetch: Truncation) — a clone that
+// holds no commit at the configured ref or no directory at the configured
+// root fails as ingest.source_unreachable, and a walk from a commit the clone
+// does not hold is truncated, so it decides nothing but that the starting
+// commit is itself.
+func TestReadSnapshotTree_MissingRefRootAndCommit(t *testing.T) {
 	t.Parallel()
 	repo, _ := longHistory(t)
 	for _, cfg := range []LayerConfig{{Ref: "no-such-branch"}, {Ref: "main", Root: "/no-such-dir"}} {
-		if _, err := readSnapshot(context.Background(), repo, cfg); !errors.Is(err, ErrSourceUnreachable) {
-			t.Errorf("readSnapshot(%+v) = %v, want ErrSourceUnreachable", cfg, err)
+		if _, _, err := readSnapshotTree(context.Background(), repo, cfg); !errors.Is(err, ErrSourceUnreachable) {
+			t.Errorf("readSnapshotTree(%+v) = %v, want ErrSourceUnreachable", cfg, err)
 		}
 	}
-	if reachable, err := isAncestor(context.Background(), repo, plumbing.ZeroHash, unreachablePrior); reachable || err != nil {
-		t.Errorf("isAncestor from a missing commit = %v, %v; want false, nil", reachable, err)
+	w, err := walkFrom(context.Background(), repo, unreachablePrior)
+	if err != nil || !w.truncated {
+		t.Fatalf("walkFrom a missing commit = %+v, %v; want a truncated walk", w, err)
+	}
+	if got := w.ancestorOrSelf(plumbing.ZeroHash); got != ancestryUndecided {
+		t.Errorf("answer from a missing commit = %v, want undecided", got)
+	}
+	if got := w.ancestorOrSelf(unreachablePrior); got != ancestryYes {
+		t.Errorf("a missing commit against itself = %v, want yes", got)
 	}
 }
 
@@ -212,43 +219,54 @@ func (b *historyBuilder) mustCommit(t *testing.T, stored bool, parents ...plumbi
 	return h
 }
 
-// ancestryCase is one force-push check: the head a snapshot reads, the prior
-// reference the layer recorded, and whether the prior is in the head's history.
+// ancestryCase is one ancestry question: whether x is y or an ancestor of y,
+// and the answer the walk from y gives.
 type ancestryCase struct {
-	name      string
-	head      plumbing.Hash
-	prior     plumbing.Hash
-	reachable bool
+	name string
+	y    plumbing.Hash
+	x    plumbing.Hash
+	want ancestry
 }
 
-// checkAncestry asserts isAncestor's answer for each case and that
-// readSnapshot reports a rewritten history exactly when the prior is not
-// reachable.
+// checkAncestry asserts the answer of each case. For a decided answer it also
+// checks the snapshot's force-push check, which reports a rewritten history
+// exactly when the answer is no. An undecided answer makes the check deepen,
+// and the repository has no remote to deepen from, so the check fails as an
+// unreachable source rather than report a rewrite.
 func checkAncestry(t *testing.T, repo *git.Repository, cases []ancestryCase) {
 	t.Helper()
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, err := isAncestor(context.Background(), repo, tc.prior, tc.head)
-			if err != nil || got != tc.reachable {
-				t.Errorf("isAncestor = %v, %v; want %v, nil", got, err, tc.reachable)
-			}
-			snap, err := readSnapshot(context.Background(), repo, LayerConfig{Ref: tc.head.String(), PriorRef: tc.prior.String()})
+			w, err := walkFrom(context.Background(), repo, tc.y)
 			if err != nil {
-				t.Fatalf("readSnapshot: %v", err)
+				t.Fatalf("walkFrom: %v", err)
 			}
-			if snap.HistoryRewritten != !tc.reachable {
-				t.Errorf("HistoryRewritten = %v, want %v", snap.HistoryRewritten, !tc.reachable)
+			if got := w.ancestorOrSelf(tc.x); got != tc.want {
+				t.Errorf("answer = %v, want %v", got, tc.want)
+			}
+			c := &gitCall{cfg: LayerConfig{PriorRef: tc.x.String()}, repo: repo, depth: DefaultFetchDepth}
+			rewritten, err := priorRewritten(context.Background(), c, tc.y)
+			switch tc.want {
+			case ancestryUndecided:
+				if !errors.Is(err, ErrSourceUnreachable) {
+					t.Errorf("force-push check on an undecided answer = %v, %v; want ErrSourceUnreachable", rewritten, err)
+				}
+			default:
+				if err != nil || rewritten != (tc.want == ancestryNo) {
+					t.Errorf("force-push check = %v, %v; want rewritten %v", rewritten, err, tc.want == ancestryNo)
+				}
 			}
 		})
 	}
 }
 
-// Spec: §7.3.1 (Force-push detected) — a merge brings the history of every
-// parent into the new head, so a prior reference reachable only through a
-// merge commit's second parent is in the history and the snapshot reports no
-// rewrite. A prior reference on a branch no merge brought in is reported as a
-// rewrite after the walk covers both sides of the merge.
-func TestIsAncestor_MergeCommits(t *testing.T) {
+// Spec: §7.3.1 (Force-push detected, Git fetch: Ancestry answer) — on a
+// complete history, a merge brings the history of every parent into the new
+// head, so a commit reachable only through a merge commit's second parent is
+// an ancestor. A commit on a branch no merge brought in is not, and a complete
+// walk answers no, even though the repository holds the commit's object: the
+// walk decides presence, not an object lookup.
+func TestAncestry_CompleteWalks(t *testing.T) {
 	t.Parallel()
 	b, err := newHistoryBuilder()
 	if err != nil {
@@ -271,24 +289,26 @@ func TestIsAncestor_MergeCommits(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	checkAncestry(t, repo, []ancestryCase{
-		{name: "prior behind the second parent", head: merge, prior: f1, reachable: true},
-		{name: "prior is the second parent", head: merge, prior: f2, reachable: true},
-		{name: "prior is the merge base", head: merge, prior: base, reachable: true},
-		{name: "prior is the head", head: merge, prior: merge, reachable: true},
-		{name: "prior on an unmerged branch", head: merge, prior: abandoned, reachable: false},
-		{name: "no-fast-forward merge of the prior", head: noFF, prior: f1, reachable: true},
-		{name: "no-fast-forward merge without the prior", head: noFF, prior: abandoned, reachable: false},
+		{name: "commit behind the second parent", y: merge, x: f1, want: ancestryYes},
+		{name: "commit is the second parent", y: merge, x: f2, want: ancestryYes},
+		{name: "commit is the merge base", y: merge, x: base, want: ancestryYes},
+		{name: "commit is the starting commit", y: merge, x: merge, want: ancestryYes},
+		{name: "commit on an unmerged branch the repository holds", y: merge, x: abandoned, want: ancestryNo},
+		{name: "no-fast-forward merge of the commit", y: noFF, x: f1, want: ancestryYes},
+		{name: "no-fast-forward merge without the commit", y: noFF, x: abandoned, want: ancestryNo},
+		{name: "descendant is not an ancestor", y: base, x: merge, want: ancestryNo},
 	})
 }
 
-// Spec: §7.3.1 (Force-push detected) — in a shallow or pruned clone, a commit
-// can name a parent the clone does not hold. A commit that names the prior
-// reference as its parent proves the prior is in the history, whether or not
-// the clone holds the prior's object, and a missing parent on one side of a
-// merge does not hide a prior reachable through the other side. A prior that
-// only the missing history could reach cannot be shown reachable, so the
-// snapshot reports a rewrite, which the strict policy refuses.
-func TestIsAncestor_MissingParentCommits(t *testing.T) {
+// Spec: §7.3.1 (Force-push detected, Git fetch: Truncation, Ancestry answer)
+// — in a shallow clone, a commit can name a parent the clone does not hold,
+// and the walk is truncated there. A commit that names x as its parent proves
+// x is an ancestor, whether or not the clone holds x's object, because a
+// commit's hash covers its parent hashes, and a missing parent on one side of
+// a merge does not hide a commit reachable through the other side. A commit
+// only the missing history could reach is undecided rather than no, so the
+// force-push check never reads a truncated history as a rewrite.
+func TestAncestry_TruncatedWalks(t *testing.T) {
 	t.Parallel()
 	b, err := newHistoryBuilder()
 	if err != nil {
@@ -302,15 +322,42 @@ func TestIsAncestor_MissingParentCommits(t *testing.T) {
 	sideHead := b.mustCommit(t, true, prior)
 	missingSide := b.mustCommit(t, false, boundary)
 	merge := b.mustCommit(t, true, missingSide, sideHead)
+	// unrelated is held by the repository, as a tag fetch would leave it, and
+	// no commit of head's history reaches it.
+	unrelated := b.mustCommit(t, true)
 	repo, err := b.open(head)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	checkAncestry(t, repo, []ancestryCase{
-		{name: "prior is the absent parent of the shallow boundary", head: head, prior: beyond, reachable: true},
-		{name: "prior beyond the absent parent", head: head, prior: pruned, reachable: false},
-		{name: "prior held in the clone below the boundary", head: head, prior: boundary, reachable: true},
-		{name: "merge whose first parent is absent and whose second parent leads to the prior", head: merge, prior: prior, reachable: true},
-		{name: "merge whose first parent is absent without the prior", head: merge, prior: pruned, reachable: false},
+		{name: "commit is the absent parent of the shallow boundary", y: head, x: beyond, want: ancestryYes},
+		{name: "commit beyond the absent parent", y: head, x: pruned, want: ancestryUndecided},
+		{name: "commit held in the clone below the boundary", y: head, x: boundary, want: ancestryYes},
+		{name: "held commit that the truncated walk does not reach", y: head, x: unrelated, want: ancestryUndecided},
+		{name: "merge whose first parent is absent and whose second parent leads to the commit", y: merge, x: prior, want: ancestryYes},
+		{name: "merge whose first parent is absent without the commit", y: merge, x: pruned, want: ancestryUndecided},
 	})
+}
+
+// Spec: §7.3.1 (Git fetch: Snapshot) — the force-push check reports no
+// rewrite for a layer with no last ingested reference and for the zero hash,
+// and a rewrite with no deepening for a reference that is not a full
+// hexadecimal commit name, which no history holds.
+func TestPriorRewritten_ReferencesThatNeedNoWalk(t *testing.T) {
+	t.Parallel()
+	repo, head := longHistory(t)
+	for _, tc := range []struct {
+		prior string
+		want  bool
+	}{
+		{prior: "", want: false},
+		{prior: plumbing.ZeroHash.String(), want: false},
+		{prior: "2026-11-26T00:00:00Z", want: true},
+		{prior: head.String()[:12], want: true},
+	} {
+		c := &gitCall{cfg: LayerConfig{PriorRef: tc.prior}, repo: repo, depth: DefaultFetchDepth}
+		if got, err := priorRewritten(context.Background(), c, head); err != nil || got != tc.want {
+			t.Errorf("priorRewritten(%q) = %v, %v; want %v, nil", tc.prior, got, err, tc.want)
+		}
+	}
 }

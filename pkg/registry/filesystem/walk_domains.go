@@ -44,14 +44,21 @@ func (r *Registry) WalkDomains() ([]DomainRecord, error) {
 	return all, nil
 }
 
+// walkLayerDomains reads the layer through its resolved root (layerRoot), as
+// walkLayer does, so a layer path that is a symbolic link yields its domains
+// together with its packages.
 func walkLayerDomains(layer Layer) ([]DomainRecord, error) {
+	root, err := layerRoot(layer)
+	if err != nil {
+		return nil, err
+	}
 	var records []DomainRecord
-	walkErr := filepath.WalkDir(layer.Path, func(path string, d os.DirEntry, walkErr error) error {
+	walkErr := filepath.WalkDir(root, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
 		if d.IsDir() {
-			if strings.HasPrefix(d.Name(), ".") && path != layer.Path {
+			if strings.HasPrefix(d.Name(), ".") && path != root {
 				return filepath.SkipDir
 			}
 			return nil
@@ -68,7 +75,7 @@ func walkLayerDomains(layer Layer) ([]DomainRecord, error) {
 			// Malformed DOMAIN.md is skipped here; ingest-time lint reports it.
 			return nil
 		}
-		rel, err := filepath.Rel(layer.Path, filepath.Dir(path))
+		rel, err := filepath.Rel(root, filepath.Dir(path))
 		if err != nil {
 			return err
 		}

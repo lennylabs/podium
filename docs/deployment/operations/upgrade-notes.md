@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, and the Sigstore keyless signature as a Sigstore bundle, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, and the Sigstore keyless signature as a Sigstore bundle, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -17,8 +17,17 @@ The current release is 0.7.0. The notes in this section describe behavior on `ma
 From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. 0.7.0 set no deadline.
 
 - A clone that takes longer than the deadline fails that ingest with `ingest.source_unreachable`, and the message names the setting. The layer keeps serving the artifacts of its last completed ingest.
-- The longest clone of a layer is the full-history clone that each ingest makes once the layer has a recorded reference, which the force-push check needs. Before the upgrade, compare that clone time for the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
+- The deadline covers the clone and every deeper fetch of one ingest (*Bounded Git fetch* below). The longest ingest of a layer is one that fetches the complete history: after a force push, or when the last ingested commit lies far behind the tip. Before the upgrade, compare the full clone time of the largest `git` layer with the default, and set `PODIUM_GIT_FETCH_TIMEOUT` above it where it is longer.
 - A value that is not a duration above zero, such as `0s` or `600`, refuses startup with `config.invalid`.
+- A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
+
+### Bounded Git fetch
+
+From 0.8.0, each ingest of a `git` layer clones the tracked ref alone, with no tags, at the depth that `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets, 16 commits by default, and fetches again at four times the depth while the force-push check cannot decide from the history it holds. 0.7.0 cloned the complete history once a layer had a last ingested commit.
+
+- A remote that cannot serve the history the check needs fails the ingest with `ingest.source_unreachable`. Such a remote is a shallow mirror whose history does not reach the layer's last ingested commit. 0.7.0 reported such an ingest as a rewritten history, which emitted `layer.history_rewritten` and, under `force_push_policy: strict`, refused the ingest. Before the upgrade, point each layer that tracks a shallow mirror at a repository with the full history, or deepen the mirror so that it holds the last ingested commit.
+- A value of `PODIUM_GIT_FETCH_DEPTH` or `git_fetch_depth` that is not an integer from 1 to 2147483646 refuses startup with `config.invalid`.
+- An ingest that reaches `PODIUM_GIT_FETCH_TIMEOUT` reports `details.constraint: "fetch_deadline"` in the reingest response, with the depth of the fetch that was running.
 - A rollback to 0.7.0 needs no step. 0.7.0 does not read the variable and ignores the key.
 
 ### Workspace `.podium` that is a symbolic link
@@ -70,6 +79,41 @@ From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that co
 - A layer registration or update that carries such an entry, or an `owner` with a control character, is refused with `400 registry.invalid_argument`. A registration is refused the same way when the caller's subject, which the registry stores as the owner and `users` entry of a user-defined layer or as the `users` entry that `PODIUM_DEFAULT_LAYER_VISIBILITY=users` grants, contains a control character.
 - A layer that 0.7.0 stored keeps its entries. Where its stored `users` or `groups` holds an empty entry, an update that sends that list back unchanged, as a client that returns the layer object it read does, is refused; send the list without the empty entry, or omit the member. The web UI's Edit dialog sends both lists on every update of an admin-defined layer, so such a layer cannot have its ref changed or its webhook secret rotated there until the empty entry is removed. The dialog shows the entry as a token labelled `(empty entry)`; remove that token, then save.
 - White space around an entry is kept and matched as written, as in 0.7.0.
+- A rollback to 0.7.0 needs no step.
+
+### Skills whose `SKILL.md` is missing or does not parse
+
+From 0.8.0, an artifact whose `ARTIFACT.md` declares `type: skill` and whose directory holds no `SKILL.md` is refused on its own under the unparseable-manifest rule, as an artifact whose `SKILL.md` does not parse already was. 0.7.0 failed the whole layer instead.
+
+- Ingest stores the other artifacts of the layer and lists the skill in `rejected` with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`. The reason names `<id>/SKILL.md` and states that the file is missing. A script that watched for the layer's failed reingest reads `rejected` instead.
+- `podium lint` lists the skill among its refused artifacts and exits 1. A filesystem-source `podium sync` drops it, names it on standard error, writes the other artifacts, and exits 1, and by default keeps the output an earlier run wrote for it, as for any artifact whose manifest does not parse.
+
+Stored-row admission no longer serves a skill row from its `ARTIFACT.md` alone when the row's `SKILL.md` does not parse. 0.7.0 served such a row's sensitivity, deprecation flag, and replacement from the manifest. 0.8.0 serves the values the row stores, as it does for a row whose manifest does not parse. For such a row, the served type, sensitivity, deprecation flag, replacement, and `audit_redact` key set come from stored columns that no content hash or signature covers. A skill's fields resolve from both documents, so a row whose `SKILL.md` does not parse has no resolved value to serve from its bytes. Ingest refuses such a skill, so only a row that an earlier release stored is affected.
+
+- To find an affected skill, reingest each layer. A skill whose `SKILL.md` does not parse is listed in `rejected` with a reason that names its `SKILL.md`, and the registry keeps serving the version it stored.
+- To serve resolved values again, correct the `SKILL.md` and publish the skill at a new version.
+- A rollback to 0.7.0 needs no step.
+
+### Files of an unparseable package that cannot be read
+
+From 0.8.0, ingest, `podium lint`, and a filesystem-source `podium sync` read every file of a package whose manifest does not parse, because the package digest of every package in a layer covers its files. 0.7.0 refused such a package without reading its other files. A file of such a package that cannot be read, such as a symbolic link that leaves a `local` layer's directory, a dangling symbolic link, or a file without read permission, now fails the ingest of the whole layer, as an unreadable file of a package whose manifest parses already did in 0.7.0. 0.7.0 refused the unparseable artifact alone and ingested the rest of the layer. A symbolic link that leaves the directory fails with `ingest.source_unreachable`.
+
+- Before the upgrade, run `podium lint --registry <path>` on each filesystem layer and fix or remove each package it refuses as `manifest_unparseable`, or remove the unreadable files from it.
+- A rollback to 0.7.0 needs no step.
+
+### `ARTIFACT.md` below a dot-prefixed directory of a package
+
+From 0.8.0, a directory that carries an `ARTIFACT.md` below a dot-prefixed directory of a package, such as `.claude/ARTIFACT.md` or `.cache/tool/ARTIFACT.md`, belongs to the enclosing package, and its files are bundled resources. 0.7.0 left such a directory out of the enclosing package, and package discovery skipped it, so its files belonged to no artifact.
+
+- The content hash of an affected package changes at its next ingest. A package that declares its version is refused with `ingest.immutable_violation` at the version 0.7.0 stored, so publish it at a new version. A skill that declares no version receives a new registry-assigned version.
+- To keep such files out of the package, delete them before ingest. Podium reads no ignore file.
+- A rollback to 0.7.0 changes the content hash back. A package that 0.8.0 stored at a version with the newly bundled files is refused with `ingest.immutable_violation` when 0.7.0 ingests it again at that version, because 0.7.0 leaves those files out. After a rollback, publish each affected package at a new version, or remove the dot-prefixed directory's `ARTIFACT.md`.
+
+### Filesystem layer paths that are symbolic links
+
+From 0.8.0, a filesystem-source `podium sync`, `podium lint`, and the podium-mcp workspace overlay resolve a layer or overlay path that is a symbolic link to a directory and walk the directory it names, for its artifacts and its `DOMAIN.md` files. 0.7.0 found no artifact and no domain under such a path, while registry ingest of the same path read it.
+
+- A workspace whose overlay path is a symbolic link starts serving the overlay's artifacts and domains after the upgrade. Remove the link to keep the overlay empty.
 - A rollback to 0.7.0 needs no step.
 
 ### Identity provider values the registry does not recognize
