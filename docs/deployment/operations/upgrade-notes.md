@@ -79,11 +79,26 @@ From 0.8.0, an artifact whose `ARTIFACT.md` declares `type: skill` and whose dir
 - Ingest stores the other artifacts of the layer and lists the skill in `rejected` with `ingest.invalid_artifact` and `details.constraint: "manifest_unparseable"`. The reason names `<id>/SKILL.md` and states that the file is missing. A script that watched for the layer's failed reingest reads `rejected` instead.
 - `podium lint` lists the skill among its refused artifacts and exits 1. A filesystem-source `podium sync` drops it, names it on standard error, writes the other artifacts, and exits 1, and by default keeps the output an earlier run wrote for it, as for any artifact whose manifest does not parse.
 
-Stored-row admission no longer serves a skill row from its `ARTIFACT.md` alone when the row's `SKILL.md` does not parse. 0.7.0 served such a row's sensitivity, deprecation flag, and replacement from the manifest. 0.8.0 serves the values the row stores, as it does for a row whose manifest does not parse. A skill's fields resolve from both documents, so a row whose `SKILL.md` does not parse has no resolved value to serve from its bytes. Ingest refuses such a skill, so only a row that an earlier release stored is affected.
+Stored-row admission no longer serves a skill row from its `ARTIFACT.md` alone when the row's `SKILL.md` does not parse. 0.7.0 served such a row's sensitivity, deprecation flag, and replacement from the manifest. 0.8.0 serves the values the row stores, as it does for a row whose manifest does not parse. For such a row, the served type, sensitivity, deprecation flag, replacement, and `audit_redact` key set come from stored columns that no content hash or signature covers. A skill's fields resolve from both documents, so a row whose `SKILL.md` does not parse has no resolved value to serve from its bytes. Ingest refuses such a skill, so only a row that an earlier release stored is affected.
 
 - To find an affected skill, reingest each layer. A skill whose `SKILL.md` does not parse is listed in `rejected` with a reason that names its `SKILL.md`, and the registry keeps serving the version it stored.
 - To serve resolved values again, correct the `SKILL.md` and publish the skill at a new version.
 - A rollback to 0.7.0 needs no step.
+
+### Files of an unparseable package that cannot be read
+
+From 0.8.0, ingest, `podium lint`, and a filesystem-source `podium sync` read every file of a package whose manifest does not parse, because the package digest of every package in a layer covers its files. 0.7.0 refused such a package without reading its other files. A file of such a package that cannot be read, such as a symbolic link that leaves a `local` layer's directory, a dangling symbolic link, or a file without read permission, now fails the ingest of the whole layer, as an unreadable file of a package whose manifest parses already did in 0.7.0. 0.7.0 refused the unparseable artifact alone and ingested the rest of the layer. A symbolic link that leaves the directory fails with `ingest.source_unreachable`.
+
+- Before the upgrade, run `podium lint --registry <path>` on each filesystem layer and fix or remove each package it refuses as `manifest_unparseable`, or remove the unreadable files from it.
+- A rollback to 0.7.0 needs no step.
+
+### `ARTIFACT.md` below a dot-prefixed directory of a package
+
+From 0.8.0, a directory that carries an `ARTIFACT.md` below a dot-prefixed directory of a package, such as `.claude/ARTIFACT.md` or `.cache/tool/ARTIFACT.md`, belongs to the enclosing package, and its files are bundled resources. 0.7.0 left such a directory out of the enclosing package, and package discovery skipped it, so its files belonged to no artifact.
+
+- The content hash of an affected package changes at its next ingest. A package that declares its version is refused with `ingest.immutable_violation` at the version 0.7.0 stored, so publish it at a new version. A skill that declares no version receives a new registry-assigned version.
+- To keep such files out of the package, delete them before ingest. Podium reads no ignore file.
+- A rollback to 0.7.0 needs no step; 0.7.0 computes the old content hash again for a package it ingests.
 
 ### Identity provider values the registry does not recognize
 
