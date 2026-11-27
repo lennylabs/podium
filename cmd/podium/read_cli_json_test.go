@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -191,5 +192,33 @@ func TestParseFrontmatterObject_EmptyAndMalformed(t *testing.T) {
 	bare := parseFrontmatterObject("type: hook\n")
 	if bare["type"] != "hook" {
 		t.Errorf("bare frontmatter not decoded: %+v", bare)
+	}
+}
+
+// Spec: §7.6.1, §7.2 — podium artifact show carries the registry's
+// package_digest member in the --json envelope and prints it on standard
+// error, and a response without the member adds neither.
+func TestReadCLI_ArtifactShowPackageDigest(t *testing.T) {
+	load := map[string]any{
+		"id": "team/x", "type": "agent", "version": "1.0.0", "content_hash": "sha256:abc",
+		"manifest_body": "Body.", "frontmatter": "---\ntype: agent\n---\n", "package_digest": "sha256:feed",
+	}
+	ts := newRegistryStub(t, map[string]any{"/v1/load_artifact": load})
+	out := captureStdout(t, func() {
+		if rc := artifactShow([]string{"--registry", ts.URL, "--json", "team/x"}); rc != 0 {
+			t.Errorf("rc = %d, want 0", rc)
+		}
+	})
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil || got["package_digest"] != "sha256:feed" {
+		t.Errorf("artifact show --json = %s (%v), want package_digest sha256:feed", out, err)
+	}
+
+	var stderr strings.Builder
+	printPackageDigest(&stderr, []byte(`{"package_digest":"sha256:feed"}`))
+	printPackageDigest(&stderr, []byte(`{"id":"team/x"}`))
+	printPackageDigest(&stderr, []byte(`not json`))
+	if stderr.String() != "package_digest: sha256:feed\n" {
+		t.Errorf("printPackageDigest wrote %q, want one line for the response that carries the member", stderr.String())
 	}
 }

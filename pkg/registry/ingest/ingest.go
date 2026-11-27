@@ -1448,6 +1448,11 @@ func manifestRecordFor(rec filesystem.ArtifactRecord, tenantID, layerID string, 
 		// captured the raw bytes in rec.SkillBytes; empty for non-skills.
 		SkillRaw:  append([]byte(nil), rec.SkillBytes...),
 		Resources: resourceRefsFor(rec),
+		// Spec: §4.7.6, §13.4 — the package digest the walk computed from
+		// the files it read, which the stored manifest, SKILL.md, and
+		// resource refs reproduce, so the §13.4 fill computes the same value
+		// from this row.
+		PackageDigest: rec.PackageDigest,
 	}, nil
 }
 

@@ -1183,3 +1183,55 @@ func TestPumpStore_FailedVerifiedIdentityCopyStopsThePump(t *testing.T) {
 		t.Errorf("pumpStore = %v with calls %v, want the copy error and no tenant write", err, target.calls)
 	}
 }
+
+// digestMarkerFailer fails the removal of the package digest fill's record
+// and passes every other call through.
+type digestMarkerFailer struct {
+	store.Store
+}
+
+func (d digestMarkerFailer) SetDataMigrationApplied(ctx context.Context, name string, applied bool) error {
+	if name == store.DataMigrationPackageDigest {
+		return errors.New("connection refused")
+	}
+	return d.Store.SetDataMigrationApplied(ctx, name, applied)
+}
+
+// Spec: §13.4, §13.10 — the command copies each manifest row with its stored
+// package digest and removes the target's record of the package digest fill
+// before the first copy, so the target's next start fills a row the source
+// stored without one. A failed removal stops the copy.
+func TestPumpStore_CopiesThePackageDigestAndClearsTheFillRecord(t *testing.T) {
+	ctx := context.Background()
+	plan := &migrationPlan{
+		tenants: []tenantPlan{{
+			tenant: store.Tenant{ID: "default", Name: "default"},
+			manifests: []store.ManifestRecord{
+				{TenantID: "default", ArtifactID: "alpha", Version: "1.0.0", ContentHash: "sha256:a", Type: "skill", Layer: "team", PackageDigest: "sha256:digest"},
+				{TenantID: "default", ArtifactID: "beta", Version: "1.0.0", ContentHash: "sha256:b", Type: "skill", Layer: "team"},
+			},
+		}},
+		manifestCount: 2,
+	}
+	target := store.NewMemory()
+	if err := target.SetDataMigrationApplied(ctx, store.DataMigrationPackageDigest, true); err != nil {
+		t.Fatalf("set marker: %v", err)
+	}
+	if err := pumpStore(ctx, plan, target); err != nil {
+		t.Fatalf("pumpStore: %v", err)
+	}
+	alpha, errA := target.GetManifest(ctx, "default", "alpha", "1.0.0")
+	beta, errB := target.GetManifest(ctx, "default", "beta", "1.0.0")
+	applied, errM := target.DataMigrationApplied(ctx, store.DataMigrationPackageDigest)
+	if errA != nil || errB != nil || errM != nil || alpha.PackageDigest != "sha256:digest" || beta.PackageDigest != "" || applied {
+		t.Errorf("alpha %q (%v), beta %q (%v), fill recorded %v (%v); want the copied digest, none, and no record",
+			alpha.PackageDigest, errA, beta.PackageDigest, errB, applied, errM)
+	}
+
+	failing := store.NewMemory()
+	err := pumpStore(ctx, plan, digestMarkerFailer{Store: failing})
+	rows, _ := failing.ListManifests(ctx, "default")
+	if err == nil || !strings.Contains(err.Error(), "clear package digest marker:") || len(rows) != 0 {
+		t.Errorf("pumpStore = %v with %d rows copied, want the marker error and no copy", err, len(rows))
+	}
+}

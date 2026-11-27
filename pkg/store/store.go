@@ -183,6 +183,13 @@ type ManifestRecord struct {
 	// delivered from object storage by content hash. Empty when the
 	// package bundles no resources.
 	Resources []ResourceRef
+	// PackageDigest is the §4.7.6 package digest of the version, written
+	// sha256:<hex>. Ingest stores the digest the walk computed from the
+	// files it read, and the §13.4 fill computes it for a row stored
+	// without one. Empty for a row the fill has not reached or whose stored
+	// files give no entry list. The registry serves it as the load_artifact
+	// package_digest member and reads it nowhere else.
+	PackageDigest string
 }
 
 // ResourceRef is one §4.4 bundled resource attached to a manifest
@@ -444,6 +451,13 @@ type Store interface {
 	// is the immutability anchor and refuses a differing hash for an
 	// existing key, so no ingest path can repair a stored value.
 	RehashManifest(ctx context.Context, tenantID, artifactID, version, oldHash, oldSignature, newHash, signature string) error
+	// SetPackageDigest stores the §4.7.6 package digest of one manifest row,
+	// including a soft-deleted one, only when the stored content_hash equals
+	// contentHash, and changes no other column. It returns ErrNotFound when
+	// no row exists for the key and ErrImmutableViolation when the stored
+	// hash differs, so the §13.4 fill never writes a digest over a row whose
+	// bytes changed after it read them.
+	SetPackageDigest(ctx context.Context, tenantID, artifactID, version, contentHash, digest string) error
 	// ListManifestsIncludingDeleted is ListManifests without the deleted_at
 	// filter, so a migration reaches the rows a restored layer would serve.
 	ListManifestsIncludingDeleted(ctx context.Context, tenantID string) ([]ManifestRecord, error)
@@ -626,6 +640,15 @@ type Store interface {
 // migrate-to-standard clears the marker on its target so the rewrite runs
 // again over the rows it copied, by the same rule.
 const DataMigrationContentHashFraming = "content-hash-framing"
+
+// DataMigrationPackageDigest names the one-time fill of the §4.7.6 package
+// digest of every stored row. Every start whose listener binds runs the fill
+// while the marker is absent and sets it once every row holds its digest.
+// podium admin migrate-to-standard clears it on its target, so the target's
+// next start fills the rows the source stored without a digest.
+//
+// Spec: §13.4
+const DataMigrationPackageDigest = "package-digest"
 
 // DeploymentMarkerVerifiedIdentity names the record that an earlier registry
 // start installed a request-time identity verifier. It lives in the same

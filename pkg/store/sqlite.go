@@ -97,6 +97,7 @@ func (s *SQLite) applySchema() error {
 			resources BLOB,
 			deprecated_at TEXT,
 			deleted_at TEXT,
+			package_digest TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE TABLE IF NOT EXISTS domains (
@@ -362,8 +363,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-			 signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, package_digest)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -373,7 +374,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
+		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt), rec.PackageDigest)
 	if err != nil {
 		return err
 	}
@@ -413,13 +414,13 @@ func sqliteRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ing
 		UPDATE manifests SET
 			type = ?, description = ?, tags = ?, sensitivity = ?, layer = ?, deprecated = ?,
 			ingested_at = ?, frontmatter = ?, body = ?, skill_raw = ?, signature = ?,
-			search_visibility = ?, resources = ?, deprecated_at = ?, deleted_at = NULL
+			search_visibility = ?, resources = ?, deprecated_at = ?, package_digest = ?, deleted_at = NULL
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ?
 			AND content_hash = ? AND layer = ? AND deleted_at IS NOT NULL`,
 		rec.Type, rec.Description, strings.Join(rec.Tags, "\n"), rec.Sensitivity, rec.Layer,
 		boolToInt(rec.Deprecated), ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
-		nullTimeText(rec.DeprecatedAt),
+		nullTimeText(rec.DeprecatedAt), rec.PackageDigest,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Layer)
 	return rowsChanged(res, err)
 }
@@ -590,8 +591,8 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-			 signature, search_visibility, resources, deprecated_at, deleted_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, package_digest)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -601,7 +602,7 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt))
+		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt), rec.PackageDigest)
 	if err != nil {
 		return err
 	}
@@ -742,7 +743,7 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-		       signature, search_visibility, resources, deprecated_at, deleted_at
+		       signature, search_visibility, resources, deprecated_at, deleted_at, package_digest
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
@@ -772,6 +773,25 @@ func (s *SQLite) RehashManifest(ctx context.Context, tenantID, artifactID, versi
 		return fmt.Errorf("store: rehash %s/%s@%s: %w", tenantID, artifactID, version, err)
 	}
 	if n > 0 {
+		return nil
+	}
+	return s.classifyRehashMiss(ctx, tenantID, artifactID, version)
+}
+
+// SetPackageDigest stores one row's package digest under the content-hash
+// condition the Store interface documents. It carries no deleted_at
+// condition, because the §13.4 fill covers a soft-deleted row a restore would
+// bring back.
+func (s *SQLite) SetPackageDigest(ctx context.Context, tenantID, artifactID, version, contentHash, digest string) error {
+	res, err := s.db.ExecContext(ctx, `
+		UPDATE manifests SET package_digest = ?
+		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND content_hash = ?`,
+		digest, tenantID, artifactID, version, contentHash)
+	changed, err := rowsChanged(res, err)
+	if err != nil {
+		return fmt.Errorf("store: set package digest %s/%s@%s: %w", tenantID, artifactID, version, err)
+	}
+	if changed {
 		return nil
 	}
 	return s.classifyRehashMiss(ctx, tenantID, artifactID, version)
@@ -848,7 +868,7 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-		       signature, search_visibility, resources, deprecated_at, deleted_at
+		       signature, search_visibility, resources, deprecated_at, deleted_at, package_digest
 		FROM manifests
 		WHERE tenant_id = ? `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -1301,7 +1321,7 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body, &rec.SkillRaw,
 		&rec.Signature, &rec.SearchVisibility, &resources,
-		&deprecatedAt, &deletedAt)
+		&deprecatedAt, &deletedAt, &rec.PackageDigest)
 	if err != nil {
 		return ManifestRecord{}, err
 	}

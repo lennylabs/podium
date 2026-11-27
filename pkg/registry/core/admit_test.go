@@ -508,6 +508,10 @@ var admDispositions = map[string]string{
 	"ManifestRecord.Tags":             "search-only; derived from SKILL.md metadata for a plain-skill row",
 	"ManifestRecord.SearchVisibility": "search-only",
 	"ResourceRef.ContentType":         "served as stored",
+	// §7.2, §13.4: a registry assertion outside the delivery record that no
+	// consumer check reads; ingest and the fill compute it from the covered
+	// fields with the resolution admission applies.
+	"ManifestRecord.PackageDigest": "served as stored",
 }
 
 // Spec: §13.4 — every stored field has one admission disposition, so a field
