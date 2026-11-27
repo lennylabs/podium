@@ -37,6 +37,10 @@ const (
 	DefaultRootMaxAge         = 90 * 24 * time.Hour
 )
 
+// MinRootRefresh is the shortest refresh interval §13.12 admits. The
+// interval must also be at least the refresh deadline.
+const MinRootRefresh = time.Minute
+
 // firstRetryDelay is the delay before the first retry of a failed refresh.
 // It doubles after each further failure, up to the refresh interval.
 const firstRetryDelay = time.Minute
@@ -156,8 +160,11 @@ type TUFRootConfig struct {
 // so AttestationRoot makes no network call.
 type TUFAttestationRoot struct {
 	cfg TUFRootConfig
-	// persist is false when Dir cannot be written; the TUF state and the
-	// copy then stay in memory for the life of the process.
+	// dirOnce creates Dir at the first refresh, so a source that never
+	// refreshes writes nothing. persist is false when Dir cannot be
+	// written; the TUF state and the copy then stay in memory for the life
+	// of the process.
+	dirOnce sync.Once
 	persist bool
 
 	// mu guards root, at, and origin, which a refresh replaces together
@@ -170,9 +177,13 @@ type TUFAttestationRoot struct {
 }
 
 // NewTUFAttestationRoot builds the public-good source with no network
-// call. It uses the copy on disk when one loads and passes the public-good
-// rule, and the embedded copy otherwise. It fails only on a configuration
-// error, which includes an embedded root that does not load.
+// call and no write: Dir is created by the first refresh. Of the copy on
+// disk, when one loads and passes the public-good rule, and the embedded
+// copy, it uses the one with the later root time, because both were
+// verified through TUF. An embedded copy of unknown time counts as the
+// earlier one, and the copy on disk wins a tie, so an upgrade during a TUF
+// outage serves the newer root the binary carries. It fails only on a
+// configuration error, which includes an embedded root that does not load.
 //
 // Spec: §4.7.11.
 func NewTUFAttestationRoot(cfg TUFRootConfig) (*TUFAttestationRoot, error) {
@@ -184,8 +195,7 @@ func NewTUFAttestationRoot(cfg TUFRootConfig) (*TUFAttestationRoot, error) {
 		return nil, fmt.Errorf("attestation: embedded public-good root: %w", err)
 	}
 	s := &TUFAttestationRoot{cfg: cfg, root: embedded, at: cfg.EmbeddedTime, origin: RootEmbedded}
-	s.persist = s.prepareDir()
-	if r, at, ok := s.loadDiskCopy(); ok {
+	if r, at, ok := s.loadDiskCopy(); ok && (cfg.EmbeddedTime.IsZero() || !at.Before(cfg.EmbeddedTime)) {
 		s.root, s.at, s.origin = r, at, RootFromDisk
 	}
 	return s, nil
@@ -196,10 +206,10 @@ func (c *TUFRootConfig) fill() error {
 	switch {
 	case c.Dir == "":
 		return errors.New("attestation: the public-good root needs a directory")
-	case c.Refresh <= 0:
-		return fmt.Errorf("attestation: refresh interval %s is not above zero", c.Refresh)
 	case c.Timeout <= 0:
 		return fmt.Errorf("attestation: refresh deadline %s is not above zero", c.Timeout)
+	case c.Refresh < MinRootRefresh || c.Refresh < c.Timeout:
+		return fmt.Errorf("attestation: refresh interval %s is below %s or below the refresh deadline %s", c.Refresh, MinRootRefresh, c.Timeout)
 	case c.MaxAge < 0:
 		return fmt.Errorf("attestation: maximum age %s is below zero", c.MaxAge)
 	}
@@ -248,8 +258,9 @@ func parsePublicGoodRoot(raw []byte) (*AttestationRoot, error) {
 	return r, nil
 }
 
-// prepareDir creates Dir and reports whether the process can write it. A
-// failure is logged and leaves the state in memory.
+// prepareDir creates Dir and reports whether the process can write it. The
+// first refresh calls it. A failure is logged and leaves the state in
+// memory.
 func (s *TUFAttestationRoot) prepareDir() bool {
 	err := os.MkdirAll(s.cfg.Dir, 0o700)
 	if err == nil {
@@ -349,6 +360,7 @@ func (s *TUFAttestationRoot) Status() AttestationRootStatus {
 //
 // Spec: §4.7.11.
 func (s *TUFAttestationRoot) Refresh(ctx context.Context) error {
+	s.dirOnce.Do(func() { s.persist = s.prepareDir() })
 	ctx, cancel := context.WithTimeout(ctx, s.cfg.Timeout)
 	defer cancel()
 	defer s.cfg.HTTPClient.CloseIdleConnections()
@@ -460,9 +472,11 @@ func writeFileAtomic(dir, name string, data []byte) error {
 }
 
 // Run refreshes the root at once and then on the §4.7.11 schedule until
-// ctx ends: every Refresh interval after a success, and after a failure
-// with a delay that starts at one minute, doubles up to the interval, and
-// is multiplied by a random factor between 0.5 and 1.5.
+// ctx ends: after a success the Refresh interval times a factor between
+// 0.9 and 1.1, so replicas started together spread their requests, and
+// after a failure a delay that starts at one minute, doubles up to the
+// interval, and is multiplied by a random factor between 0.5 and 1.5. The
+// caller starts Run only on a registry that can verify on public-good.
 //
 // Spec: §4.7.11.
 func (s *TUFAttestationRoot) Run(ctx context.Context) {
@@ -480,7 +494,7 @@ func (s *TUFAttestationRoot) Run(ctx context.Context) {
 		}
 		if err == nil {
 			failures = 0
-			delay = s.cfg.Refresh
+			delay = time.Duration(float64(s.cfg.Refresh) * (0.9 + 0.2*s.cfg.Jitter()))
 			st := s.Status()
 			s.cfg.Logf("attestation: refreshed the public-good trusted root (%s); next refresh in %s", st.Digest, delay)
 			continue
@@ -504,7 +518,8 @@ func (s *TUFAttestationRoot) retryDelay(n int) time.Duration {
 // logFailure logs a failed refresh, with the warning of §4.7.11 once the
 // root in use is older than half the maximum age.
 func (s *TUFAttestationRoot) logFailure(err error, next time.Duration) {
-	s.cfg.Logf("attestation: %v; next attempt in %s", err, next.Round(time.Second))
+	// err carries the "attestation:" prefix of Refresh.
+	s.cfg.Logf("%v; next attempt in %s", err, next.Round(time.Second))
 	if s.cfg.MaxAge == 0 {
 		return
 	}

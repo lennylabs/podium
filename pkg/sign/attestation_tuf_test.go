@@ -131,6 +131,9 @@ func TestTUFRoot_RefreshReplacesEmbeddedAndPersists(t *testing.T) {
 	if f.repo.Requests() != 0 {
 		t.Fatalf("construction sent %d requests, want none", f.repo.Requests())
 	}
+	if _, err := os.Stat(f.dir); !os.IsNotExist(err) {
+		t.Fatalf("construction created the root directory (%v), want none before a refresh", err)
+	}
 	if err := verifiesUnder(t, src, f.embedded); err != nil {
 		t.Fatalf("bundle under the embedded root: %v", err)
 	}
@@ -538,11 +541,11 @@ func TestTUFRoot_UnwritableDirectoryStaysInMemory(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(f.dir, 0o700) })
 	src := f.source(t, f.config(time.Time{}))
-	if !f.logs.contains("stay in memory") {
-		t.Fatalf("logs = %q, want the in-memory notice", f.logs.lines)
-	}
 	if err := src.Refresh(context.Background()); err != nil {
 		t.Fatalf("Refresh: %v", err)
+	}
+	if !f.logs.contains("stay in memory") {
+		t.Fatalf("logs = %q, want the in-memory notice", f.logs.lines)
 	}
 	if src.Status().Origin != sign.RootRefreshed {
 		t.Fatalf("origin = %s, want refreshed", src.Status().Origin)
@@ -554,14 +557,19 @@ func TestTUFRoot_UnwritableDirectoryStaysInMemory(t *testing.T) {
 }
 
 // Spec: §4.7.11 — the source refuses a configuration it cannot run: no
-// directory, an interval or a deadline that is not above zero, a negative
+// directory, a deadline that is not above zero, an interval below one
+// minute or below the deadline, a negative
 // maximum age, and an embedded root that does not pass the public-good rule.
 func TestTUFRoot_ConfigurationErrors(t *testing.T) {
 	t.Parallel()
 	f := newTUFFixture(t)
 	for name, edit := range map[string]func(*sign.TUFRootConfig){
-		"no directory":        func(c *sign.TUFRootConfig) { c.Dir = "" },
-		"zero interval":       func(c *sign.TUFRootConfig) { c.Refresh = 0 },
+		"no directory":      func(c *sign.TUFRootConfig) { c.Dir = "" },
+		"zero interval":     func(c *sign.TUFRootConfig) { c.Refresh = 0 },
+		"interval below 1m": func(c *sign.TUFRootConfig) { c.Refresh = 59 * time.Second },
+		"interval below the deadline": func(c *sign.TUFRootConfig) {
+			c.Refresh, c.Timeout = 2*time.Minute, 3*time.Minute
+		},
 		"zero deadline":       func(c *sign.TUFRootConfig) { c.Timeout = 0 },
 		"negative max age":    func(c *sign.TUFRootConfig) { c.MaxAge = -time.Second },
 		"embedded with no CT": func(c *sign.TUFRootConfig) { c.Embedded = f.embedded.TrustedRootJSON() },
@@ -661,5 +669,61 @@ func TestTUFRoot_NoHalfAgeWarningWithoutLimit(t *testing.T) {
 	s.stop()
 	if f.logs.contains("past half of PODIUM_SIGSTORE_ROOT_MAX_AGE") {
 		t.Errorf("logs = %q, want no half-age warning", f.logs.lines)
+	}
+}
+
+// Spec: §4.7.11 — of the copy on disk and the embedded copy, the one with
+// the later root time serves before a refresh: an embedded root built after
+// the last refresh replaces an older copy on disk, a copy refreshed after
+// the build stays, the copy wins a tie, and an embedded root of unknown
+// time never replaces a copy.
+func TestTUFRoot_LaterOfDiskAndEmbedded(t *testing.T) {
+	t.Parallel()
+	f := newTUFFixture(t)
+	refreshedAt := f.clk.Now()
+	if err := f.source(t, f.config(time.Time{})).Refresh(context.Background()); err != nil {
+		t.Fatalf("seed the disk copy: %v", err)
+	}
+	f.repo.SetMode(tufharness.Fail)
+	for name, tc := range map[string]struct {
+		embeddedAt time.Time
+		want       sign.RootOrigin
+	}{
+		"embedded built later":     {refreshedAt.Add(time.Hour), sign.RootEmbedded},
+		"embedded built earlier":   {refreshedAt.Add(-time.Hour), sign.RootFromDisk},
+		"tie":                      {refreshedAt, sign.RootFromDisk},
+		"embedded of unknown time": {time.Time{}, sign.RootFromDisk},
+	} {
+		src := f.source(t, f.config(tc.embeddedAt))
+		if got := src.Status().Origin; got != tc.want {
+			t.Errorf("%s: origin = %s, want %s", name, got, tc.want)
+		}
+		under := f.served
+		if tc.want == sign.RootEmbedded {
+			under = f.embedded
+		}
+		if err := verifiesUnder(t, src, under); err != nil {
+			t.Errorf("%s: bundle under the root in use: %v", name, err)
+		}
+	}
+}
+
+// Spec: §4.7.11 — after a success the next refresh waits the interval
+// times a factor between 0.9 and 1.1.
+func TestTUFRoot_IntervalJitter(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		jitter float64
+		want   time.Duration
+	}{{0, 9 * time.Hour}, {0.999999, 11 * time.Hour}} {
+		f := newTUFFixture(t)
+		cfg := f.config(time.Time{})
+		cfg.Refresh = 10 * time.Hour
+		s := newSchedule(t, &cfg, f, tc.jitter)
+		s.want(0)
+		if diff := s.next() - tc.want; diff < -time.Second || diff > time.Second {
+			t.Errorf("jitter %v: delay off %v by %v", tc.jitter, tc.want, diff)
+		}
+		s.stop()
 	}
 }
