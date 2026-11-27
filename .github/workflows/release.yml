@@ -307,6 +307,42 @@ jobs:
             go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
           done
           ls -la dist/
+      - name: Refuse a test build
+        # The end-to-end harness builds binaries with the podiumtest tag,
+        # which compiles hidden test flags. One of them sends the GitHub API
+        # request of `podium layer register --trust-preset` and `podium
+        # attest init`, with the token in GH_TOKEN, to another host, so a
+        # shipped binary must not carry it (spec §7.3.1, §7.3.5). The build
+        # settings that `go version -m` reads survive -s -w. The linux/arm64
+        # binary is cross-compiled on an amd64 runner and gets the settings
+        # check alone; every other target also runs the binary and requires
+        # it to refuse the flag as undefined.
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          SUFFIX: ${{ matrix.suffix }}
+          RUNNABLE: ${{ matrix.goarch == 'amd64' || matrix.goos == 'darwin' }}
+        run: |
+          set -eu
+          for cmd in podium podium-server podium-mcp; do
+            bin="dist/${cmd}-${GOOS}-${GOARCH}${SUFFIX}"
+            if go version -m "${bin}" | grep -Eq '^[[:space:]]+build[[:space:]]+-tags=.*podiumtest'; then
+              echo "::error::${bin} was built with the podiumtest tag" >&2
+              exit 1
+            fi
+          done
+          if [ "${RUNNABLE}" = 'true' ]; then
+            bin="dist/podium-${GOOS}-${GOARCH}${SUFFIX}"
+            for sub in 'layer register --id x --repo https://github.com/acme/x' 'attest init'; do
+              rc=0
+              # shellcheck disable=SC2086 # $sub holds the subcommand words
+              out=$("${bin}" ${sub} --test-github-api http://127.0.0.1:1 2>&1) || rc=$?
+              if [ "${rc}" != 2 ] || ! printf '%s' "${out}" | grep -q 'flag provided but not defined: -test-github-api'; then
+                echo "::error::${bin} ${sub} did not refuse --test-github-api (exit ${rc}): ${out}" >&2
+                exit 1
+              fi
+            done
+          fi
       - name: Package archive for Homebrew tap / Scoop bucket
         # Brew + scoop consumers expect a single archive per platform
         # containing all three binaries with their canonical names

@@ -1,0 +1,33 @@
+# Signs the Podium layers of this repository on each push to main by
+# calling the shared signing workflow of acme/.github, which publishes the
+# signed state to the podium/signed branch. A registry tracks that branch.
+# Written by `podium attest init` (podium v1.2.3).
+name: podium-attest
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'skills/.podium/attestations/**'
+  workflow_dispatch:
+    inputs:
+      recover:
+        description: Rebuild the attestation directories from this run's bundles alone
+        type: boolean
+        default: false
+
+concurrency:
+  group: podium-attest
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  attest:
+    uses: acme/.github/.github/workflows/podium-attest.yml@main
+    with:
+      roots: skills
+      recover: ${{ github.event_name == 'workflow_dispatch' && inputs.recover }}

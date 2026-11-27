@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/attest/ghactions"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
@@ -22,18 +23,21 @@ import (
 )
 
 // attestCmd writes the §7.3.5 subjects of one layer for a signing tool, and
-// dispatches the import and check subcommands. A first argument of import or
-// check names the subcommand, so a <dir> of either name is written ./import
-// or ./check.
+// dispatches the init, import, and check subcommands. A first argument of
+// init, import, or check names the subcommand, so a <dir> of such a name is
+// written ./init, ./import, or ./check.
 //
 //	podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>]
 //	              [--max-subjects <n>] [--format checksums|statement]
+//	podium attest init [<dir>] [--root <subpath>]... [--shared-workflow <owner>/<repo>] [--reusable] [--force]
 //	podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]
 //	podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements <file>]
 func attestCmd(args []string) int {
 	ctx := context.Background()
 	if len(args) > 0 {
 		switch args[0] {
+		case "init":
+			return runAttestInit(ctx, args[1:], attestInitEnv{getenv: os.Getenv, apiBase: ghactions.APIBase, stdout: os.Stdout, stderr: os.Stderr})
 		case "import":
 			return runAttestImport(ctx, args[1:], os.Stdout, os.Stderr)
 		case "check":
