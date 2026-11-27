@@ -181,7 +181,7 @@ func runBin(t testing.TB, bin, cwd string, env []string, stdin []byte, timeout t
 	if ctx.Err() == context.DeadlineExceeded {
 		t.Fatalf("%s %s timed out after %s\nstderr:\n%s", bin, strings.Join(args, " "), timeout, se.String())
 	}
-	res := cliResult{Stdout: so.String(), Stderr: se.String()}
+	res := cliResult{Stdout: so.String(), Stderr: cmdharness.StripCoverageNoise(se.String())}
 	if ee, ok := err.(*exec.ExitError); ok {
 		res.Exit = ee.ExitCode()
 	} else if err != nil {
