@@ -541,7 +541,9 @@ type Store interface {
 	//
 	// DataMigrationApplied reports whether the named one-time rewrite of
 	// stored values has completed against this store. The marker is global
-	// to the store rather than per tenant.
+	// to the store rather than per tenant. The same table carries
+	// deployment-level markers that are not data migrations, such as
+	// DeploymentMarkerVerifiedIdentity.
 	DataMigrationApplied(ctx context.Context, name string) (bool, error)
 	// SetDataMigrationApplied records (applied true) or removes (applied
 	// false) the named marker. Both directions are idempotent, so replicas
@@ -624,6 +626,19 @@ type Store interface {
 // migrate-to-standard clears the marker on its target so the rewrite runs
 // again over the rows it copied, by the same rule.
 const DataMigrationContentHashFraming = "content-hash-framing"
+
+// DeploymentMarkerVerifiedIdentity names the record that an earlier registry
+// start installed a request-time identity verifier. It lives in the same
+// store-global marker table as the data-migration markers, because that table
+// is the store's one place for deployment-level state: one row per deployment
+// rather than per tenant, outside the per-org schemas on Postgres. Every start
+// with a verifier sets it, a start without one is refused while it is set, and
+// the acknowledged removal clears it. The in-memory store keeps nothing across
+// restarts, so the record never outlives the process there and the refusal
+// never applies to it.
+//
+// Spec: §13.10 (Identity provider removed between starts)
+const DeploymentMarkerVerifiedIdentity = "identity-verified"
 
 // SuiteName is the canonical name of the conformance suite (§9.3).
 // Implementations import test/conformance/store and reference this

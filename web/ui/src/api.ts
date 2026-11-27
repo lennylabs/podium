@@ -719,6 +719,10 @@ export interface LayerSecretResult {
   layer: LayerRecord;
   webhook_url?: string;
   webhook_secret?: string;
+  /** warnings carries the §7.3.1 unapplied-visibility warning: on a registry
+   * that verifies no caller, a layer that is not public is visible to every
+   * caller. The registry omits the member when there is none. */
+  warnings?: string[];
 }
 
 export function registerLayer(body: LayerRegistration): Promise<LayerSecretResult> {
@@ -790,8 +794,16 @@ export function reorderLayers(order: string[]): Promise<unknown> {
   });
 }
 
-export function restoreLayer(id: string): Promise<unknown> {
-  return request<unknown>(`${paths.layers}/restore${query({ id })}`, { ...write, method: 'POST' });
+/** LayerRestoreResult is the restore response: the restored layer's ID and,
+ * on a registry that verifies no caller, the §7.3.1 unapplied-visibility
+ * warning for a restored layer that is not public. */
+export interface LayerRestoreResult {
+  restored: string;
+  warnings?: string[];
+}
+
+export function restoreLayer(id: string): Promise<LayerRestoreResult> {
+  return request<LayerRestoreResult>(`${paths.layers}/restore${query({ id })}`, { ...write, method: 'POST' });
 }
 
 /** listDeletedLayers returns the layers still inside the recovery window. An

@@ -16,6 +16,7 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 	t.Setenv("PODIUM_WEB_UI", "")
 	t.Setenv("PODIUM_WEB_UI_ALLOW_PUBLIC_BIND", "")
 	t.Setenv("PODIUM_NO_EMBEDDINGS", "")
+	t.Setenv("PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL", "")
 	// An unset PODIUM_SIGN already resolves to registry-key (§13.10), so the
 	// fixture starts from none to make the flag's side effect observable.
 	t.Setenv("PODIUM_SIGN", "none")
@@ -23,7 +24,7 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 	t.Setenv("PODIUM_POSTGRES_DSN", "")
 	t.Setenv("PODIUM_CONFIG_FILE", filepath.Join(t.TempDir(), "missing.yaml"))
 
-	code := serveCmd([]string{"--web-ui", "--web-ui-allow-public-bind", "--no-embeddings", "--sign", "registry-key"})
+	code := serveCmd([]string{"--web-ui", "--web-ui-allow-public-bind", "--no-embeddings", "--sign", "registry-key", "--allow-identity-provider-removal"})
 	if code != 1 {
 		t.Fatalf("serveCmd exit = %d, want 1 (validate fails on missing PODIUM_POSTGRES_DSN)", code)
 	}
@@ -32,6 +33,7 @@ func TestServeCmd_StandaloneFlagsSetEnv(t *testing.T) {
 		{"PODIUM_WEB_UI_ALLOW_PUBLIC_BIND", "true"},
 		{"PODIUM_NO_EMBEDDINGS", "true"},
 		{"PODIUM_SIGN", "registry-key"},
+		{"PODIUM_ALLOW_IDENTITY_PROVIDER_REMOVAL", "true"},
 	} {
 		if got := os.Getenv(c.env); got != c.want {
 			t.Errorf("%s = %q, want %q (flag side effect)", c.env, got, c.want)

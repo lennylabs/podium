@@ -10360,7 +10360,7 @@ step 7 catches.
      echo "[$*] exit=$?"; tail -2 "$WORK/refuse.log"
    }
    refuse PODIUM_IDENTITY_PROVIDER=
-   refuse PODIUM_IDENTITY_PROVIDER=oidc
+   refuse PODIUM_IDENTITY_PROVIDER=external
    refuse PODIUM_IDENTITY_PROVIDER= PODIUM_PUBLIC_MODE=true
    refuse PODIUM_IDENTITY_PROVIDER=oauth-device-code
    ```
@@ -10376,7 +10376,7 @@ step 7 catches.
    **Expect.** The first three runs exit non-zero with
    `config.multitenant_no_verifier`. Each message names
    `injected-session-token`, `oidc-jwt`, and `trusted-headers`, and each
-   contains `unset PODIUM_MULTI_TENANT`. The `oidc` run quotes `"oidc"`, and
+   contains `unset PODIUM_MULTI_TENANT`. The `external` run quotes `"external"`, and
    the public-mode run contains `unset PODIUM_PUBLIC_MODE`. The fourth run
    exits non-zero with `config.identity_provider_unverified`, and its message
    contains `unset PODIUM_IDENTITY_PROVIDER` and `PODIUM_MULTI_TENANT`. Any

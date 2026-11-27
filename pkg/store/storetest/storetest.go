@@ -42,6 +42,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("RehashManifestSameHashSignsOnce", func(t *testing.T) { rehashManifestSameHashSignsOnce(t, factory(t)) })
 	t.Run("RehashManifestSignatureCAS", func(t *testing.T) { rehashManifestSignatureCAS(t, factory(t)) })
 	t.Run("DataMigrationMarker", func(t *testing.T) { dataMigrationMarker(t, factory(t)) })
+	t.Run("VerifiedIdentityMarker", func(t *testing.T) { verifiedIdentityMarker(t, factory(t)) })
 	t.Run("ListManifestsStableOrder", func(t *testing.T) { listManifestsStableOrder(t, factory(t)) })
 	t.Run("DependencyEdges", func(t *testing.T) { dependencyEdges(t, factory(t)) })
 	t.Run("DependentsScopedToTenant", func(t *testing.T) { dependentsScopedToTenant(t, factory(t)) })
@@ -512,6 +513,36 @@ func dataMigrationMarker(t *testing.T, s store.Store) {
 	if unknown || !set || unrelated || cleared {
 		t.Errorf("marker: unknown %v, set %v, unrelated name %v, cleared %v; want false, true, false, false",
 			unknown, set, unrelated, cleared)
+	}
+}
+
+// Spec: §13.10 (Identity provider removed between starts) — the
+// verified-identity record shares the marker table with the §13.4
+// data-migration markers, and neither name sets or clears the other. A store
+// that confused them would either refuse a start with no identity provider
+// because the content-hash rewrite completed, or rerun the rewrite after an
+// acknowledged identity-provider removal.
+func verifiedIdentityMarker(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	const identity = store.DeploymentMarkerVerifiedIdentity
+	const migration = store.DataMigrationContentHashFraming
+
+	must(t, s.SetDataMigrationApplied(ctx, migration, true))
+	beforeSet, err := s.DataMigrationApplied(ctx, identity)
+	must(t, err)
+	must(t, s.SetDataMigrationApplied(ctx, identity, true))
+	must(t, s.SetDataMigrationApplied(ctx, identity, true))
+	set, err := s.DataMigrationApplied(ctx, identity)
+	must(t, err)
+	must(t, s.SetDataMigrationApplied(ctx, identity, false))
+	cleared, err := s.DataMigrationApplied(ctx, identity)
+	must(t, err)
+	migrationKept, err := s.DataMigrationApplied(ctx, migration)
+	must(t, err)
+	if beforeSet || !set || cleared || !migrationKept {
+		t.Errorf("verified-identity record: before set %v, set %v, cleared %v, content-hash marker kept %v; want false, true, false, true",
+			beforeSet, set, cleared, migrationKept)
 	}
 }
 

@@ -169,7 +169,7 @@ A single-node deployment is single-tenant by default. Setting `PODIUM_MULTI_TENA
 
 | Configuration | Startup error |
 |:--|:--|
-| No identity provider, a provider value the registry does not recognize, or public mode with no identity provider | `config.multitenant_no_verifier` |
+| No identity provider, `external`, or public mode with no identity provider | `config.multitenant_no_verifier` |
 | A recognized provider the registry does not verify, such as `oauth-device-code` | `config.identity_provider_unverified` |
 
 A single node omits the Postgres schema-per-org isolation and row-level security the Clustered deployment mode provides for multi-tenant deployments, and it runs no replicas.
@@ -201,6 +201,7 @@ podium serve --standalone --public-mode --layer-path /path/to/artifacts/
 - Public mode refuses the re-embed and overlap rebuild passes, which query the embedding provider and the search index for every artifact, every layer write, and erasure, unless the request carries the operator token. The layer writes are `podium layer register`, `unregister`, `update`, `restore`, `reorder`, and `reingest`, and erasure is `podium admin erase`. Set `PODIUM_OPERATOR_TOKEN` to a secret of at least 32 characters on the registry, and set the same value in the environment of the operator who runs `podium admin reembed`, `podium admin rebuild-overlap`, `podium admin erase`, or a `podium layer` command. With the variable unset, every one of these commands fails with `403 auth.forbidden`, and the registry serves the layers its startup configuration declares and accepts no layer change over the API. [Operator token in public mode](../../reference/http-api#operator-token-in-public-mode) states the rule.
 - The layer list stays open to every caller. The web UI sends no operator token, so it offers no layer control in public mode.
 - The audit log records `caller.identity = "system:public"` for every call, so downstream consumers can filter on it.
+- In addition to the startup banner, the registry logs a warning at startup that lists the stored layers with no `public` grant, because every caller sees them in public mode. A `podium layer register`, `update`, or `restore` of such a layer writes a warning for it to standard error. Both state that the layer's declaration takes effect once public mode is turned off and an identity provider is configured. [Restricted layers on a registry that verifies no caller](../content/access-control#restricted-layers-on-a-registry-that-verifies-no-caller) describes both.
 
 Public mode is appropriate when both of the following hold:
 
