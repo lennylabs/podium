@@ -11,6 +11,7 @@ import (
 
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // ArtifactRecord is one artifact discovered under a layer's tree, with its
@@ -504,14 +505,37 @@ func loadPlainSkillRecord(layer Layer, dir string) (ArtifactRecord, error) {
 	return rec, nil
 }
 
+// VersionControlName is the name of the version-control data a package can
+// hold: a Git repository directory, or the .git file of a submodule or a
+// linked worktree.
+const VersionControlName = ".git"
+
+// SkipVersionControl reports whether the walk entry name below a package root
+// is version-control data, which §4.4 leaves out of the bundled resource set
+// together with every file below it. Only the exact name counts: a Git
+// working tree lists its repository directory as exactly .git on its own
+// platform, and every other name that resolves to .git stays in the set,
+// where lint.resource_path_reserved refuses it.
+//
+// Spec: §4.4
+func SkipVersionControl(name string) bool {
+	return name == VersionControlName
+}
+
 // captureResources records every file under dir, the package directory
 // below layerRoot, as a bundled resource of rec, except the package root's
-// manifests and the files of a nested package.
+// manifests, the files of a nested package, and version-control data.
 func captureResources(rec *ArtifactRecord, layerRoot, dir string) error {
 	fsys := os.DirFS(layerRoot)
 	return filepath.WalkDir(dir, func(path string, d os.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
+		}
+		if path != dir && SkipVersionControl(d.Name()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 		if d.IsDir() {
 			if path == dir {
@@ -586,8 +610,16 @@ func skipNestedPackage(fsys fs.FS, layerRoot, dir string) error {
 // ARTIFACT.md or SKILL.md yields an empty ID and is rejected, so every artifact has an
 // addressable canonical home. "@" is reserved as the reference delimiter in
 // the "<id>@<semver>" and "<id>@sha256:<hash>" grammar; allowing it inside a
-// segment makes a reference split ambiguously. Both the filesystem-source
-// walk and the server ingest walk call this so they share one invariant.
+// segment makes a reference split ambiguously. No segment names .git or
+// .podium under the §7.5.3 aliasing rule: package discovery skips a
+// dot-prefixed directory, but a filesystem resolves GIT~1 or a .git that
+// carries a code point HFS+ ignores to .git, and a consumer writes the ID as
+// a path (the canonical layout, the .podium/resources/<id>/ bucket), so such
+// an ID would reach a repository's .git or Podium's own state. The
+// filesystem-source walk, the workspace overlay walk, and the server ingest
+// walk all call this so they share one invariant.
+//
+// Spec: §4.2, §7.5.3
 func ValidateCanonicalID(id string) error {
 	if id == "" {
 		return errors.New("artifact must live in a subdirectory of the layer (a root-level ARTIFACT.md or SKILL.md has no canonical ID)")
@@ -598,6 +630,9 @@ func ValidateCanonicalID(id string) error {
 		}
 		if strings.Contains(seg, "@") {
 			return fmt.Errorf("canonical ID segment %q must not contain '@' (reserved for the @version or @sha256 suffix)", seg)
+		}
+		if materialize.AliasesDotGit(seg) || materialize.AliasesDotPodium(seg) {
+			return fmt.Errorf("canonical ID segment %q names .git or .podium on some filesystem", seg)
 		}
 	}
 	return nil

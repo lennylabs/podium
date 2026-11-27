@@ -78,6 +78,15 @@ standard error, and leaves it out of the next lock in these cases:
 
 - The path leaves the target, names `.git`, or names Podium's own state under
   `.podium/`.
+- The path has a segment that a filesystem resolves to `.git`, or begins with a
+  segment that resolves to `.podium` and names Podium's state. Sync applies the
+  checks Git applies under `core.protectHFS` and `core.protectNTFS` on every
+  platform, because a lock committed on one platform is read on another. The
+  refused forms include a different letter case (`.GIT`), a code point that
+  HFS+ ignores (`.git` preceded by U+200C ZERO WIDTH NON-JOINER), the trailing
+  spaces and periods that NTFS strips (`.git.`), an NTFS alternate data stream
+  (`.git::$INDEX_ALLOCATION`), and the NTFS short name `GIT~1`. Names such as
+  `.github`, `.gitignore`, and `.gitkeep` are unaffected.
 - The path reaches a symbolic link that resolves outside the target.
 - The path names a symbolic link, a directory, or another file that is not a
   regular file.
@@ -95,6 +104,12 @@ A forged lock entry cannot delete a file whose bytes its author cannot predict,
 such as a file with local edits. A file with predictable content, such as an
 empty file, a `.gitkeep`, or a standard license text, has a predictable hash,
 so a forged entry can name it whether or not Git tracks it.
+
+Sync applies the same rule to the paths it writes, so an artifact whose output
+path has such a segment is not written. A registry or workspace overlay package
+whose directory name has such a segment, such as `GIT~1/hooks`, is refused when
+the layer is read, and `podium sync` exits with an error that names the
+segment.
 
 A directory that is a symbolic link to another directory inside the target is
 followed, as it is when sync writes. A shared config file that is a symbolic

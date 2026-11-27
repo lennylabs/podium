@@ -220,7 +220,7 @@ The workspace local overlay is a per-developer set of artifact packages (an `ART
 
 The MCP server watches the resolved path via fsnotify and re-indexes on change. `podium sync` reads it once per invocation and again on each watcher event when `--watch` is set. The SDK reads it on each `Client.search_artifacts` and `Client.load_artifact` call (cached for the duration of a `session_id`).
 
-Format: the same package layout (§4.2) and frontmatter as the registry.
+Format: the same package layout (§4.2) and frontmatter as the registry. The §4.2 canonical-ID rules apply to an overlay package, so an overlay that holds a package whose canonical ID has a segment that names `.git` or `.podium` under the §7.5.3 aliasing rule fails to load: `podium sync` exits with an error, and the MCP server and the SDKs skip the overlay with a warning that names its path, as the MCP server does for a missing overlay path (§6.9), and serve none of its packages.
 
 **Collisions with registry-side artifacts.** The workspace local overlay is an exception to the §4.6 collision rule. An overlay artifact whose canonical ID matches an artifact in the caller's composed registry-side view replaces that artifact in the consumer's view on every consumer (the MCP server, `podium sync`, and the SDKs). The consumer applies no ingest rule to an overlay artifact and serves it as authored. The collision is neither rejected nor reported. The overlay is per-developer, is never ingested or shared, and exists for the local iteration loop, so a replacement affects only the developer who wrote it. Promoting the artifact to a shared layer subjects it to the §4.6 rules, and `podium lint` reports an `ARTIFACT.md` that the §4.6 no-inheritance rule or the §4.1 removed-type rule refuses.
 

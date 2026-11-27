@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/lennylabs/podium/internal/testharness"
 )
 
 func TestEnvDefault(t *testing.T) {
@@ -240,6 +242,38 @@ func TestNewServer_MissingOverlayWarnsOnceAndSkips(t *testing.T) {
 	// warning must not be repeated.
 	if n := strings.Count(out, absent); n != 1 {
 		t.Errorf("warning emitted %d times, want exactly once", n)
+	}
+}
+
+// Spec: §4.2, §6.4, §6.9 — an overlay that holds a package whose canonical ID
+// has a segment naming .git under the §7.5.3 aliasing rule fails to load, so
+// the MCP server skips the overlay with a warning naming the path, as it does
+// for a missing overlay path, and serves none of its packages.
+func TestNewServer_AliasedOverlayPackageWarnsAndSkips(t *testing.T) {
+	ws := t.TempDir()
+	overlayDir := filepath.Join(ws, ".podium", "overlay")
+	testharness.WriteTree(t, ws,
+		testharness.WriteTreeOption{Path: ".podium/overlay/GIT~1/ARTIFACT.md", Content: "---\ntype: agent\nversion: 0.1.0\n---\n\nhooks\n"},
+		testharness.WriteTreeOption{Path: ".podium/overlay/draft/ARTIFACT.md", Content: "---\ntype: agent\nversion: 0.1.0\n---\n\ndraft\n"},
+	)
+	cfg := &config{
+		registry:    "http://127.0.0.1:1",
+		harness:     "none",
+		cacheDir:    t.TempDir(),
+		cacheMode:   "always-revalidate",
+		overlayPath: overlayDir,
+	}
+	var srv *mcpServer
+	var err error
+	out := captureStderr(t, func() { srv, err = newServer(cfg) })
+	if err != nil {
+		t.Fatalf("newServer: %v", err)
+	}
+	if len(srv.overlay) != 0 {
+		t.Errorf("overlay records = %d, want the overlay skipped", len(srv.overlay))
+	}
+	if !strings.Contains(out, overlayDir) || !strings.Contains(out, "names .git or .podium") {
+		t.Errorf("startup warning = %q, want the overlay path and the canonical-ID refusal", out)
 	}
 }
 

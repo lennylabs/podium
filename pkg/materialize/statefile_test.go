@@ -667,7 +667,7 @@ func TestRefusalMessages_PrefixOnce(t *testing.T) {
 		text string
 	}{
 		{".podium link", podiumErr, []error{ErrUnconfinedPath, ErrPodiumNotDirectory}, `materialize: .podium is a symbolic link or not a directory: ".podium/sync.lock"`},
-		{"recorded-path rule", ruleErr, []error{ErrUnconfinedPath, ErrUnsafeRecordedPath}, `materialize: path is not a regular file confined to the destination: ".git/hooks/x": unsafe recorded path: .git segment`},
+		{"recorded-path rule", ruleErr, []error{ErrUnconfinedPath, ErrUnsafeRecordedPath}, `materialize: path is not a regular file confined to the destination: ".git/hooks/x": unsafe recorded path: .git segment ".git"`},
 	} {
 		for _, w := range tc.want {
 			if !errors.Is(tc.err, w) {

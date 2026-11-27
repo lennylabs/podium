@@ -6,7 +6,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 )
 
 // ErrStateFileIsDirectory signals a directory at a state file's own name,
@@ -184,7 +183,7 @@ func inspectStateDir(root *os.Root, rel string, dirs []string, i int) (bool, err
 		return true, nil
 	case err != nil:
 		return false, fmt.Errorf("%w: %q: %v", ErrUnconfinedPath, rel, err)
-	case !info.IsDir() && i == 0 && strings.EqualFold(dirs[0], ".podium"):
+	case !info.IsDir() && i == 0 && AliasesDotPodium(dirs[0]):
 		return false, podiumDirError(rel)
 	case !info.IsDir():
 		return false, fmt.Errorf("%w: %q: %s is a symbolic link or not a directory", ErrUnconfinedPath, rel, filepath.ToSlash(name))
