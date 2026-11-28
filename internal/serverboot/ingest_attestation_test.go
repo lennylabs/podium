@@ -196,3 +196,34 @@ func TestTrustPolicyChangeHook(t *testing.T) {
 	}
 	trustPolicyChangeHook(errListLinks{st}, &ingest.AttestationConfig{}, nil, nil, nil)(ctx, lc, "alice")
 }
+
+// Spec: §4.7.11 (Re-evaluation) — the hook requests an ingest cycle of the
+// changed layer, which runs outside the request and logs a failure; the
+// start re-evaluates the stored layers of each tenant and logs a failure.
+func TestTrustPolicyChangeReingestAndStart(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	ran := make(chan string, 2)
+	reingest := backgroundReingest(ctx, func(_ context.Context, lc store.LayerConfig) error {
+		ran <- lc.ID
+		return errors.New("source down")
+	})
+	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, nil, nil, reingest)(ctx, store.LayerConfig{TenantID: "t", ID: "L", TrustMode: "none"}, "alice")
+	select {
+	case id := <-ran:
+		if id != "L" {
+			t.Errorf("reingest of %s", id)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the hook requested no ingest cycle")
+	}
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x", TrustMode: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingSink{}
+	reevaluateAtStart(ctx, st, []string{"t"}, &ingest.AttestationConfig{}, sink, nil)
+	reevaluateAtStart(ctx, errListLinks{st}, []string{"t"}, &ingest.AttestationConfig{}, nil, nil)
+}
