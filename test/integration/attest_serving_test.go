@@ -367,7 +367,7 @@ func TestAttestServing_RevalidationCoversTheMembers(t *testing.T) {
 
 	// A new link.
 	at := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
-	if err := f.st.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
+	if _, err := f.st.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
 		Bundles: []store.StoredAttestation{{Digest: "sha256:" + strings.Repeat("e", 64), Bundle: []byte("x"), AttestedAt: at, StoredAt: at}},
 		Versions: []store.VersionAttestations{{ArtifactID: "finance/pay", Version: "1.0.0", Links: []store.AttestationLink{{
 			PredicateType: "https://example.com/scan/v1", Instance: "github", SignerIssuer: sh.DefaultIssuer, SignerIdentity: "scanner@acme.com",

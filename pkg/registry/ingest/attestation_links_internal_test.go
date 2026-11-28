@@ -80,7 +80,7 @@ func TestUnchangedRow(t *testing.T) {
 	var p *linkPlan
 	p.version(&rec, "a/x", "1.0.0", nil, nil)
 	p.outcome(rows["a/x"][0], &store.VersionOutcome{Outcome: store.OutcomeVerified})
-	if err := p.write(context.Background(), nil, ""); err != nil {
+	if _, err := p.write(context.Background(), nil, ""); err != nil {
 		t.Error(err)
 	}
 	q := &linkPlan{cycle: &AttestationCycle{mode: "require"}}

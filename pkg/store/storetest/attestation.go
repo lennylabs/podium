@@ -206,19 +206,27 @@ func attestationStorage(t *testing.T, s store.Store) {
 	}
 	verified := store.VersionOutcome{Outcome: store.OutcomeVerified, EvaluatedAt: &at}
 	var got []string
-	note := func(label string, err error) { got = append(got, fmt.Sprintf("%s: %v", label, err)) }
-	note("other claim", s.WriteAttestations(ctx, "t", "L", "c0", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
-	note("write", s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{
+	note := func(label string) func(store.AttestationWriteResult, error) {
+		return func(r store.AttestationWriteResult, err error) {
+			got = append(got, fmt.Sprintf("%s: %v %s", label, err, linksView(r.Updated)))
+		}
+	}
+	note("other claim")(s.WriteAttestations(ctx, "t", "L", "c0", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
+	note("other policy")(s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{Policy: &store.TrustPolicy{Mode: "require"},
+		Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
+	note("write")(s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{Policy: &store.TrustPolicy{},
 		Bundles: []store.StoredAttestation{bundle("d1", "L", &idx), bundle("d2", "L", nil)},
 		Versions: []store.VersionAttestations{{ArtifactID: "a", Version: "1.0.0", Outcome: &verified,
 			Links: []store.AttestationLink{link("public-good", "d1", "verified", "k1"), link("github", "d2", "unverified", "dropped")}}},
 	}))
-	note("again", s.WriteAttestations(ctx, "u", "", "", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "U", nil)}}))
-	note("upsert", s.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{
+	note("again")(s.WriteAttestations(ctx, "u", "", "", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "U", nil)}}))
+	note("upsert")(s.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{
 		Bundles: []store.StoredAttestation{bundle("d1", "M", nil)},
 		Versions: []store.VersionAttestations{
 			{ArtifactID: "a", Version: "1.0.0", Links: []store.AttestationLink{link("public-good", "d2", "verified", "k2")},
-				Updates: []store.AttestationLink{link("github", "d1", "verified", "x"), link("github", "d2", "verified", "k3")},
+				Updates: []store.LinkUpdate{{Link: link("github", "d1", "verified", "x"), ReadVerdict: "unverified"},
+					{Link: link("github", "d2", "verified", "y"), ReadVerdict: "verified"},
+					{Link: link("github", "d2", "verified", "k3"), ReadVerdict: "unverified"}},
 				Outcome: &store.VersionOutcome{Outcome: store.OutcomeNotEvaluated}, OutcomeIf: store.OutcomeFailed},
 			{ArtifactID: "b", Version: "1.0.0", ReplaceLinks: true, Links: []store.AttestationLink{link("public-good", "d1", "verified", "k1")},
 				Outcome: &store.VersionOutcome{Outcome: store.OutcomeVerified, EvaluatedAt: &at}, OutcomeIf: store.OutcomeFailed},
@@ -236,7 +244,7 @@ func attestationStorage(t *testing.T, s store.Store) {
 	got = append(got, fmt.Sprintf("%s %s %s %s %s %d %s", a.Digest, a.Bundle, a.LayerID, a.SourceRepositoryRef, a.SignerIdentity, *a.LogIndex,
 		a.AttestedAt.Format(time.RFC3339Nano)))
 	_, err = s.GetAttestation(ctx, "u", "d2")
-	note("other tenant", err)
+	got = append(got, fmt.Sprintf("other tenant: %v", err))
 	// Root records.
 	r1 := store.RootRecord{Instance: "public-good", RootDigest: "sha256:1", RootTime: at}
 	r2 := store.RootRecord{Instance: "public-good", RootDigest: "sha256:2", RootTime: at.Add(time.Hour)}
@@ -265,10 +273,11 @@ func attestationStorage(t *testing.T, s store.Store) {
 	got = append(got, fmt.Sprint(len(left), " ", left[0].Digest), linksView(links))
 	ts := "2026-11-20T09:14:02.123456Z"
 	want := []string{
-		"other claim: " + store.ErrIngestSuperseded.Error(),
-		"write: <nil>",
-		"again: <nil>",
-		"upsert: <nil>",
+		"other claim: " + store.ErrIngestSuperseded.Error() + " []",
+		"other policy: " + store.ErrIngestSuperseded.Error() + " []",
+		"write: <nil> []",
+		"again: <nil> []",
+		"upsert: <nil> [a@1.0.0 p/github/iss/id=d2:verified:k3]",
 		"verified - " + ts,
 		"verified - " + ts,
 		"verified - -",

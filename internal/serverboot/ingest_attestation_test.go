@@ -183,16 +183,16 @@ func TestTrustPolicyChangeHook(t *testing.T) {
 		Type: "agent", Layer: "L", AttestationOutcome: store.OutcomeVerified}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{Versions: []store.VersionAttestations{{ArtifactID: "a/x", Version: "1.0.0",
+	if _, err := st.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{Versions: []store.VersionAttestations{{ArtifactID: "a/x", Version: "1.0.0",
 		Links: []store.AttestationLink{{PredicateType: "p", Instance: "github", Digest: "sha256:d", Verdict: store.VerdictVerified, VerifiedUnder: "k", LinkedAt: at}}}}}); err != nil {
 		t.Fatal(err)
 	}
 	sink := &recordingSink{}
 	lc := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", TrustMode: "none"}
-	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, sink, nil)(ctx, lc, "alice")
+	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, sink, nil, nil)(ctx, lc, "alice")
 	events := sink.events
 	if len(events) != 1 || events[0].Type != audit.EventLayerAttestationLinksDowngraded || events[0].Caller != "alice" || events[0].Context["cause"] != "policy_change" {
 		t.Fatalf("events %+v", events)
 	}
-	trustPolicyChangeHook(errListLinks{st}, &ingest.AttestationConfig{}, nil, nil)(ctx, lc, "alice")
+	trustPolicyChangeHook(errListLinks{st}, &ingest.AttestationConfig{}, nil, nil, nil)(ctx, lc, "alice")
 }

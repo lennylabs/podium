@@ -726,11 +726,6 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			})
 			continue
 		}
-		// Spec: §4.7.11 (Attestation outcome) — a version the cycle stores
-		// carries the outcome the cycle evaluated.
-		if o := att.versionOutcome(verdict, rec.ID, false, now); o != nil {
-			mr.AttestationOutcome, mr.AttestationFailure, mr.AttestationEvaluatedAt = o.Outcome, o.Failure, o.EvaluatedAt
-		}
 
 		// §4.7.8 quota enforcement: refuse the artifact if accepting
 		// it would push current storage past the configured budget.
@@ -794,7 +789,10 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 			plan.version(&rec, mr.ArtifactID, mr.Version, att.versionOutcome(verdict, rec.ID, true, now), storedRow(rowsByID, mr.ArtifactID, mr.Version))
 			continue
 		}
-		plan.version(&rec, mr.ArtifactID, mr.Version, nil, nil)
+		// Spec: §4.7.11 (Attestation outcome) — a version the cycle stores
+		// holds not_evaluated until the cycle's link write gives it the
+		// outcome the cycle evaluated, under the policy it claimed under.
+		plan.version(&rec, mr.ArtifactID, mr.Version, att.versionOutcome(verdict, rec.ID, false, now), nil)
 		res.Accepted++
 		res.Ingested = append(res.Ingested, IngestedArtifact{ArtifactID: mr.ArtifactID, Version: mr.Version, Accepted: true})
 
@@ -897,8 +895,14 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// With an ingest claim, the store checks in the tombstoning transaction
 	// that no later cycle of the layer claimed it, because that cycle's
 	// snapshot can be the newer one, and a superseded cycle removes nothing.
-	if err := plan.write(ctx, st, req.IngestClaim); err != nil {
+	plan.clearRest(rowsByID)
+	superseded, err := plan.write(ctx, st, req.IngestClaim)
+	if err != nil {
 		return nil, err
+	}
+	if superseded {
+		res.Removed, res.Superseded = []string{}, true
+		return res, nil
 	}
 	res.Removed = removedArtifacts(rowsByID, req.LayerID, inSnapshot)
 	if len(res.Removed) > 0 || req.IngestClaim != "" {

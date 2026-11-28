@@ -22,6 +22,7 @@ import (
 const (
 	reevalCauseCycle        = "cycle"
 	reevalCausePolicyChange = "policy_change"
+	reevalCauseStart        = "start"
 )
 
 // ConstraintLinkDowngraded is the constraint of the outcome a re-evaluation
@@ -190,6 +191,39 @@ func (a *AttestationCycle) reevaluate(ctx context.Context, st store.Store, onWri
 //
 // Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy)
 func (c *AttestationConfig) Reevaluate(ctx context.Context, st store.Store, lc store.LayerConfig, clk clock.Clock, emit AuditEmitterFunc) error {
+	return c.reevaluateClaimless(ctx, st, lc, clk, emit, reevalCausePolicyChange, nil)
+}
+
+// ReevaluateStoredLayers runs the §4.7.11 re-evaluation of every live layer
+// of tenantID that a start finds, after it seeded the declared and bootstrap
+// layers and loaded the trusted roots, so a policy that a declaration, the
+// trust default, or a replaced root changed between two starts is
+// re-evaluated before the registry serves. It reads the tenant's versions
+// once for every layer, and re-evaluates each layer even when another fails,
+// returning the first failure.
+//
+// Spec: §4.7.11 (Re-evaluation)
+func (c *AttestationConfig) ReevaluateStoredLayers(ctx context.Context, st store.Store, tenantID string, clk clock.Clock, emit AuditEmitterFunc) error {
+	layers, err := st.ListLayerConfigs(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("ingest: read the layers of tenant %s: %w", tenantID, err)
+	}
+	rows, err := st.ListManifestsIncludingDeleted(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("ingest: read the versions of tenant %s: %w", tenantID, err)
+	}
+	var first error
+	for _, lc := range layers {
+		if err := c.reevaluateClaimless(ctx, st, lc, clk, emit, reevalCauseStart, rows); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
+}
+
+// reevaluateClaimless runs a re-evaluation that holds no ingest claim, with
+// the tenant's versions rows when the caller read them.
+func (c *AttestationConfig) reevaluateClaimless(ctx context.Context, st store.Store, lc store.LayerConfig, clk clock.Clock, emit AuditEmitterFunc, cause string, rows []store.ManifestRecord) error {
 	if c == nil {
 		c = &AttestationConfig{}
 	}
@@ -200,7 +234,7 @@ func (c *AttestationConfig) Reevaluate(ctx context.Context, st store.Store, lc s
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	r := reevaluation{cfg: c, st: st, layer: lc, clock: clk, audit: emit, cause: reevalCausePolicyChange}
+	r := reevaluation{cfg: c, st: st, layer: lc, clock: clk, audit: emit, cause: cause, clearAll: true, rows: rows}
 	_, err := r.run(ctx)
 	return err
 }
@@ -220,7 +254,21 @@ type reevaluation struct {
 	// each selected bundle.
 	policy policyState
 	cycle  *AttestationCycle
+	// clearAll makes a re-evaluation under none set every version of the
+	// layer to not_evaluated, which a claim-less re-evaluation does. A cycle
+	// leaves that to its own write, which reads the versions anyway. rows
+	// holds the tenant's versions when the caller read them.
+	clearAll bool
+	rows     []store.ManifestRecord
 }
+
+// checkKey names a decision about one stored bundle under the instance a
+// link keys it on: a requirement accepts a link only through a signer of
+// that instance.
+type checkKey struct{ digest, instance string }
+
+// keyOf returns the check key of a link.
+func keyOf(l store.AttestationLink) checkKey { return checkKey{l.Digest, l.Instance} }
 
 // linkCheck is what a re-evaluation decided about one stored bundle: the
 // requirements that accept it, empty when none does, and whether the
@@ -248,15 +296,16 @@ func (r *reevaluation) run(ctx context.Context) (policyState, error) {
 		return ps, fmt.Errorf("ingest: read the links of layer %s: %w", r.layer.ID, err)
 	}
 	selected := r.selectLinks(links)
-	if len(selected) == 0 && ps.mode != layer.TrustModeNone {
+	clear := ps.mode == layer.TrustModeNone && r.clearAll
+	if len(selected) == 0 && !clear {
 		return ps, nil
 	}
 	checks, err := r.checkBundles(ctx, selected)
 	if err != nil {
 		return ps, err
 	}
-	w, downgraded := r.writes(ctx, links, selected, checks)
-	if ps.mode == layer.TrustModeNone {
+	w := r.writes(ctx, links, selected, checks)
+	if clear {
 		if err := r.clearOutcomes(ctx, &w); err != nil {
 			return ps, err
 		}
@@ -264,17 +313,36 @@ func (r *reevaluation) run(ctx context.Context) (policyState, error) {
 	if len(w.Versions) == 0 {
 		return ps, nil
 	}
+	if r.claim != "" {
+		// Spec: §4.7.11 (Verified links) — the writes of a cycle apply only
+		// under the policy it claimed under.
+		p := store.PolicyOf(r.layer)
+		w.Policy = &p
+	}
 	if r.onWrite != nil {
 		r.onWrite()
 	}
-	if err := r.st.WriteAttestations(ctx, r.layer.TenantID, r.layer.ID, r.claim, w); err != nil {
+	res, err := r.st.WriteAttestations(ctx, r.layer.TenantID, r.layer.ID, r.claim, w)
+	if err != nil {
 		if errors.Is(err, store.ErrIngestSuperseded) {
 			return ps, err
 		}
 		return ps, fmt.Errorf("ingest: write the re-evaluation of layer %s: %w", r.layer.ID, err)
 	}
-	r.emit(downgraded)
+	r.emit(downgradedDigests(res.Updated))
 	return ps, nil
+}
+
+// downgradedDigests returns, sorted, the digests of the applied updates that
+// changed a link to unverified.
+func downgradedDigests(updated []store.AttestationLink) []string {
+	set := map[string]bool{}
+	for _, l := range updated {
+		if l.Verdict == store.VerdictUnverified {
+			set[l.Digest] = true
+		}
+	}
+	return sortedKeys(set)
 }
 
 // selectLinks returns the verified links the re-evaluation decides.
@@ -297,58 +365,82 @@ func (r *reevaluation) selectLinks(links []store.AttestationLink) []store.Attest
 // root record compares the certificate with the signers alone and decides
 // only a bundle that no signer matches. A bundle the store no longer holds
 // is accepted by no requirement.
-func (r *reevaluation) checkBundles(ctx context.Context, selected []store.AttestationLink) (map[string]linkCheck, error) {
-	out := map[string]linkCheck{}
+func (r *reevaluation) checkBundles(ctx context.Context, selected []store.AttestationLink) (map[checkKey]linkCheck, error) {
+	out := map[checkKey]linkCheck{}
+	raws := map[string]*snapshotBundle{}
 	for _, l := range selected {
-		if _, done := out[l.Digest]; done {
+		k := keyOf(l)
+		if _, done := out[k]; done {
 			continue
 		}
 		if r.policy.mode == layer.TrustModeNone {
-			out[l.Digest] = linkCheck{decided: true}
+			out[k] = linkCheck{decided: true}
 			continue
 		}
-		a, err := r.st.GetAttestation(ctx, r.layer.TenantID, l.Digest)
-		if errors.Is(err, store.ErrNotFound) {
-			out[l.Digest] = linkCheck{decided: true}
-			continue
+		b, ok := raws[l.Digest]
+		if !ok {
+			a, err := r.st.GetAttestation(ctx, r.layer.TenantID, l.Digest)
+			switch {
+			case errors.Is(err, store.ErrNotFound):
+				out[k] = linkCheck{decided: true}
+				continue
+			case err != nil:
+				return nil, fmt.Errorf("ingest: read attestation %s: %w", l.Digest, err)
+			}
+			b = &snapshotBundle{raw: a.Bundle, verified: map[string]*sign.VerifiedAttestation{}, refusal: map[string]sign.AttestationReason{}}
+			raws[l.Digest] = b
 		}
-		if err != nil {
-			return nil, fmt.Errorf("ingest: read attestation %s: %w", l.Digest, err)
-		}
-		c, err := r.check(ctx, a.Bundle)
+		c, err := r.check(ctx, b, l.Instance)
 		if err != nil {
 			return nil, err
 		}
-		out[l.Digest] = c
+		out[k] = c
 	}
 	return out, nil
 }
 
-// check decides one stored bundle.
-func (r *reevaluation) check(ctx context.Context, raw []byte) (linkCheck, error) {
+// check decides one stored bundle under the instance a link keys it on: a
+// process that holds the recorded roots verifies it under that instance for
+// each signer that names it, and a process behind a root record compares the
+// certificate with those signers alone.
+func (r *reevaluation) check(ctx context.Context, b *snapshotBundle, instance string) (linkCheck, error) {
 	if !r.policy.holds {
-		reqs := matchingRequirements(raw, r.layer.TrustRequirements)
+		reqs := matchingRequirements(b.raw, r.layer.TrustRequirements, instance)
 		return linkCheck{accepted: reqs, decided: len(reqs) == 0}, nil
 	}
-	b := &snapshotBundle{raw: raw}
-	if err := r.cycle.evaluate(ctx, b); err != nil {
-		return linkCheck{}, err
-	}
 	var accepted []int
-	for i, v := range b.accepted {
-		if v != nil {
-			accepted = append(accepted, i)
+	for i, req := range r.layer.TrustRequirements {
+		for _, s := range req.Signers {
+			if signerInstance(s) != instance {
+				continue
+			}
+			v, _, err := r.cycle.verifyUnder(ctx, b, s.Instance)
+			if err != nil {
+				return linkCheck{}, err
+			}
+			if v != nil && signerReason(v, s, req) == "" {
+				accepted = append(accepted, i)
+				break
+			}
 		}
 	}
 	return linkCheck{accepted: accepted, decided: true}, nil
 }
 
-// matchingRequirements returns the requirements that have a signer whose
-// issuer, identity, source binding, and ref binding the certificate of raw
-// matches and whose predicate type, where the requirement names one, equals
-// the bundle's. It verifies nothing, so it reads only a bundle the registry
-// verified when it stored it.
-func matchingRequirements(raw []byte, reqs []store.TrustRequirement) []int {
+// signerInstance is the instance a signer names, public-good for none.
+func signerInstance(s store.TrustSigner) string {
+	if s.Instance == "" {
+		return sign.PublicGoodInstance
+	}
+	return s.Instance
+}
+
+// matchingRequirements returns the requirements that have a signer of
+// instance whose issuer, identity, source binding, and ref binding the
+// certificate of raw matches and whose predicate type, where the
+// requirement names one, equals the bundle's. It verifies nothing, so it
+// reads only a bundle the registry verified when it stored it.
+func matchingRequirements(raw []byte, reqs []store.TrustRequirement, instance string) []int {
 	sum, err := sign.InspectAttestationBundle(raw)
 	if err != nil {
 		return nil
@@ -359,7 +451,7 @@ func matchingRequirements(raw []byte, reqs []store.TrustRequirement) []int {
 			continue
 		}
 		for _, s := range req.Signers {
-			if sum.MatchesSigner(layer.VerifierSigner(s)) == nil {
+			if signerInstance(s) == instance && sum.MatchesSigner(layer.VerifierSigner(s)) == nil {
 				out = append(out, i)
 				break
 			}
@@ -369,8 +461,9 @@ func matchingRequirements(raw []byte, reqs []store.TrustRequirement) []int {
 }
 
 // writes builds the link updates and the outcome downgrades of the decided
-// bundles, and returns the digests whose links changed to unverified.
-func (r *reevaluation) writes(ctx context.Context, links, selected []store.AttestationLink, checks map[string]linkCheck) (store.AttestationWrites, []string) {
+// bundles. Each update applies only while the link holds the digest, the
+// verdict, and the key the re-evaluation read.
+func (r *reevaluation) writes(ctx context.Context, links, selected []store.AttestationLink, checks map[checkKey]linkCheck) store.AttestationWrites {
 	now := r.clock.Now().UTC()
 	byVersion := map[[2]string]*store.VersionAttestations{}
 	var order [][2]string
@@ -384,10 +477,10 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 		}
 		return v
 	}
-	downgradedDigests := map[string]bool{}
 	downgradedLinks := map[[2]string]map[store.LinkKey]bool{}
 	for _, l := range selected {
-		c := checks[l.Digest]
+		read := l
+		c := checks[keyOf(l)]
 		switch {
 		case len(c.accepted) > 0 && r.policy.holds:
 			l.VerifiedUnder = r.policy.key
@@ -395,7 +488,6 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 			continue
 		default:
 			l.Verdict, l.VerifiedUnder = store.VerdictUnverified, ""
-			downgradedDigests[l.Digest] = true
 			k := [2]string{l.ArtifactID, l.Version}
 			if downgradedLinks[k] == nil {
 				downgradedLinks[k] = map[store.LinkKey]bool{}
@@ -404,7 +496,7 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 		}
 		l.LinkedAt = now
 		v := version(l)
-		v.Updates = append(v.Updates, l)
+		v.Updates = append(v.Updates, store.LinkUpdate{Link: l, ReadVerdict: read.Verdict, ReadVerifiedUnder: read.VerifiedUnder})
 	}
 	if r.policy.mode != layer.TrustModeNone {
 		r.downgradeOutcomes(ctx, links, checks, downgradedLinks, version, now)
@@ -413,7 +505,7 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 	for _, k := range order {
 		w.Versions = append(w.Versions, *byVersion[k])
 	}
-	return w, sortedKeys(downgradedDigests)
+	return w
 }
 
 // downgradeOutcomes sets the outcome failed on each version that lost a
@@ -422,7 +514,7 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 // accept a remaining link keeps its outcome. A remaining link that the
 // re-evaluation did not decide is credited to the requirements whose signers
 // its certificate matches.
-func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.AttestationLink, checks map[string]linkCheck,
+func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.AttestationLink, checks map[checkKey]linkCheck,
 	downgraded map[[2]string]map[store.LinkKey]bool, version func(store.AttestationLink) *store.VersionAttestations, now time.Time) {
 	handled := map[[2]string]bool{}
 	for _, l := range links {
@@ -457,8 +549,8 @@ func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.Atte
 
 // remainingRequirements returns the requirements a verified link that keeps
 // its verdict counts for.
-func (r *reevaluation) remainingRequirements(ctx context.Context, l store.AttestationLink, checks map[string]linkCheck) []int {
-	if c, ok := checks[l.Digest]; ok && c.decided {
+func (r *reevaluation) remainingRequirements(ctx context.Context, l store.AttestationLink, checks map[checkKey]linkCheck) []int {
+	if c, ok := checks[keyOf(l)]; ok && c.decided {
 		return c.accepted
 	}
 	a, err := r.st.GetAttestation(ctx, r.layer.TenantID, l.Digest)
@@ -472,16 +564,19 @@ func (r *reevaluation) remainingRequirements(ctx context.Context, l store.Attest
 		}
 		return all
 	}
-	return matchingRequirements(a.Bundle, r.layer.TrustRequirements)
+	return matchingRequirements(a.Bundle, r.layer.TrustRequirements, l.Instance)
 }
 
 // clearOutcomes sets the outcome not_evaluated on every version of a layer
 // under none whose outcome is another, which a change of the mode to none
 // requires.
 func (r *reevaluation) clearOutcomes(ctx context.Context, w *store.AttestationWrites) error {
-	rows, err := r.st.ListManifestsIncludingDeleted(ctx, r.layer.TenantID)
-	if err != nil {
-		return fmt.Errorf("ingest: read the versions of layer %s: %w", r.layer.ID, err)
+	rows := r.rows
+	if rows == nil {
+		var err error
+		if rows, err = r.st.ListManifestsIncludingDeleted(ctx, r.layer.TenantID); err != nil {
+			return fmt.Errorf("ingest: read the versions of layer %s: %w", r.layer.ID, err)
+		}
 	}
 	now := r.clock.Now().UTC()
 	idx := map[[2]string]int{}

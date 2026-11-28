@@ -147,34 +147,59 @@ type sqlExec interface {
 }
 
 // writeAttestations applies w inside tx. With a claim, its first statement
-// is a no-op update of the layer row under the claim, which takes the row's
-// write lock and refuses the write when the layer no longer holds the claim.
-func (d attSQL) writeAttestations(ctx context.Context, tx *sql.Tx, tenantID, layerID, claim string, w AttestationWrites) error {
+// is a no-op update of the layer row under the claim, and under w.Policy
+// when it is set, which takes the row's write lock and refuses the write
+// when the layer no longer holds the claim or that policy.
+func (d attSQL) writeAttestations(ctx context.Context, tx *sql.Tx, tenantID, layerID, claim string, w AttestationWrites) (AttestationWriteResult, error) {
 	if claim != "" {
-		held, err := rowsChanged(tx.ExecContext(ctx, d.q(`
-			UPDATE layer_configs SET ingest_claim = ingest_claim
-			WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?`), tenantID, layerID, claim))
-		if err != nil {
-			return err
-		}
-		if !held {
-			return ErrIngestSuperseded
+		if err := d.checkClaim(ctx, tx, tenantID, layerID, claim, w.Policy); err != nil {
+			return AttestationWriteResult{}, err
 		}
 	}
 	for _, b := range w.Bundles {
 		if err := d.insertBundle(ctx, tx, tenantID, normalizeStoredAttestation(b)); err != nil {
-			return err
+			return AttestationWriteResult{}, err
 		}
 	}
+	var res AttestationWriteResult
 	for _, v := range w.Versions {
-		if err := d.writeVersion(ctx, tx, tenantID, v); err != nil {
+		updated, err := d.writeVersion(ctx, tx, tenantID, v)
+		if err != nil {
+			return AttestationWriteResult{}, err
+		}
+		res.Updated = append(res.Updated, updated...)
+	}
+	return res, nil
+}
+
+// checkClaim locks the layer row while it holds claim, and the stored trust
+// policy p when p is set, and returns ErrIngestSuperseded otherwise.
+func (d attSQL) checkClaim(ctx context.Context, tx *sql.Tx, tenantID, layerID, claim string, p *TrustPolicy) error {
+	q := `UPDATE layer_configs SET ingest_claim = ingest_claim
+		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?`
+	args := []any{tenantID, layerID, claim}
+	if p != nil {
+		mode, reqs, root, err := policyColumns(*p)
+		if err != nil {
 			return err
 		}
+		q += ` AND trust_mode = ? AND trust_requirements = ? AND trust_layer_root = ?`
+		args = append(args, mode, reqs, root)
+	}
+	held, err := rowsChanged(tx.ExecContext(ctx, d.q(q), args...))
+	if err != nil {
+		return err
+	}
+	if !held {
+		return ErrIngestSuperseded
 	}
 	return nil
 }
 
-// insertBundle stores a bundle the tenant does not hold yet.
+// insertBundle stores a bundle the tenant does not hold yet. A stored bundle
+// takes a no-op update, which locks its row until the write commits, so a
+// purge's sweep that runs meanwhile skips it (pgSweepStmts) rather than
+// delete a bundle a link of this write references.
 func (d attSQL) insertBundle(ctx context.Context, tx *sql.Tx, tenantID string, b StoredAttestation) error {
 	var logIndex any
 	if b.LogIndex != nil {
@@ -185,7 +210,7 @@ func (d attSQL) insertBundle(ctx context.Context, tx *sql.Tx, tenantID string, b
 			source_repository, source_repository_owner, source_repository_ref, signer_issuer, signer_identity,
 			log_index, attested_at, stored_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (tenant_id, digest) DO NOTHING`),
+		ON CONFLICT (tenant_id, digest) DO UPDATE SET digest = excluded.digest`),
 		tenantID, b.Digest, b.Bundle, b.LayerID, b.SourceRef, b.PredicateType, b.Instance,
 		b.SourceRepository, b.SourceRepositoryOwner, b.SourceRepositoryRef, b.SignerIssuer, b.SignerIdentity,
 		logIndex, d.tm(b.AttestedAt), d.tm(b.StoredAt))
@@ -195,13 +220,14 @@ func (d attSQL) insertBundle(ctx context.Context, tx *sql.Tx, tenantID string, b
 	return nil
 }
 
-// writeVersion applies the write of one version.
-func (d attSQL) writeVersion(ctx context.Context, tx *sql.Tx, tenantID string, v VersionAttestations) error {
+// writeVersion applies the write of one version and returns the link
+// updates that applied.
+func (d attSQL) writeVersion(ctx context.Context, tx *sql.Tx, tenantID string, v VersionAttestations) ([]AttestationLink, error) {
 	if v.ReplaceLinks {
 		if _, err := tx.ExecContext(ctx, d.q(`
 			DELETE FROM artifact_attestations WHERE tenant_id = ? AND artifact_id = ? AND version = ?`),
 			tenantID, v.ArtifactID, v.Version); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, l := range v.Links {
@@ -215,21 +241,28 @@ func (d attSQL) writeVersion(ctx context.Context, tx *sql.Tx, tenantID string, v
 				verified_under = excluded.verified_under, linked_at = excluded.linked_at`),
 			tenantID, v.ArtifactID, v.Version, l.PredicateType, l.Instance, l.SignerIssuer, l.SignerIdentity,
 			l.Digest, l.Verdict, l.VerifiedUnder, d.tm(l.LinkedAt)); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	for _, l := range v.Updates {
-		l = normalizeLink(l)
-		if _, err := tx.ExecContext(ctx, d.q(`
+	var updated []AttestationLink
+	for _, u := range v.Updates {
+		l := normalizeLink(u.Link)
+		l.ArtifactID, l.Version = v.ArtifactID, v.Version
+		changed, err := rowsChanged(tx.ExecContext(ctx, d.q(`
 			UPDATE artifact_attestations SET verdict = ?, verified_under = ?, linked_at = ?
 			WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND predicate_type = ? AND instance = ?
-				AND signer_issuer = ? AND signer_identity = ? AND digest = ?`),
+				AND signer_issuer = ? AND signer_identity = ? AND digest = ? AND verdict = ? AND verified_under = ?`),
 			l.Verdict, l.VerifiedUnder, d.tm(l.LinkedAt),
-			tenantID, v.ArtifactID, v.Version, l.PredicateType, l.Instance, l.SignerIssuer, l.SignerIdentity, l.Digest); err != nil {
-			return err
+			tenantID, v.ArtifactID, v.Version, l.PredicateType, l.Instance, l.SignerIssuer, l.SignerIdentity, l.Digest,
+			u.ReadVerdict, u.ReadVerifiedUnder))
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			updated = append(updated, l)
 		}
 	}
-	return d.writeOutcome(ctx, tx, tenantID, v)
+	return updated, d.writeOutcome(ctx, tx, tenantID, v)
 }
 
 // writeOutcome sets the outcome of the version's stored row, under the
@@ -397,9 +430,25 @@ var sweepStmts = []string{
 		WHERE l.tenant_id = attestations.tenant_id AND l.digest = attestations.digest)`,
 }
 
+// pgSweepStmts are the Postgres form of sweepStmts: the bundle deletion
+// skips a row that an attestation write in flight holds locked
+// (insertBundle), whose link would reference it once that write commits.
+var pgSweepStmts = []string{
+	sweepStmts[0],
+	`DELETE FROM attestations WHERE (tenant_id, digest) IN (
+		SELECT a.tenant_id, a.digest FROM attestations a WHERE NOT EXISTS (SELECT 1 FROM artifact_attestations l
+			WHERE l.tenant_id = a.tenant_id AND l.digest = a.digest)
+		FOR UPDATE SKIP LOCKED)`,
+}
+
 // sweepAttestations runs the sweep statements on ex.
 func sweepAttestations(ctx context.Context, ex sqlExec) error {
-	for _, stmt := range sweepStmts {
+	return runSweep(ctx, ex, sweepStmts)
+}
+
+// runSweep runs stmts on ex.
+func runSweep(ctx context.Context, ex sqlExec, stmts []string) error {
+	for _, stmt := range stmts {
 		if _, err := ex.ExecContext(ctx, stmt); err != nil {
 			return fmt.Errorf("store: sweep attestations: %w", err)
 		}
@@ -412,19 +461,20 @@ var sqliteAtt = attSQL{}
 
 // WriteAttestations applies w in one transaction (§4.7.11 Attestation
 // storage).
-func (s *SQLite) WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) error {
+func (s *SQLite) WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) (AttestationWriteResult, error) {
 	if w.empty() && claim == "" {
-		return nil
+		return AttestationWriteResult{}, nil
 	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return AttestationWriteResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := sqliteAtt.writeAttestations(ctx, tx, tenantID, layerID, claim, w); err != nil {
-		return err
+	res, err := sqliteAtt.writeAttestations(ctx, tx, tenantID, layerID, claim, w)
+	if err != nil {
+		return AttestationWriteResult{}, err
 	}
-	return tx.Commit()
+	return res, tx.Commit()
 }
 
 // GetAttestation returns the stored bundle of digest.
@@ -457,24 +507,25 @@ var pgAtt = attSQL{pg: true}
 
 // WriteAttestations applies w in one transaction on the tenant's org schema
 // (§4.7.11 Attestation storage).
-func (p *Postgres) WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) error {
+func (p *Postgres) WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) (AttestationWriteResult, error) {
 	if w.empty() && claim == "" {
-		return nil
+		return AttestationWriteResult{}, nil
 	}
 	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
-		return err
+		return AttestationWriteResult{}, err
 	}
 	defer release()
 	tx, err := conn.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return AttestationWriteResult{}, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := pgAtt.writeAttestations(ctx, tx, tenantID, layerID, claim, w); err != nil {
-		return err
+	res, err := pgAtt.writeAttestations(ctx, tx, tenantID, layerID, claim, w)
+	if err != nil {
+		return AttestationWriteResult{}, err
 	}
-	return tx.Commit()
+	return res, tx.Commit()
 }
 
 // GetAttestation returns the stored bundle of digest.
@@ -528,5 +579,5 @@ func pgSweepAttestations(ctx context.Context, tx sqlExec) error {
 	if !exists {
 		return nil
 	}
-	return sweepAttestations(ctx, tx)
+	return runSweep(ctx, tx, pgSweepStmts)
 }

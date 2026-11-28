@@ -62,6 +62,8 @@ type linkPlan struct {
 	// or require, nil when the step evaluated none, which changes no link.
 	evaluated []*snapshotBundle
 	now       time.Time
+	// written holds the versions the plan wrote an outcome for or walked.
+	written map[[2]string]bool
 }
 
 // newLinkPlan reads the stored links of the layer the cycle links.
@@ -73,7 +75,8 @@ func newLinkPlan(ctx context.Context, st store.Store, a *AttestationCycle, now t
 	if err != nil {
 		return nil, fmt.Errorf("ingest: read the links of layer %s: %w", a.layer.ID, err)
 	}
-	p := &linkPlan{cycle: a, stored: map[[2]string][]store.AttestationLink{}, bundles: map[string]store.StoredAttestation{}, now: now}
+	p := &linkPlan{cycle: a, stored: map[[2]string][]store.AttestationLink{}, bundles: map[string]store.StoredAttestation{}, now: now,
+		written: map[[2]string]bool{}}
 	for _, l := range links {
 		k := [2]string{l.ArtifactID, l.Version}
 		p.stored[k] = append(p.stored[k], l)
@@ -81,23 +84,61 @@ func newLinkPlan(ctx context.Context, st store.Store, a *AttestationCycle, now t
 	return p, nil
 }
 
-// version adds the writes of one version that the cycle stores (stored) or
-// classifies as unchanged, from the snapshot record rec. row is the stored
-// row of an unchanged version, whose outcome the plan rewrites when the
-// cycle's outcome differs.
+// version adds the writes of one version that the cycle stores or classifies
+// as unchanged, from the snapshot record rec. row is the stored row of an
+// unchanged version, nil for a version the cycle stored, which it created or
+// restored with the outcome not_evaluated. A stored version takes only the
+// links the plan gives it, none included, so a restored version keeps no
+// link of an earlier life, and the outcome the cycle evaluated. An unchanged
+// version takes its outcome when it differs from the stored one.
+//
+// Spec: §4.7.11 (Verified links, Attestation outcome)
 func (p *linkPlan) version(rec *filesystem.ArtifactRecord, id, version string, outcome *store.VersionOutcome, row *store.ManifestRecord) {
 	if p == nil {
 		return
 	}
+	k := [2]string{id, version}
+	p.written[k] = true
 	w := store.VersionAttestations{ArtifactID: id, Version: version}
-	if links, changed := p.links(rec, p.stored[[2]string{id, version}]); changed {
+	stored := p.stored[k]
+	if row == nil {
+		stored = nil
+	}
+	links, changed := p.links(rec, stored)
+	switch {
+	case row == nil:
+		w.ReplaceLinks, w.Links = true, links
+	case changed:
 		w.ReplaceLinks, w.Links = true, links
 	}
-	if row != nil && outcome != nil && !row.Outcome().Equal(*outcome) {
+	switch {
+	case outcome == nil:
+	case row == nil && outcome.Outcome != store.OutcomeNotEvaluated:
+		w.Outcome = outcome
+	case row != nil && !row.Outcome().Equal(*outcome):
 		w.Outcome = outcome
 	}
 	if w.ReplaceLinks || w.Outcome != nil {
 		p.versions = append(p.versions, w)
+	}
+}
+
+// clearRest sets not_evaluated on every stored version of the layer that a
+// cycle under none did not walk, from the listing the cycle read, which a
+// change of the mode to none requires of the versions no longer in the tree.
+//
+// Spec: §4.7.11 (Re-evaluation)
+func (p *linkPlan) clearRest(rowsByID map[string][]store.ManifestRecord) {
+	if p == nil || p.cycle.verifies() {
+		return
+	}
+	for _, rows := range rowsByID {
+		for _, row := range rows {
+			if row.Layer != p.cycle.layer.ID || p.written[[2]string{row.ArtifactID, row.Version}] {
+				continue
+			}
+			p.outcome(row, &store.VersionOutcome{Outcome: store.OutcomeNotEvaluated, EvaluatedAt: &p.now})
+		}
 	}
 }
 
@@ -108,6 +149,7 @@ func (p *linkPlan) outcome(row store.ManifestRecord, o *store.VersionOutcome) {
 	if p == nil || o == nil || row.Outcome().Equal(*o) {
 		return
 	}
+	p.written[[2]string{row.ArtifactID, row.Version}] = true
 	p.versions = append(p.versions, store.VersionAttestations{ArtifactID: row.ArtifactID, Version: row.Version, Outcome: o})
 }
 
@@ -264,22 +306,34 @@ func sameLinks(a, b []store.AttestationLink) bool {
 	return true
 }
 
-// write stores the plan in one store write under the cycle's claim. A plan
-// that writes nothing makes no write. A later claim refuses it with
-// store.ErrIngestSuperseded, which the removal check that follows reports.
-func (p *linkPlan) write(ctx context.Context, st store.Store, claim string) error {
+// write stores the plan in one store write under the cycle's claim and the
+// trust policy the cycle claimed under. A plan that writes nothing makes no
+// write. superseded reports a write that a later claim or a changed policy
+// refused: the cycle then stops as a superseded one, so a cycle in flight
+// across a policy change writes no link and no outcome under the earlier
+// policy, and the versions it stored keep the outcome not_evaluated.
+//
+// Spec: §4.7.11 (Verified links)
+func (p *linkPlan) write(ctx context.Context, st store.Store, claim string) (superseded bool, err error) {
 	if p == nil || len(p.versions) == 0 {
-		return nil
+		return false, nil
 	}
 	w := store.AttestationWrites{Versions: p.versions}
 	for _, d := range sortedKeys(p.bundles) {
 		w.Bundles = append(w.Bundles, p.bundles[d])
 	}
-	err := st.WriteAttestations(ctx, p.cycle.layer.TenantID, p.cycle.layer.ID, claim, w)
-	if err != nil && !errors.Is(err, store.ErrIngestSuperseded) {
-		return fmt.Errorf("ingest: write the links of layer %s: %w", p.cycle.layer.ID, err)
+	if claim != "" {
+		pol := store.PolicyOf(p.cycle.layer)
+		w.Policy = &pol
 	}
-	return nil
+	_, err = st.WriteAttestations(ctx, p.cycle.layer.TenantID, p.cycle.layer.ID, claim, w)
+	switch {
+	case errors.Is(err, store.ErrIngestSuperseded):
+		return true, nil
+	case err != nil:
+		return false, fmt.Errorf("ingest: write the links of layer %s: %w", p.cycle.layer.ID, err)
+	}
+	return false, nil
 }
 
 // readUnverified reads the attestation directory of a cycle under none and

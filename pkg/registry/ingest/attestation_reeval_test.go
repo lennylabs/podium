@@ -3,6 +3,8 @@ package ingest_test
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -55,9 +57,9 @@ func (f *faultyStore) GetAttestation(ctx context.Context, tenantID, digest strin
 	return f.Store.GetAttestation(ctx, tenantID, digest)
 }
 
-func (f *faultyStore) WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w store.AttestationWrites) error {
+func (f *faultyStore) WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w store.AttestationWrites) (store.AttestationWriteResult, error) {
 	if err := f.err("WriteAttestations"); err != nil {
-		return err
+		return store.AttestationWriteResult{}, err
 	}
 	return f.Store.WriteAttestations(ctx, tenantID, layerID, claim, w)
 }
@@ -238,4 +240,15 @@ func TestAttestationLinks_PlanStoreFailures(t *testing.T) {
 	f.st = inner
 	f.cfg = nil
 	f.mustCycle()
+}
+
+// errFaulty is the failure a faultyStore injects in the race tests.
+var errFaulty = errors.New("store down")
+
+// faultyCfg is an attestation configuration with no instance.
+var faultyCfg = ingest.AttestationConfig{}
+
+// removeAll removes a path under dir.
+func removeAll(dir, rel string) error {
+	return os.RemoveAll(filepath.Join(dir, filepath.FromSlash(rel)))
 }

@@ -893,7 +893,14 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 // DeprecatedAt predates `before` (§8.4 90-day window). Timestamps are
 // stored as RFC3339Nano UTC text, which sorts lexicographically.
 func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error) {
-	res, err := s.db.ExecContext(ctx, `
+	// Spec: §4.7.11 (Attestation storage) — the removal and the sweep of its
+	// links and bundles are one transaction.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?`,
 		before.UTC().Format(time.RFC3339Nano))
@@ -904,7 +911,10 @@ func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time)
 	if err != nil {
 		return 0, err
 	}
-	return int(n), sweepAttestations(ctx, s.db)
+	if err := sweepAttestations(ctx, tx); err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
 }
 
 // PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).

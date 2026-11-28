@@ -1325,7 +1325,14 @@ func (p *Postgres) purgeDeprecatedInSchema(ctx context.Context, ident string, be
 	if _, err := conn.ExecContext(ctx, `SET search_path TO `+ident+`, public`); err != nil {
 		return 0, err
 	}
-	res, err := conn.ExecContext(ctx, `
+	// Spec: §4.7.11 (Attestation storage) — the removal and the sweep of its
+	// links and bundles are one transaction.
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deprecated = TRUE AND deprecated_at IS NOT NULL AND deprecated_at < $1`,
 		before.UTC())
@@ -1336,7 +1343,10 @@ func (p *Postgres) purgeDeprecatedInSchema(ctx context.Context, ident string, be
 	if err != nil {
 		return 0, err
 	}
-	return int(n), pgSweepAttestations(ctx, conn)
+	if err := pgSweepAttestations(ctx, tx); err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
 }
 
 // PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
