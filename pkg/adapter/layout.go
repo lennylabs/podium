@@ -205,8 +205,8 @@ func needsEscape(r rune) bool {
 
 // writeEscape writes the escape of r that TOML basic strings and YAML
 // double-quoted scalars share: the short form for the backslash, the double
-// quote, line feed, carriage return, and tab, and \uXXXX or \UXXXXXXXX for
-// every other code point.
+// quote, line feed, carriage return, and tab, and \uXXXX for every other code
+// point needsEscape reports, all of which lie in the Basic Multilingual Plane.
 func writeEscape(b *strings.Builder, r rune) {
 	switch r {
 	case '\\':
@@ -220,10 +220,6 @@ func writeEscape(b *strings.Builder, r rune) {
 	case '\t':
 		b.WriteString(`\t`)
 	default:
-		if r > 0xffff {
-			fmt.Fprintf(b, `\U%08X`, r)
-			return
-		}
 		fmt.Fprintf(b, `\u%04X`, r)
 	}
 }
