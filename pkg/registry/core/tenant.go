@@ -82,6 +82,13 @@ func (r *Registry) UpdateTenant(ctx context.Context, t store.Tenant) error {
 	return r.store.UpdateTenant(ctx, t)
 }
 
+// UpdateTenantIf writes a tenant's mutable configuration only while the
+// stored record equals expect, and returns store.ErrTenantChanged otherwise
+// (§7.3.3).
+func (r *Registry) UpdateTenantIf(ctx context.Context, t, expect store.Tenant) error {
+	return r.store.UpdateTenantIf(ctx, t, expect)
+}
+
 // DeactivateTenant soft-deactivates a tenant: it stops resolving while its
 // data persists (§4.7.1). Returns store.ErrTenantNotFound for an unknown ID.
 func (r *Registry) DeactivateTenant(ctx context.Context, id string) error {

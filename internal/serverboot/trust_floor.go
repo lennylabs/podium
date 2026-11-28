@@ -225,10 +225,10 @@ func logFloorInvalidLayers(ctx context.Context, st store.Store, tenants []string
 // re-evaluated as after a trust policy change, because the floor decides the
 // mode an empty trust_mode resolves to. A failure is logged and changes
 // nothing the request stored, because each layer's next ingest cycle runs
-// the re-evaluation again.
+// the re-evaluation again. clk dates the outcomes a downgrade writes.
 //
 // Spec: §4.7.11 (Re-evaluation), §7.3.3
-func tenantFloorChangeHook(st store.Store, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber) func(context.Context, string, string) {
+func tenantFloorChangeHook(st store.Store, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber, clk clock.Clock) func(context.Context, string, string) {
 	return func(ctx context.Context, tenantID, caller string) {
 		layers, err := st.ListLayerConfigs(ctx, tenantID)
 		if err != nil {
@@ -240,7 +240,7 @@ func tenantFloorChangeHook(st store.Store, att *ingest.AttestationConfig, sink a
 			emit = ingestAuditEmitter(ctx, sink, scrubber, caller, tenantID)
 		}
 		for _, lc := range layers {
-			if err := att.Reevaluate(ctx, st, lc, clock.Real{}, emit); err != nil {
+			if err := att.Reevaluate(ctx, st, lc, clk, emit); err != nil {
 				log.Printf("attestation: layer %s (tenant %s): re-evaluate the links after a trust floor change: %v; the next ingest cycle of the layer runs it again", lc.ID, tenantID, err)
 			}
 		}

@@ -79,10 +79,11 @@ func (p floorPatch) applyTo(f store.TrustFloor) store.TrustFloor {
 }
 
 // decodeFloorPatch reads the floor members out of a tenant body decoded as
-// raw. A member matches its name without regard to letter case, so a body
-// that carries one member under two spellings is refused, and so is a
-// member whose name reads as a trust member and is none of the three
-// (layer.IsTrustLikeName), so a misspelled floor member is never dropped. A
+// raw. A member matches its name without regard to letter case, and the
+// handlers refuse a member carried twice (repeatedFloorMember) before they
+// call it. A member whose name reads as a trust member and is none of the
+// three (layer.IsTrustLikeName) is refused, so a misspelled floor member is
+// never dropped. A
 // null mode is refused, and a null list is the empty list. An entry that
 // holds a member of another name fails its decode.
 //
@@ -101,9 +102,6 @@ func decodeFloorPatch(raw map[string]json.RawMessage) (floorPatch, error) {
 				return floorPatch{}, fmt.Errorf("%q is not a tenant member; the trust floor members are %s", key, strings.Join(floorMemberNames, ", "))
 			}
 			continue
-		}
-		if _, dup := found[member]; dup {
-			return floorPatch{}, fmt.Errorf("%s is carried more than once under different letter case", member)
 		}
 		found[member] = v
 	}
@@ -159,4 +157,39 @@ func floorEventFields(before, after store.TrustFloor) map[string]string {
 func floorJSON(f store.TrustFloor) string {
 	out, _ := json.Marshal(f.Clone())
 	return string(out)
+}
+
+// repeatedFloorMember refuses a body object that carries one floor member
+// twice, under the same name or under different letter case. A decode into
+// a map keeps the last of two members silently, which would let a body that
+// raises the floor and lowers it again in a later member pass as either.
+// A body that is not an object is left to the decode, which refuses it.
+//
+// Spec: §7.3.3
+func repeatedFloorMember(body []byte) error {
+	dec := json.NewDecoder(bytes.NewReader(body))
+	if tok, err := dec.Token(); err != nil || tok != json.Delim('{') {
+		return nil
+	}
+	seen := map[string]bool{}
+	for dec.More() {
+		tok, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		key, _ := tok.(string)
+		for _, m := range floorMemberNames {
+			if strings.EqualFold(key, m) {
+				if seen[m] {
+					return fmt.Errorf("%s is carried more than once", m)
+				}
+				seen[m] = true
+			}
+		}
+		var skip json.RawMessage
+		if err := dec.Decode(&skip); err != nil {
+			return nil
+		}
+	}
+	return nil
 }

@@ -1757,7 +1757,7 @@ func run(ctx context.Context, stop func()) error {
 			// §4.7.11 (Tenant trust floor): a floor entry names a configured
 			// instance, and a floor change re-evaluates the tenant's layers.
 			server.WithTrustFloorInstances(cfg.trustInstanceKnown),
-			server.WithTenantFloorChange(tenantFloorChangeHook(st, cfg.ingestAttest, auditSink, scrubber)))
+			server.WithTenantFloorChange(tenantFloorChangeHook(st, cfg.ingestAttest, auditSink, scrubber, clock.Real{})))
 		log.Printf("multi-tenant mode: routing requests by organization")
 	}
 
