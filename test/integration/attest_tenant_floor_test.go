@@ -231,8 +231,8 @@ func TestTenantFloor_MultiTenantEndpointsCycleAndServing(t *testing.T) {
 		ae.Constraint() != "signer_outside_floor" || len(after) != len(before) {
 		t.Errorf("cycle under the floor: %v, versions %d -> %d", err, len(before), len(after))
 	}
-	if lc, _ := f.st.GetLayerConfig(ctx, "default", "team"); lc.AttestationRecord.Status != ingest.CodeAttestationPolicyInvalid {
-		t.Errorf("record status %q", lc.AttestationRecord.Status)
+	if lc, _ := f.st.GetLayerConfig(ctx, "default", "team"); lc.Status != ingest.CodeAttestationPolicyInvalid {
+		t.Errorf("record status %q", lc.Status)
 	}
 }
 
