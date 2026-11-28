@@ -121,3 +121,37 @@ func TestTagNamesHash(t *testing.T) {
 		t.Error("an empty hash names a tag")
 	}
 }
+
+// Spec: §7.2 — the kept tag is written through a temporary file and a
+// rename: a missing directory and a target that cannot be replaced fail the
+// write and leave no temporary file.
+func TestWriteFileAtomic(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "etag")
+	if err := writeFileAtomic(p, []byte("a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(p, []byte("b")); err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(p); string(b) != "b" {
+		t.Errorf("content %q", b)
+	}
+	if err := writeFileAtomic(filepath.Join(dir, "missing", "etag"), nil); err == nil {
+		t.Error("a write into a missing directory passed")
+	}
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.MkdirAll(filepath.Join(blocked, "inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeFileAtomic(blocked, []byte("x")); err == nil {
+		t.Error("replacing a non-empty directory passed")
+	}
+	entries, _ := os.ReadDir(dir)
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".") {
+			t.Errorf("left %s", e.Name())
+		}
+	}
+}
