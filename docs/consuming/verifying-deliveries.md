@@ -381,7 +381,16 @@ trust policy* states the format.
   of a record meet the well-formed rule, and a server-source record answers the
   ID the sync requested. A failure is `materialize.request_mismatch` under every
   mode. A sync manifest that lists one ID more than once has every record of
-  that ID refused with the constraint `duplicate_id`. A record that the run's scope does not select is not written, and the
+  that ID refused with the constraint `duplicate_id`.
+- **Output paths.** Before it writes, the sync computes the output paths of
+  every selected record. Two distinct IDs that write one file, compared byte
+  for byte and with ASCII letters folded to lower case, are both refused with
+  `materialize.output_conflict` under every mode, so `Finance/pay` cannot
+  write over the output of an attested `finance/pay` on a file system that
+  ignores case. A record that the attestation check refused still blocks its
+  paths. Files that a config merge shares, such as `.mcp.json`, are not
+  compared. Paths that differ only in Unicode normalization are not compared
+  yet. A record that the run's scope does not select is not written, and the
   sync reports no refusal for it.
 - **Selected records under `warn` or `require`.** The attestation check runs on
   each record that the run's scope selects. Against a server registry it
@@ -393,7 +402,11 @@ trust policy* states the format.
   layer subject with the layer digest. A layer signed under a root, as
   `podium attest --root` signs it, needs a `layer_roots` entry, and otherwise
   each artifact is refused with `materialize.attestation_mismatch` and the
-  constraint `layer_digest`.
+  constraint `layer_digest`. Once `~/.podium/sync.yaml` sets `layer_roots`,
+  every layer that holds an artifact that the user sources resolve to `require`
+  must be listed, because the repository chooses the layer's directory name;
+  an unlisted layer refuses such an artifact with the constraint
+  `layer_root_unlisted`.
 
 ### Refused records
 

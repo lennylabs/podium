@@ -288,6 +288,11 @@ A render checks author attestations under the consumer trust policy of the
   record would lose its published files at reconciliation.
 - Under `warn` the render writes the failure on standard error and renders the
   record. The harnesses that import the repository do not see the warning.
+- Two distinct IDs that render one component file fail the target with
+  `materialize.output_conflict`, whatever their modes. An emitter names a
+  skill directory by the last segment of the ID, so `team/pay` and
+  `finance/pay` collide in `skills/pay/`; rename one artifact or exclude one ID
+  from the plugin's scope.
 - The rendered tree carries no bundle or provenance file, and the render's lock
   records no attestation member.
 
