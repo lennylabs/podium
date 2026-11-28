@@ -365,6 +365,7 @@ target_harnesses: [claude-code, opencode]
 | `hook_event` | `hook` | Required. One of the canonical event names that [Hooks](hooks#canonical-events) lists. A missing value, or a value outside the list, is an ingest error. The adapter translates the name to the harness's native event. |
 | `hook_action` | `hook` | Required; a missing value is an ingest error. Shell snippet that runs when the event fires and receives the event payload on stdin. [Hooks](hooks#moving-the-action-into-a-bundled-script) describes how the adapter rewrites a reference to a bundled script. |
 | `server_identifier` | `mcp-server` | Canonical server identifier. It keys the reverse index: any artifact whose `mcpServers:` entry resolves to this identifier gets a dependency edge to the registration, whatever the referencing artifact's type. |
+| `name` | `mcp-server` | The key of the server's entry in harness configuration files, such as `mcpServers.<name>` in `.mcp.json` and `[mcp_servers.<name>]` in `.codex/config.toml`. When set, it is 1 to 64 ASCII letters, digits, `_`, or `-`; any other value is refused at ingest with `ingest.invalid_artifact` and the constraint `mcp_server_name`. When unset, the last segment of the artifact ID is the key. |
 | `target_harnesses` | Any | Opts the artifact out of cross-harness materialization. Set it to a list of harness names, and the artifact materializes only for harnesses on the list. |
 
 ---

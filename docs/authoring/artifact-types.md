@@ -229,6 +229,8 @@ The `server_identifier` field is the registration's canonical identity. Each ada
 | Codex | Writes an `[mcp_servers.<name>]` table into `.codex/config.toml`. |
 | Claude Desktop, Claude Cowork, Pi, and Hermes | Nothing. These harnesses have no project-level MCP surface. |
 
+A declared `name` is 1 to 64 ASCII letters, digits, `_`, or `-`. Ingest refuses another value with `ingest.invalid_artifact` and `details.constraint: "mcp_server_name"`, because the name is the key of the server's entry in each harness's configuration file. An artifact that declares no `name` is keyed by the last segment of its ID, and the Codex adapter writes such a key as a quoted TOML key when it holds another character, such as `[mcp_servers."finance.warehouse"]`.
+
 Materialization does not read an `mcpServers:` list in the registration's own frontmatter.
 
 `server_identifier` also keys the reverse index. When any artifact declares an `mcpServers:` entry that resolves to the same identifier, Podium records the dependency edge.
