@@ -3,6 +3,7 @@ package materialize
 import (
 	"bytes"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -56,8 +57,8 @@ type podiumBlock struct {
 //
 // Spec: §6.7
 func injectBlock(base []byte, key string, block []byte, cs commentStyle) []byte {
-	begin := cs.open + "podium:begin:" + key + cs.close
-	end := cs.open + "podium:end:" + key + cs.close
+	begin := cs.open + markerName("begin", key) + cs.close
+	end := cs.open + markerName("end", key) + cs.close
 	body := begin + "\n" + strings.TrimRight(string(block), "\n") + "\n" + end
 	s := string(base)
 	for _, blk := range podiumBlocks(s, cs) {
@@ -231,22 +232,48 @@ func scanMarkers(s string, cs commentStyle) []markerLine {
 	return out
 }
 
+// markerName returns the marker text, without its comment delimiters, that
+// names key for kind ("begin" or "end"). A key that holds a control character
+// takes the quoted form podium:<kind>-q:"<escaped key>": written as it is, a
+// line feed in an artifact ID would end the marker's comment line and add the
+// rest of the ID to the file, such as a table to .codex/config.toml. Every
+// other key is written as it is, so the markers of existing blocks still
+// match.
+//
+// Spec: §6.7 (Encoding)
+func markerName(kind, key string) string {
+	if strings.ContainsFunc(key, isControl) {
+		return "podium:" + kind + "-q:" + strconv.Quote(key)
+	}
+	return "podium:" + kind + ":" + key
+}
+
 // markerKey reports whether line, without its line feed, is a begin marker
 // (begin true) or an end marker in the comment style cs, and returns the key
-// it names. A carriage return ending the line is the line's terminator, and
-// spaces and tabs around the marker are indentation and trailing whitespace an
-// editor can add; none of them is part of the key.
+// it names, decoded from the quoted form markerName writes. A carriage return
+// ending the line is the line's terminator, and spaces and tabs around the
+// marker are indentation and trailing whitespace an editor can add; none of
+// them is part of the key. A plain marker that holds a control character, as
+// an earlier release wrote one, still names its key, so the quoted block
+// replaces it.
 func markerKey(line string, begin bool, cs commentStyle) (string, bool) {
 	kind := "end"
 	if begin {
 		kind = "begin"
 	}
 	text := strings.Trim(strings.TrimSuffix(line, "\r"), " \t")
-	rest, ok := strings.CutPrefix(text, cs.open+"podium:"+kind+":")
+	body, ok := strings.CutSuffix(text, cs.close)
 	if !ok {
 		return "", false
 	}
-	key, ok := strings.CutSuffix(rest, cs.close)
+	if quoted, ok := strings.CutPrefix(body, cs.open+"podium:"+kind+"-q:"); ok {
+		key, err := strconv.Unquote(quoted)
+		if err != nil || key == "" {
+			return "", false
+		}
+		return key, true
+	}
+	key, ok := strings.CutPrefix(body, cs.open+"podium:"+kind+":")
 	if !ok || key == "" {
 		return "", false
 	}

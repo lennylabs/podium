@@ -5,6 +5,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/spi"
 )
@@ -296,11 +297,16 @@ func InCoreFeatureSet(c Capability) bool {
 // artifact" failure mode for harnessID. It returns a structured error
 // naming the untranslatable fields (the ✗ cells the artifact exercises for
 // harnessID) and suggesting harness: none, or nil when every used field is
-// translatable. harness "none" (raw output) and harnesses absent from the
-// §6.7.1 matrix never fail: they carry no per-field contract.
+// translatable. harness "none" (raw output) never fails, and harnesses
+// absent from the §6.7.1 matrix carry no per-field contract. An mcp-server
+// whose declared name the §4.1 rule refuses fails on every other harness
+// first, with MCPServerNameError.
 func TranslationError(harnessID string, art *manifest.Artifact) error {
 	if harnessID == "" || harnessID == "none" {
 		return nil
+	}
+	if err := MCPServerNameError(harnessID, art); err != nil {
+		return err
 	}
 	var unsupported []string
 	for _, c := range UsedCapabilities(art) {
@@ -319,5 +325,27 @@ func TranslationError(harnessID string, art *manifest.Artifact) error {
 		Message: fmt.Sprintf("materialize.untranslatable: adapter %q cannot translate %s; use harness: none for raw output",
 			harnessID, strings.Join(unsupported, ", ")),
 		Details: map[string]any{"harness": harnessID, "unsupported": unsupported},
+	}
+}
+
+// MCPServerNameError refuses to materialize, for harnessID, an mcp-server
+// whose declared name breaks the §4.1 MCP server name rule. Ingest refuses
+// such a name, but a stored row ingested before the rule and a workspace
+// overlay artifact reach a consumer unchecked, and the name is the key of the
+// server's entry in the harness's shared configuration file. The error is the
+// §6.9 materialize.untranslatable failure; its message holds no part of the
+// name, which can hold a line break, and its constraint is the one ingest
+// reports for the rule. It returns nil for any other artifact.
+//
+// Spec: §4.1 (MCP server names), §6.9
+func MCPServerNameError(harnessID string, art *manifest.Artifact) error {
+	if !manifest.MCPServerNameRefused(art) {
+		return nil
+	}
+	return &spi.Error{
+		Code: "materialize.untranslatable",
+		Message: fmt.Sprintf("materialize.untranslatable: adapter %q cannot write this mcp-server name as a configuration key; "+
+			"an mcp-server name is 1 to 64 ASCII letters, digits, '_', or '-'", harnessID),
+		Details: map[string]any{"harness": harnessID, "constraint": layer.MCPServerNameConstraint},
 	}
 }

@@ -2,9 +2,11 @@ package adapter
 
 import (
 	"encoding/json"
+	"fmt"
 	"path"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/lennylabs/podium/pkg/manifest"
 )
@@ -111,33 +113,119 @@ func codexAgentTOML(src Source, name string) []byte {
 	return []byte(b.String())
 }
 
-// tomlBasic returns s as a TOML basic string. A basic string cannot contain a
-// literal control character, so newline, carriage return, and tab are escaped
-// (a multiline hook_action block scalar otherwise produces invalid TOML). The
-// backslash is escaped first so the inserted escapes are not doubled.
+// tomlBasic returns s as a TOML basic string. A basic string admits no
+// literal control character, so every one is escaped: a multiline
+// hook_action block scalar otherwise produces invalid TOML, and a line break
+// in a manifest string would end the value and start a table of its own.
+//
+// Spec: §6.7 (Encoding)
 func tomlBasic(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return `"` + s + `"`
+	return doubleQuoted(s)
 }
 
-// yamlDoubleQuote returns s as a YAML double-quoted scalar, escaping the
-// backslash and double-quote so a value with YAML-significant leading
-// characters (a `*` glob, a `:` in a description) stays a plain string instead
-// of being parsed as an alias, mapping, or flow indicator.
-func yamlDoubleQuote(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	return `"` + s + `"`
+// tomlKey returns k as one TOML key: bare when it is non-empty and holds only
+// ASCII letters, digits, '_', and '-', and a quoted basic string otherwise,
+// so a key taken from a manifest or an ID cannot close its table header or
+// add a dotted part.
+//
+// Spec: §4.1 (MCP server names), §6.7 (Encoding)
+func tomlKey(k string) string {
+	if k != "" && strings.Trim(k, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == "" {
+		return k
+	}
+	return tomlBasic(k)
 }
 
+// tomlMultiline returns s as a TOML multi-line basic string. A line feed and
+// a tab stay literal, and each run of three double quotes is escaped so it
+// cannot close the string. Every other control character is escaped, because
+// TOML admits none in a multi-line string; an escaped carriage return before
+// a line feed still decodes to the CRLF the author wrote.
+//
+// Spec: §6.7 (Encoding)
 func tomlMultiline(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"""`, `\"\"\"`)
-	return "\"\"\"\n" + s + "\n\"\"\""
+	var b strings.Builder
+	b.WriteString("\"\"\"\n")
+	for i := 0; i < len(s); {
+		if strings.HasPrefix(s[i:], `"""`) {
+			b.WriteString(`\"\"\"`)
+			i += 3
+			continue
+		}
+		r, n := utf8.DecodeRuneInString(s[i:])
+		i += n
+		if r != '\n' && r != '\t' && (r == '\\' || needsEscape(r)) {
+			writeEscape(&b, r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	b.WriteString("\n\"\"\"")
+	return b.String()
+}
+
+// yamlDoubleQuote returns s as a YAML double-quoted scalar. The backslash and
+// the double quote are escaped so a value with YAML-significant characters (a
+// `*` glob, a `:` in a description) stays a plain string, and every control
+// character and YAML line break is escaped so a manifest string cannot end
+// the scalar's line and add a frontmatter key, or close the frontmatter with
+// a `---` line.
+//
+// Spec: §6.7 (Encoding)
+func yamlDoubleQuote(s string) string {
+	return doubleQuoted(s)
+}
+
+// doubleQuoted returns s between double quotes with the double quote, the
+// backslash, and every code point needsEscape reports escaped. TOML basic
+// strings and YAML double-quoted scalars read these escapes alike, so one
+// encoder serves both.
+func doubleQuoted(s string) string {
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		if r == '"' || r == '\\' || needsEscape(r) {
+			writeEscape(&b, r)
+			continue
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// needsEscape reports whether r has to be escaped in a TOML basic string or a
+// YAML double-quoted scalar: a C0 or C1 control character, DEL, a YAML line
+// break (U+0085 is C1, U+2028, U+2029), or a code point YAML does not admit
+// as content (U+FEFF, U+FFFE, U+FFFF).
+func needsEscape(r rune) bool {
+	return r < 0x20 || (r >= 0x7f && r <= 0x9f) ||
+		r == 0x2028 || r == 0x2029 || r == 0xfeff || r == 0xfffe || r == 0xffff
+}
+
+// writeEscape writes the escape of r that TOML basic strings and YAML
+// double-quoted scalars share: the short form for the backslash, the double
+// quote, line feed, carriage return, and tab, and \uXXXX or \UXXXXXXXX for
+// every other code point.
+func writeEscape(b *strings.Builder, r rune) {
+	switch r {
+	case '\\':
+		b.WriteString(`\\`)
+	case '"':
+		b.WriteString(`\"`)
+	case '\n':
+		b.WriteString(`\n`)
+	case '\r':
+		b.WriteString(`\r`)
+	case '\t':
+		b.WriteString(`\t`)
+	default:
+		if r > 0xffff {
+			fmt.Fprintf(b, `\U%08X`, r)
+			return
+		}
+		fmt.Fprintf(b, `\u%04X`, r)
+	}
 }
 
 // --- mcp-server config-merge -------------------------------------------------
@@ -207,7 +295,7 @@ func codexMCPTOML(src Source) []byte {
 	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
 	name := mcpName(src)
 	var b strings.Builder
-	b.WriteString("[mcp_servers." + name + "]\n")
+	b.WriteString("[mcp_servers." + tomlKey(name) + "]\n")
 	if url, ok := cfg["url"].(string); ok {
 		b.WriteString("url = " + tomlBasic(url) + "\n")
 	} else {
