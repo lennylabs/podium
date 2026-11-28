@@ -9,8 +9,10 @@ import (
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
+	"github.com/lennylabs/podium/pkg/typeprovider"
 )
 
 // The §4.7.11 trust modes. The empty mode resolves to the deployment
@@ -20,12 +22,6 @@ const (
 	TrustModeWarn    = "warn"
 	TrustModeRequire = "require"
 )
-
-// MaxTrustRequirements is the number of requirements a policy holds in this
-// release. Several requirements, optional requirements, and the covering
-// marker arrive with a later phase, and a policy that names more is refused
-// rather than read as fewer.
-const MaxTrustRequirements = 1
 
 // ErrTrustPolicy wraps every refusal of a layer trust policy, so a caller
 // tells a policy refusal from another failure with errors.Is.
@@ -88,8 +84,8 @@ func CheckTrustPolicy(cfg store.LayerConfig, instances TrustInstances, defaultMo
 	if !ValidTrustMode(cfg.TrustMode) {
 		return trustRefusal("trust_mode %q is not none, warn, or require", cfg.TrustMode)
 	}
-	if n := len(cfg.TrustRequirements); n > MaxTrustRequirements {
-		return trustRefusal("trust_requirements holds %d requirements; several requirements are not available yet, so a policy holds at most %d", n, MaxTrustRequirements)
+	if err := checkCovering(cfg.TrustRequirements); err != nil {
+		return err
 	}
 	if mode := ResolveTrustMode(cfg.TrustMode, defaultMode); (mode == TrustModeWarn || mode == TrustModeRequire) && len(cfg.TrustRequirements) == 0 {
 		if cfg.TrustMode == "" {
@@ -102,7 +98,95 @@ func CheckTrustPolicy(cfg store.LayerConfig, instances TrustInstances, defaultMo
 			return err
 		}
 	}
+	if err := checkRequireTypes(cfg); err != nil {
+		return err
+	}
 	return checkTrustLayerRoot(cfg.SourceType, cfg.TrustLayerRoot)
+}
+
+// CoveringRequirement returns the position of the covering requirement of
+// reqs, whose signers attest the layer subject and every artifact: the only
+// requirement of a policy that holds one, and the first that sets
+// covers_layer in a policy that holds several. It returns -1 for no
+// requirement and for several with none marked, which checkCovering
+// refuses, so a caller fails closed on a policy no rule admitted.
+//
+// Spec: §4.7.11 (Layer trust policy)
+func CoveringRequirement(reqs []store.TrustRequirement) int {
+	if len(reqs) == 1 {
+		return 0
+	}
+	for i, r := range reqs {
+		if r.CoversLayer {
+			return i
+		}
+	}
+	return -1
+}
+
+// checkCovering applies the rules of the covering requirement: exactly one
+// requirement of a policy with several sets covers_layer, and the covering
+// requirement is not optional, because the layer step reads it for the
+// layer subject and the completeness condition.
+//
+// Spec: §4.7.11 (Policy rules)
+func checkCovering(reqs []store.TrustRequirement) error {
+	marked := 0
+	for _, r := range reqs {
+		if r.CoversLayer {
+			marked++
+		}
+	}
+	if len(reqs) > 1 && marked != 1 {
+		return trustRefusal("trust_requirements holds %d requirements and %d of them set covers_layer; a policy with several requirements marks exactly one covering requirement", len(reqs), marked)
+	}
+	if c := CoveringRequirement(reqs); c >= 0 && reqs[c].Optional {
+		return trustRefusal("trust_requirements[%d] is the covering requirement and sets optional; the covering requirement cannot be optional", c)
+	}
+	return nil
+}
+
+// checkRequireTypes applies the trust_require_types rules: each entry names
+// an artifact type the registry knows, no entry is listed twice, and a
+// policy that lists a type has a requirement and a trust_mode other than
+// none. A type the registry does not know, such as a misspelled hooks, is
+// refused rather than stored as a list that enforces nothing.
+//
+// Spec: §4.7.11 (Policy rules)
+func checkRequireTypes(cfg store.LayerConfig) error {
+	if len(cfg.TrustRequireTypes) == 0 {
+		return nil
+	}
+	seen := map[string]bool{}
+	for i, t := range cfg.TrustRequireTypes {
+		if !KnownArtifactType(t) {
+			return trustRefusal("trust_require_types[%d] %q is not an artifact type this registry knows", i, t)
+		}
+		if seen[t] {
+			return trustRefusal("trust_require_types lists %q twice", t)
+		}
+		seen[t] = true
+	}
+	if len(cfg.TrustRequirements) == 0 {
+		return trustRefusal("trust_require_types needs a requirement in trust_requirements")
+	}
+	if cfg.TrustMode == TrustModeNone {
+		return trustRefusal("trust_require_types applies to a layer whose trust_mode is warn or require, and trust_mode is none")
+	}
+	return nil
+}
+
+// KnownArtifactType reports whether t is an artifact type the registry
+// knows: a §4.1 first-class or built-in extension type, or a type that a
+// registered type provider supplies.
+//
+// Spec: §4.7.11 (Policy rules), §4.1
+func KnownArtifactType(t string) bool {
+	if t == "" {
+		return false
+	}
+	_, ok := typeprovider.Default.Get(manifest.ArtifactType(t))
+	return ok
 }
 
 // checkRequirement applies the requirement and signer rules to req.
@@ -220,7 +304,8 @@ func DeriveSourceBinding(sourceType, repo string, reqs []store.TrustRequirement)
 	}
 	out := make([]store.TrustRequirement, len(reqs))
 	for i, r := range reqs {
-		out[i] = store.TrustRequirement{PredicateType: r.PredicateType, Signers: slices.Clone(r.Signers)}
+		out[i] = r
+		out[i].Signers = slices.Clone(r.Signers)
 	}
 	base, ok := derivableRepository(sourceType, repo)
 	if !ok {
@@ -325,17 +410,18 @@ var (
 
 // TrustPolicyEqual reports whether a and b hold the same trust policy. A nil
 // and an empty requirement list are equal, because both store no
-// requirement.
+// requirement, and so are a nil and an empty type list.
 //
 // Spec: §7.3.1 (The layer lifecycle event follows what the write changed)
 func TrustPolicyEqual(a, b store.LayerConfig) bool {
 	if a.TrustMode != b.TrustMode || a.TrustLayerRoot != b.TrustLayerRoot ||
-		len(a.TrustRequirements) != len(b.TrustRequirements) {
+		len(a.TrustRequirements) != len(b.TrustRequirements) || !slices.Equal(a.TrustRequireTypes, b.TrustRequireTypes) {
 		return false
 	}
 	for i := range a.TrustRequirements {
 		ra, rb := a.TrustRequirements[i], b.TrustRequirements[i]
-		if ra.PredicateType != rb.PredicateType || !slices.EqualFunc(ra.Signers, rb.Signers, signerEqual) {
+		if ra.PredicateType != rb.PredicateType || ra.CoversLayer != rb.CoversLayer || ra.Optional != rb.Optional ||
+			!slices.EqualFunc(ra.Signers, rb.Signers, signerEqual) {
 			return false
 		}
 	}
@@ -359,7 +445,7 @@ func instanceName(n string) string {
 
 // TrustMemberNames are the layer-level trust policy members of a layer
 // object, a layer request body, and a registry.yaml layer entry.
-var TrustMemberNames = []string{"trust_mode", "trust_requirements", "trust_layer_root"}
+var TrustMemberNames = []string{"trust_mode", "trust_requirements", "trust_require_types", "trust_layer_root"}
 
 // IsTrustLikeName reports whether name, with its letters folded to lower
 // case and each - read as _, begins with "trust". A member of that form that

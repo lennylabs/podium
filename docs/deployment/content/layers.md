@@ -145,12 +145,13 @@ Authoring rights stay with the source. Whoever can merge to a layer's tracked Gi
 
 Each layer carries a trust policy that states which signers' author attestations its content needs. Under `warn` and `require`, every ingest cycle of the layer verifies the bundles in its attestation directory against the policy, as [Ingest verification](#ingest-verification) below describes.
 
-The policy has three members, which the layer object reports and `podium layer show <id>` prints:
+The policy has these members, which the layer object reports and `podium layer show <id>` prints:
 
 | Member | Meaning |
 |:--|:--|
 | `trust_mode` | `none`, `warn`, or `require`. An empty value takes `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
-| `trust_requirements` | A list that holds at most one requirement. A requirement has `signers` and an optional `predicate_type`. Several requirements are not available yet. |
+| `trust_requirements` | A list of requirements. A requirement has `signers`, an optional `predicate_type`, an optional `covers_layer`, and an optional `optional`. An artifact is verified when it meets every requirement that is not optional. |
+| `trust_require_types` | A list of artifact types, such as `hook` and `mcp-server`, whose failure drops the artifact under `warn` as under `require`. |
 | `trust_layer_root` | For a `local` layer, the `root` under which its content was signed. A `git` layer takes it from its `root`. |
 
 A signer has an OIDC `issuer` and a certificate `identity`, which are compared byte for byte with the signing certificate. It also has source binding members (`source_repository`, `source_repository_owner`, `source_repository_id`, and `source_repository_owner_id`, or `any_source: true`), a ref binding (`source_repository_ref`, or `any_ref: true`), and an optional `instance`, which names a Sigstore instance of `sigstore.instances` and defaults to `public-good`.
@@ -179,11 +180,52 @@ registry:
               source_repository_ref: refs/heads/main
 ```
 
-A layer registered at runtime takes the policy from the [trust policy flags](../../reference/cli#trust-policy-flags) of `podium layer register` and `podium layer update`, or from the `trust_mode`, `trust_requirements`, and `trust_layer_root` members of the [layer endpoints](../../reference/http-api#layer-management).
+A layer registered at runtime takes the policy from the [trust policy flags](../../reference/cli#trust-policy-flags) of `podium layer register` and `podium layer update`, or from the `trust_mode`, `trust_requirements`, `trust_require_types`, and `trust_layer_root` members of the [layer endpoints](../../reference/http-api#layer-management).
+
+### Several requirements
+
+A layer requires attestations from more than one signer by listing several requirements, such as a build attestation from the signing workflow and a scan attestation from a scanner with an identity of its own. Exactly one requirement sets `covers_layer: true`. Its signers attest the layer subject, and its statements list every artifact of the layer, so a state that no run of that signer produced is refused as a whole. Each other requirement is decided for each artifact, because a second signer can lag behind the first or decline an artifact:
+
+- Under `require`, an artifact that an additional requirement does not cover is dropped and reported with its code and the position of the requirement. An unchanged artifact keeps serving its stored version.
+- Under `warn`, such an artifact is stored with the outcome `failed`, which names the requirement.
+- A requirement with `optional: true` fails nothing. The registry verifies and links its bundles, so a consumer whose own policy trusts that signer finds them, and an artifact it does not cover is neither dropped nor reported. The covering requirement cannot be optional.
+
+```yaml
+      trust_mode: warn
+      trust_require_types: [hook, mcp-server]
+      trust_requirements:
+        - covers_layer: true
+          predicate_type: https://slsa.dev/provenance/v1
+          signers:
+            - issuer: https://token.actions.githubusercontent.com
+              identity: https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main
+              source_repository_id: "123456"
+              source_repository_ref: refs/heads/main
+        - predicate_type: https://acme.com/scan/v1
+          signers:
+            - issuer: https://accounts.acme.com
+              identity: scanner@acme.com
+        - optional: true
+          predicate_type: https://acme.com/review/v1
+          signers:
+            - issuer: https://accounts.acme.com
+              identity: review-bot@acme.com
+```
+
+A requirement states that one of its signers signed a statement of its predicate type over the artifact's bytes, and nothing about what the statement records. A scanner or a review signer that a requirement lists therefore signs only on a passing result.
+
+A party who serves the tracked ref can remove a second signer's bundle from a signed state. The changed artifacts that need it are then dropped, the unchanged ones keep their versions, and the removals of the signed state apply, which is also the state a lagging second signer produces. `attestation_dropped` and the output of `podium layer reingest` report the dropped artifacts. A layer that must apply a signed state whole or not at all uses the covering requirement alone.
+
+### Required types
+
+`trust_require_types` lets a layer run `warn` while its riskiest types are enforced. An artifact of a listed type that fails a requirement is dropped under `warn` as under `require`. When the layer step fails under `warn`, every artifact of a listed type is withheld: the cycle stores no version of it, reports it with the layer step's code, counts it in `attestation_dropped`, and removes no stored version of a listed type, so an unsigned or replayed state can neither change nor remove a hook. Each entry is a type the registry knows, a policy that lists one needs a requirement, and its `trust_mode` is not `none`. An artifact counts as a listed type when its manifest declares one or when the version the registry serves for its ID is of one, so a snapshot that declares a stored hook an `agent` is held to the hook's rule.
+
+> [!WARNING]
+> `trust_require_types` enforces nothing while the layer's mode resolves to `none`, which runs no attestation step. A layer with an empty `trust_mode` takes `PODIUM_LAYER_TRUST_DEFAULT`, so its list applies only while the default is `warn` or `require`. A registration or an update that leaves a layer in that state answers with a warning.
 
 ### Checking bundles against the policy
 
-`podium layer show <id> --requirements` writes a registered layer's requirements, with the binding members the registry derived, as a requirements file. `podium attest check --requirements` reads the file and verifies each bundle in the layer's attestation directory against those signers, so a signing workflow or a pull-request check finds a bundle the policy would refuse before the content reaches the registry:
+`podium layer show <id> --requirements` writes a registered layer's requirements, with the binding members the registry derived, as a requirements file. `podium attest check --requirements` reads the file and verifies each bundle in the layer's attestation directory against those signers, so a signing workflow or a pull-request check finds a bundle the policy would refuse before the content reaches the registry. The check reads the layer subject and the packages from the covering requirement's bundles, and it also fails for each package that an additional requirement that is not optional does not cover. The same file, edited, updates a policy of several requirements with `podium layer update --trust-requirements-file`:
 
 ```
 podium layer show finance --requirements > requirements.json
@@ -194,10 +236,10 @@ podium attest check --root skills --requirements requirements.json
 
 ### Ingest verification
 
-A cycle of a layer whose mode resolves to `warn` or `require` reads the bundle files of `.podium/attestations/` in its snapshot and verifies each one against the signers of the requirement. It then checks that the accepted bundles list the layer subject with the layer digest of the snapshot, that the layer subject is not older than the layer's attestation mark, that its attested commit lies in the history of the tracked ref and descends from the commit recorded with the mark (a `git` layer whose signing certificate records the commit), and that every artifact of the snapshot has a subject with its package digest. These checks run before the cycle writes anything.
+A cycle of a layer whose mode resolves to `warn` or `require` reads the bundle files of `.podium/attestations/` in its snapshot and verifies each one against the signers of each requirement. It then checks that the accepted bundles of the covering requirement list the layer subject with the layer digest of the snapshot, that the layer subject is not older than the layer's attestation mark, that its attested commit lies in the history of the tracked ref and descends from the commit recorded with the mark (a `git` layer whose signing certificate records the commit), and that every artifact of the snapshot has a subject with its package digest in those bundles. These checks run before the cycle writes anything. Each artifact is then checked against the additional requirements, as [Several requirements](#several-requirements) above describes.
 
 - Under `require`, a failed check refuses the cycle: nothing is stored or removed, the versions the registry already holds keep serving, and `podium layer reingest` exits 1 with the code, such as `ingest.attestation_missing`, and its `details`. A start whose ingest of a declared `local` or `--layer-path` layer is refused keeps running, and the start log names the layer and the code.
-- Under `warn`, a failed check is recorded and the cycle stores the snapshot.
+- Under `warn`, a failed check is recorded and the cycle stores the snapshot, apart from the artifacts of the [required types](#required-types).
 - A layer whose policy has no requirement under a mode above `none`, or names an instance the registry no longer configures, is refused with `ingest.attestation_policy_invalid` on every cycle until the policy is updated.
 
 Each such cycle writes the layer's attestation record, which the layer object reports and `podium layer show` prints: `attestation_mark`, `attested_commit`, `attestation_status` (`ok` or the code of the failure), `attestation_details`, `attestation_dropped`, and `attestation_checked_at`. When the status is not `ok`, `podium layer show` writes the next step for the code on standard error:
@@ -221,7 +263,7 @@ A layer that `--layer-path` bootstraps carries no signers of its own. Under a `P
 
 A cycle that verifies a layer stores each accepted bundle once and links it to the versions whose subject it lists, one link per predicate type and signer, where the signer is the Sigstore instance under which the bundle verified and the certificate's issuer and identity. A version holds at most 16 links. An unchanged artifact keeps its link across signing runs, so a consumer fetches no new bundle for it after each merge. A layer under `none` whose snapshot holds `.podium/attestations/` links each bundle whose signature, certificate chain, and time verify under a configured instance as `unverified`, so a consumer can verify the bundles under its own policy.
 
-Each version also carries an attestation outcome: `verified` when the cycle that evaluated it found every requirement met, `failed` with the code, the scope, the constraint, and the requirement when it did not, and `not_evaluated` for a version of a layer under `none` and for a version stored before the registry kept outcomes. `load_artifact`, each `ok` item of a bulk load, and `podium artifact show` report the links and the outcome:
+Each version also carries an attestation outcome: `verified` when the cycle that evaluated it found every requirement that is not optional met, `failed` with the code, the scope, the constraint, and the requirement when it did not, and `not_evaluated` for a version of a layer under `none` and for a version stored before the registry kept outcomes. `load_artifact`, each `ok` item of a bulk load, and `podium artifact show` report the links and the outcome:
 
 ```
 podium artifact show finance/ap/pay-invoice
@@ -229,7 +271,7 @@ podium artifact show finance/ap/pay-invoice
 
 The default output writes one `attestation_outcome:` line and one `attestation:` line per link on standard error. The [HTTP API](../../reference/http-api#load_artifact) describes the members, and `GET /v1/attestations/{digest}` serves a linked bundle to a caller who can see a version that links it.
 
-A link records the policy under which the registry verified it. When the trust policy of a layer changes through `podium layer update` or a re-registration, at each registry start, which covers a changed `registry.yaml` declaration, `PODIUM_LAYER_TRUST_DEFAULT`, or trusted root, and at the start of each ingest cycle, the registry re-evaluates the links that were verified under another policy: each bundle a requirement still accepts keeps its link, and a link whose bundle no requirement accepts becomes `unverified`, its version's outcome becomes `failed` with `ingest.attestation_missing` and the constraint `link_downgraded`, and the registry records `layer.attestation_links_downgraded`. A change to `none` changes every verified link to `unverified` and every outcome to `not_evaluated`. A policy change through the layer endpoints also starts an ingest cycle of the layer, and a cycle that was already running under the earlier policy stores its content but writes no link and no outcome. A re-evaluation changes an outcome only when it downgrades a link, so a change that adds a requirement, or that moves the only accepting signer to another signer of the requirement, leaves a stored version `verified` until a cycle evaluates it again; a version no longer in the tree keeps its last outcome. A change of policy refuses no stored version: a version with a downgraded link keeps serving, and the next cycle that passes the layer step links the versions still in the tree under the new policy. While a layer's policy is invalid, such as one that names an instance the registry no longer configures, its `verified` versions are served as `failed` with `ingest.attestation_policy_invalid`, and the stored outcome is served again once the policy is repaired.
+A link records the policy under which the registry verified it. When the trust policy of a layer changes through `podium layer update` or a re-registration, at each registry start, which covers a changed `registry.yaml` declaration, `PODIUM_LAYER_TRUST_DEFAULT`, or trusted root, and at the start of each ingest cycle, the registry re-evaluates the links that were verified under another policy: each bundle a requirement still accepts keeps its link, and a link whose bundle no requirement accepts becomes `unverified`, its version's outcome becomes `failed` with `ingest.attestation_missing` and the constraint `link_downgraded` when a requirement that is not optional is left with no verified link, and the registry records `layer.attestation_links_downgraded`. A change to `none` changes every verified link to `unverified` and every outcome to `not_evaluated`. A policy change through the layer endpoints also starts an ingest cycle of the layer, and a cycle that was already running under the earlier policy stores its content but writes no link and no outcome. A re-evaluation changes an outcome only when it downgrades a link, so a change that adds a requirement, or that moves the only accepting signer to another signer of the requirement, leaves a stored version `verified` until a cycle evaluates it again; a version no longer in the tree keeps its last outcome. A change of policy refuses no stored version: a version with a downgraded link keeps serving, and the next cycle that passes the layer step links the versions still in the tree under the new policy. While a layer's policy is invalid, such as one that names an instance the registry no longer configures, its `verified` versions are served as `failed` with `ingest.attestation_policy_invalid`, and the stored outcome is served again once the policy is repaired.
 
 Stored bundles count toward the tenant's storage quota. A purge of a version deletes its links, and a bundle that no version links is deleted with it.
 
@@ -260,13 +302,14 @@ The registry derives the binding only from a repository URL of the form `https:/
 A registration or an update whose policy breaks one of these rules is refused with `registry.invalid_argument`, and a declared layer whose policy breaks one refuses the registry start with `config.invalid_layer_trust`:
 
 - A `trust_mode` of `warn` or `require` needs a requirement, and a requirement needs at least one signer. At the layer endpoints an empty `trust_mode` counts as `PODIUM_LAYER_TRUST_DEFAULT`, so while the default is `warn` or `require`, a registration or an update that leaves a layer with no mode and no requirement is refused. A declared layer in that state starts, and the start log names it.
-- A policy holds at most one requirement.
+- A policy with several requirements sets `covers_layer: true` on exactly one of them, and that requirement does not set `optional: true`.
+- Each entry of `trust_require_types` names an artifact type the registry knows, no entry is listed twice, and a policy that lists a type has a requirement and a `trust_mode` other than `none`.
 - A signer names an `issuer` and an `identity`, and the binding rules above hold after the derivation.
 - A signer that sets `any_source` names no source binding member, and one that sets `any_ref` names no `source_repository_ref`.
 - A signer's `instance` is one the registry configures.
 - A `git` layer sets no `trust_layer_root`. A `trust_layer_root` neither begins nor ends with `/` and holds no empty, `.`, or `..` segment, and is valid UTF-8 with no white space, control character, or backslash.
 - A requirement or a signer holds no member of another name, including one reached through a YAML alias.
-- A request body or a `registry.yaml` layer entry holds no member that reads as a trust member and is none, such as `trust_mod` or `trust-mode`: a member whose name, with letters folded to lower case and each `-` read as `_`, begins with `trust`. In a layer entry this includes a key taken through a YAML merge key (`<<`), and an entry whose merge keys nest more than 16 deep is refused. A request body matches `trust_mode`, `trust_requirements`, and `trust_layer_root` without regard to letter case and refuses one carried twice, and `trust_mode` and `trust_layer_root` refuse `null`.
+- A request body or a `registry.yaml` layer entry holds no member that reads as a trust member and is none, such as `trust_mod` or `trust-mode`: a member whose name, with letters folded to lower case and each `-` read as `_`, begins with `trust`. In a layer entry this includes a key taken through a YAML merge key (`<<`), and an entry whose merge keys nest more than 16 deep is refused. A request body matches `trust_mode`, `trust_requirements`, `trust_require_types`, and `trust_layer_root` without regard to letter case and refuses one carried twice, and `trust_mode` and `trust_layer_root` refuse `null`.
 - The layer endpoints refuse a trust change for a layer declared in `registry.yaml`, whose declaration sets its policy at each start. A request that restates the stored policy, such as a layer object returned as read, is admitted. A registration under a declared ID without trust members keeps the declared policy, is checked against its source type, and is refused when it changes the layer's source while the declaration holds a requirement.
 
 An update that changes no trust member does not re-check the stored policy, so a policy whose instance was later removed from `registry.yaml` does not block an unrelated update. A layer whose empty mode `PODIUM_LAYER_TRUST_DEFAULT` resolves to `warn` or `require` and that has no requirement is logged as a warning at each start.

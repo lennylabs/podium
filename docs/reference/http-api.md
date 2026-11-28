@@ -1048,7 +1048,8 @@ Every endpoint in this section that returns a layer returns the same object, wit
 | `git_provider` | string | The provider whose signature scheme verifies this layer's inbound deliveries. Empty resolves to `github`. |
 | `force_push_policy` | string | `tolerant` or `strict`. Present on a layer that sets a policy and absent on one that does not. |
 | `trust_mode` | string | Trust mode: `none`, `warn`, `require`, or empty, which takes `PODIUM_LAYER_TRUST_DEFAULT`. See [Layer trust policy](../deployment/content/layers#layer-trust-policy). |
-| `trust_requirements` | array | The trust requirement, at most one, with any source binding members the registry derived. `null` when the layer has none. |
+| `trust_requirements` | array | The trust requirements, each with `signers`, `predicate_type`, `covers_layer`, and `optional` where set, and with any source binding members the registry derived. `null` when the layer has none. |
+| `trust_require_types` | array | The artifact types whose failure drops the artifact under `warn` as under `require`. `null` when the layer lists none. |
 | `trust_layer_root` | string | For a `local` layer, the `root` under which its content was signed. |
 | `attestation_mark`, `attested_commit`, `attestation_status`, `attestation_details`, `attestation_dropped`, `attestation_checked_at` | mixed | The layer's [attestation record](../deployment/content/layers#ingest-verification), read-only: the attested time of the last accepted layer subject, its signed commit, `ok` or the code of the last cycle's attestation failure, that failure's `details`, the number of artifacts the last cycle's artifact step dropped, and the time of the last record write. Each is absent until a cycle writes it, and a register or update body that carries one changes nothing. |
 | `visibility_source`, `visibility_pending` | mixed | Read-only, on a layer that `--layer-path` loads: `declared` or `default`, and the `.layer-config` visibility (an object with `public`, `organization`, `groups`, and `users`) that the last start or cycle read and did not apply in full. Each is absent while it holds no value. See [Visibility of a `--layer-path` layer](../deployment/content/layers#visibility-of-a---layer-path-layer). |
@@ -1129,7 +1130,7 @@ POST /v1/layers
 | `local_path` | No | The filesystem path on the registry host. |
 | `git_provider` | No | The Git provider whose webhook signature scheme verifies this layer's inbound deliveries. It applies to a `git` source alone. Omitting it resolves the layer to `github`. |
 | `force_push_policy` | No | `tolerant` or `strict`. |
-| `trust_mode`, `trust_requirements`, `trust_layer_root` | No | The [layer trust policy](../deployment/content/layers#layer-trust-policy). The registry derives the source binding of a signer of the layer's own repository before it stores the policy. |
+| `trust_mode`, `trust_requirements`, `trust_require_types`, `trust_layer_root` | No | The [layer trust policy](../deployment/content/layers#layer-trust-policy). The registry derives the source binding of a signer of the layer's own repository before it stores the policy. |
 | `public`, `organization`, `groups`, `users` | No | Visibility. Read on a tenant admin's registration alone. |
 | `owner` | No | The layer owner. Read on a tenant admin's registration alone. |
 | `repo_username`, `repo_token` | No | The write-only repository credential. See [Repository credential](#repository-credential). |
@@ -1156,6 +1157,7 @@ POST /v1/layers
     "git_provider": "github",
     "trust_mode": "",
     "trust_requirements": null,
+    "trust_require_types": null,
     "trust_layer_root": "",
     "last_ingested_ref": "",
     "created_at": "2026-09-04T10:15:00Z",
@@ -1415,9 +1417,10 @@ PUT  /v1/layers/update?id={id}
 |:--|:--|
 | `public`, `organization`, `groups`, `users` | By presence. See [Visibility members](#visibility-members). |
 | `ref`, `root`, `local_path`, `owner`, `git_provider`, `force_push_policy` | By value. A non-zero field replaces the corresponding value, and a zero field leaves it unchanged. |
-| `trust_mode`, `trust_requirements`, `trust_layer_root` | By presence, matched without regard to letter case. A member the body carries replaces the stored value, so `"trust_mode": ""` returns the layer to `PODIUM_LAYER_TRUST_DEFAULT` and `"trust_requirements": []` or `null` removes the requirement; `null` for `trust_mode` or `trust_layer_root` is refused. An update that carries one of them checks the resulting policy; one that carries none leaves the stored policy unchecked. A trust member that changes the policy of a layer declared in `registry.yaml` is refused. |
+| `trust_mode`, `trust_requirements`, `trust_require_types`, `trust_layer_root` | By presence, matched without regard to letter case. A member the body carries replaces the stored value, so `"trust_mode": ""` returns the layer to `PODIUM_LAYER_TRUST_DEFAULT`, `"trust_requirements": []` or `null` removes the requirements, and `"trust_require_types": []` or `null` removes the listed types; `null` for `trust_mode` or `trust_layer_root` is refused. An update that carries one of them checks the resulting policy; one that carries none leaves the stored policy unchecked. A trust member that changes the policy of a layer declared in `registry.yaml` is refused. |
 | `repo_token`, `repo_username`, `clear_repo_credential` | See [Repository credential on update](#repository-credential-on-update). |
 | `rotate_webhook_secret` | Requests a webhook-secret rotation. The response then carries the new secret in `webhook_secret`. |
+| `expected_trust_requirements` | A precondition: the requirements, or `null` for none, that the client expects the layer to store. When the stored requirements differ, at the check or at the write, the update is refused with `400 registry.invalid_argument` and `details.constraint: "trust_requirements_changed"`, and nothing is written. |
 
 **Response.** The layer. An update that requests no secret rotation returns the layer alone, without `webhook_url` and `webhook_secret`. On a registry that verifies no caller, the response carries the [unapplied-visibility warning](#unapplied-visibility-warning) when the layer sets no `public` grant.
 

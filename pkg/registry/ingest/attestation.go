@@ -193,6 +193,9 @@ type AttestationCycle struct {
 	// evaluated holds the bundles layer step 2 evaluated, which the cycle
 	// links after a failed layer step under warn as after a passed one.
 	evaluated []*snapshotBundle
+	// storedTypes holds, for a policy that lists types, the types of the
+	// live stored versions of the layer by ID (readStoredTypes).
+	storedTypes map[string][]string
 	// vis is the visibility rule of a cycle of a path-bootstrapped layer,
 	// nil for every other layer (§4.7.11 Visibility of a path-bootstrapped
 	// layer). rowCreated and visAudit are set by AtStart, and publish
@@ -414,6 +417,10 @@ type attestationVerdict struct {
 	outcomes map[string]AttestationOutcome
 	// bundles are the bundles layer step 2 evaluated, which the cycle links.
 	bundles []*snapshotBundle
+	// requireTypes is the layer's trust_require_types, which keeps the
+	// stored versions of a listed type from removal after a failed layer
+	// step (withholdsRemoval).
+	requireTypes []string
 }
 
 // AttestationOutcome is the §4.7.11 attestation outcome of one artifact

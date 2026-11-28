@@ -304,7 +304,10 @@ func (r *reevaluation) run(ctx context.Context) (policyState, error) {
 	if err != nil {
 		return ps, err
 	}
-	w := r.writes(ctx, links, selected, checks)
+	w, err := r.writes(ctx, links, selected, checks)
+	if err != nil {
+		return ps, err
+	}
 	if clear {
 		if err := r.clearOutcomes(ctx, &w); err != nil {
 			return ps, err
@@ -462,8 +465,9 @@ func matchingRequirements(raw []byte, reqs []store.TrustRequirement, instance st
 
 // writes builds the link updates and the outcome downgrades of the decided
 // bundles. Each update applies only while the link holds the digest, the
-// verdict, and the key the re-evaluation read.
-func (r *reevaluation) writes(ctx context.Context, links, selected []store.AttestationLink, checks map[checkKey]linkCheck) store.AttestationWrites {
+// verdict, and the key the re-evaluation read. A bundle the outcome
+// downgrade cannot read fails the re-evaluation, which then writes nothing.
+func (r *reevaluation) writes(ctx context.Context, links, selected []store.AttestationLink, checks map[checkKey]linkCheck) (store.AttestationWrites, error) {
 	now := r.clock.Now().UTC()
 	byVersion := map[[2]string]*store.VersionAttestations{}
 	var order [][2]string
@@ -499,23 +503,27 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 		v.Updates = append(v.Updates, store.LinkUpdate{Link: l, ReadVerdict: read.Verdict, ReadVerifiedUnder: read.VerifiedUnder})
 	}
 	if r.policy.mode != layer.TrustModeNone {
-		r.downgradeOutcomes(ctx, links, checks, downgradedLinks, version, now)
+		if err := r.downgradeOutcomes(ctx, links, checks, downgradedLinks, version, now); err != nil {
+			return store.AttestationWrites{}, err
+		}
 	}
 	w := store.AttestationWrites{}
 	for _, k := range order {
 		w.Versions = append(w.Versions, *byVersion[k])
 	}
-	return w
+	return w, nil
 }
 
 // downgradeOutcomes sets the outcome failed on each version that lost a
-// verified link, with the first requirement that accepts the bundle of none
-// of its remaining verified links. A version whose requirements each still
-// accept a remaining link keeps its outcome. A remaining link that the
+// verified link, with the first requirement that is not optional and that
+// accepts the bundle of none of its remaining verified links. A version
+// whose requirements that are not optional each still accept a remaining
+// link keeps its outcome, so a lost link of an optional requirement changes
+// no outcome. A remaining link that the
 // re-evaluation did not decide is credited to the requirements whose signers
 // its certificate matches.
 func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.AttestationLink, checks map[checkKey]linkCheck,
-	downgraded map[[2]string]map[store.LinkKey]bool, version func(store.AttestationLink) *store.VersionAttestations, now time.Time) {
+	downgraded map[[2]string]map[store.LinkKey]bool, version func(store.AttestationLink) *store.VersionAttestations, now time.Time) error {
 	handled := map[[2]string]bool{}
 	for _, l := range links {
 		k := [2]string{l.ArtifactID, l.Version}
@@ -529,12 +537,16 @@ func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.Atte
 			if other.ArtifactID != l.ArtifactID || other.Version != l.Version || other.Verdict != store.VerdictVerified || lost[other.Key()] {
 				continue
 			}
-			for _, req := range r.remainingRequirements(ctx, other, checks) {
+			reqs, err := r.remainingRequirements(ctx, other, checks)
+			if err != nil {
+				return err
+			}
+			for _, req := range reqs {
 				covered[req] = true
 			}
 		}
-		for req := range r.layer.TrustRequirements {
-			if covered[req] {
+		for req, tr := range r.layer.TrustRequirements {
+			if tr.Optional || covered[req] {
 				continue
 			}
 			n := req
@@ -545,26 +557,28 @@ func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.Atte
 			break
 		}
 	}
+	return nil
 }
 
 // remainingRequirements returns the requirements a verified link that keeps
-// its verdict counts for.
-func (r *reevaluation) remainingRequirements(ctx context.Context, l store.AttestationLink, checks map[checkKey]linkCheck) []int {
+// its verdict counts for. A bundle the store no longer holds counts for no
+// requirement, as checkBundles decides it. A read that fails otherwise fails
+// the re-evaluation, so a read failure never keeps an outcome verified; the
+// next cycle or start runs the re-evaluation again.
+//
+// Spec: §4.7.11 (Re-evaluation)
+func (r *reevaluation) remainingRequirements(ctx context.Context, l store.AttestationLink, checks map[checkKey]linkCheck) ([]int, error) {
 	if c, ok := checks[keyOf(l)]; ok && c.decided {
-		return c.accepted
+		return c.accepted, nil
 	}
 	a, err := r.st.GetAttestation(ctx, r.layer.TenantID, l.Digest)
-	if err != nil {
-		// A link whose bundle cannot be read counts for every requirement it
-		// was verified for, which the outcome it holds records, so no read
-		// failure downgrades an outcome.
-		all := make([]int, len(r.layer.TrustRequirements))
-		for i := range all {
-			all[i] = i
-		}
-		return all
+	switch {
+	case errors.Is(err, store.ErrNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, fmt.Errorf("ingest: read attestation %s: %w", l.Digest, err)
 	}
-	return matchingRequirements(a.Bundle, r.layer.TrustRequirements, l.Instance)
+	return matchingRequirements(a.Bundle, r.layer.TrustRequirements, l.Instance), nil
 }
 
 // clearOutcomes sets the outcome not_evaluated on every version of a layer

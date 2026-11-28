@@ -64,15 +64,15 @@ func (s *Memory) WriteAttestations(_ context.Context, tenantID, layerID, claim s
 // its stored form.
 func (s *Memory) storesPolicyLocked(tenantID, layerID string, p TrustPolicy) (bool, error) {
 	cfg := s.layers[layerKey(tenantID, layerID)]
-	wm, wr, wl, err := policyColumns(p)
+	wm, wr, wt, wl, err := policyColumns(p)
 	if err != nil {
 		return false, err
 	}
-	sm, sr, sl, err := policyColumns(PolicyOf(cfg))
+	sm, sr, st, sl, err := policyColumns(PolicyOf(cfg))
 	if err != nil {
 		return false, err
 	}
-	return wm == sm && wr == sr && wl == sl, nil
+	return wm == sm && wr == sr && wt == st && wl == sl, nil
 }
 
 // writeVersionLocked applies the write of one version and returns the link

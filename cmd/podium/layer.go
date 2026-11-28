@@ -37,7 +37,7 @@ var sleepFor = func(d time.Duration) { time.Sleep(d) }
 //
 //	podium layer register --id <id> --repo <git-url> --ref <ref> [--root <subpath>] [--repo-username <name>] [--repo-token-file <path|->] [--clear-repo-credential] [<trust flags>]
 //	podium layer register --id <id> --local <path> [<trust flags>]
-//	podium layer update --id <id> [<trust flags>] [--clear-trust-requirements]
+//	podium layer update --id <id> [<trust flags>] [--clear-trust-requirements] [--clear-trust-require-types]
 //	podium layer list
 //	podium layer show <id>
 //	podium layer reorder <id> [<id> ...]
@@ -138,11 +138,11 @@ func layerUpdate(args []string) int {
 		return 2
 	}
 	// Spec: §7.3.1 (Layer CLI) — the trust flags patch the trust members by
-	// presence, and a requirement built from them replaces the stored one.
+	// presence, and a requirement built from them replaces the stored ones.
 	trustBody, err := trust.body(set)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 2
+		return trustBodyExit(err)
 	}
 	for k, v := range trustBody {
 		body[k] = v
@@ -186,6 +186,14 @@ func layerUpdate(args []string) int {
 	if len(body) == 0 {
 		fmt.Fprintln(os.Stderr, "error: at least one mutable field must be provided")
 		return 2
+	}
+	expected, err := trust.checkSingleRequirement(*registry, *id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+	if expected != nil {
+		body["expected_trust_requirements"] = expected
 	}
 	out, status := doJSON(*registry+"/v1/layers/update?id="+*id, "PUT", body)
 	if status >= 400 {
@@ -313,7 +321,7 @@ func layerRegister(args []string) int {
 	body, err := trust.body(set)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
-		return 2
+		return trustBodyExit(err)
 	}
 	body["id"] = *id
 	if *repo != "" {

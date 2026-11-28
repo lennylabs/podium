@@ -206,7 +206,8 @@ Each entry of `layers` takes these keys:
 | `visibility.public`, `visibility.organization` | boolean | Visibility to everyone, or to every authenticated caller of the tenant. |
 | `visibility.groups`, `visibility.users` | list of strings | Visibility to the named groups or users. |
 | `trust_mode` | string | Trust mode of the layer: `none`, `warn`, or `require`. Unset takes `PODIUM_LAYER_TRUST_DEFAULT`. |
-| `trust_requirements` | list | At most one requirement, each with `signers` and an optional `predicate_type`. [Layer trust policy](../deployment/content/layers#layer-trust-policy) lists the signer keys. |
+| `trust_requirements` | list | Requirements, each with `signers` and the optional keys `predicate_type`, `covers_layer`, and `optional`. A list of several sets `covers_layer: true` on one requirement. [Layer trust policy](../deployment/content/layers#layer-trust-policy) lists the signer keys. |
+| `trust_require_types` | list of strings | Artifact types, such as `hook`, whose failure drops the artifact under `warn` as under `require`. |
 | `trust_layer_root` | string | For a `local` entry, the `root` under which the layer's content was signed. |
 
 An entry that sets both sources or neither, or that omits a required key, refuses startup. An entry whose trust policy breaks a [policy rule](../deployment/content/layers#policy-rules), including a requirement or signer key the policy does not define, written in place or through a YAML alias, and an entry key such as `trust-mode` that reads as a trust key and is none, refuses startup with `config.invalid_layer_trust`, in an error that names the layer and the rule.

@@ -179,12 +179,12 @@ func (d attSQL) checkClaim(ctx context.Context, tx *sql.Tx, tenantID, layerID, c
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?`
 	args := []any{tenantID, layerID, claim}
 	if p != nil {
-		mode, reqs, root, err := policyColumns(*p)
+		mode, reqs, types, root, err := policyColumns(*p)
 		if err != nil {
 			return err
 		}
-		q += ` AND trust_mode = ? AND trust_requirements = ? AND trust_layer_root = ?`
-		args = append(args, mode, reqs, root)
+		q += ` AND trust_mode = ? AND trust_requirements = ? AND trust_require_types = ? AND trust_layer_root = ?`
+		args = append(args, mode, reqs, types, root)
 	}
 	held, err := rowsChanged(tx.ExecContext(ctx, d.q(q), args...))
 	if err != nil {

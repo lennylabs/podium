@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -154,6 +155,35 @@ func TestAttestCheck_Requirements(t *testing.T) {
 	// An unreadable root file fails the check when a bundle is verified.
 	if code, _, stderr := runCheckT(t, nil, dir, "--root", "skills", "--requirements", reqs, "--trusted-root", "github="+filepath.Join(t.TempDir(), "none")); code != 1 || !strings.Contains(stderr, `Sigstore instance "github"`) {
 		t.Errorf("unreadable root: exit %d, stderr %q", code, stderr)
+	}
+}
+
+// Spec: §7.3.5 (Checking bundles) — with several requirements the layer
+// subject and the packages are checked against the covering requirement's
+// bundles, each additional requirement that is not optional fails the check
+// for a package its bundles do not list, an optional requirement fails
+// nothing, and a bundle that some requirement accepts is not reported as
+// refused.
+func TestAttestCheck_SeveralRequirements(t *testing.T) {
+	dir := importLayer(t)
+	h := sh.New(t)
+	subs := layerSubjectsOf(t, dir, "skills")
+	rootFile := writeFileT(t, "github.json", string(h.TrustedRootJSON(sh.GitHubStyleRoot()...)))
+	scanner := sh.WithLeaf(sh.LeafEmail("scanner@acme.com"))
+	placeBundles(t, dir, "skills", ghBundleOf(t, h, importSLSA, subs), ghBundleOf(t, h, importScan, subs[:2], scanner))
+	reqs := func(optional bool) string {
+		return writeFileT(t, "requirements.json", `{"trust_requirements":[`+
+			`{"signers":[{"issuer":"`+sh.DefaultIssuer+`","identity":"scanner@acme.com","instance":"github"}],"predicate_type":"`+importScan+`","optional":`+fmt.Sprint(optional)+`},`+
+			`{"signers":[{"issuer":"`+sh.DefaultIssuer+`","identity":"`+sh.DefaultSAN+`","instance":"github"}],"predicate_type":"`+importSLSA+`","covers_layer":true}]}`)
+	}
+	code, stdout, stderr := runCheckT(t, nil, dir, "--root", "skills", "--requirements", reqs(false), "--trusted-root", "github="+rootFile)
+	name := strings.SplitN(subs[2].Name, "@", 2)[0]
+	if code != 1 || !strings.Contains(stdout, "missing: no bundle of requirement 0 lists "+name) || strings.Count(stdout, "missing:") != 1 || strings.Contains(stdout, "refused:") {
+		t.Fatalf("exit %d, stdout %q, stderr %s", code, stdout, stderr)
+	}
+	code, stdout, stderr = runCheckT(t, nil, dir, "--root", "skills", "--requirements", reqs(true), "--trusted-root", "github="+rootFile)
+	if code != 0 || !strings.Contains(stdout, "ok: ") {
+		t.Fatalf("optional: exit %d, stdout %q, stderr %s", code, stdout, stderr)
 	}
 }
 

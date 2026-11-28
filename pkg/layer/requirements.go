@@ -47,18 +47,18 @@ func ParseRequirementsFile(raw []byte) (RequirementsFile, error) {
 }
 
 // CheckRequirements applies the §4.7.11 policy rules that read a
-// requirement or a signer to reqs: at least one and at most
-// MaxTrustRequirements requirements, a signer in each, and the signer rules
+// requirement or a signer to reqs: at least one requirement, one covering
+// requirement that is not optional, a signer in each, and the signer rules
 // with each instance known to instances. It returns nil or an error wrapping
 // ErrTrustPolicy.
 //
 // Spec: §4.7.11 (Policy rules)
 func CheckRequirements(reqs []store.TrustRequirement, instances TrustInstances) error {
-	switch n := len(reqs); {
-	case n == 0:
+	if len(reqs) == 0 {
 		return trustRefusal("trust_requirements holds no requirement")
-	case n > MaxTrustRequirements:
-		return trustRefusal("trust_requirements holds %d requirements; several requirements are not available yet, so a policy holds at most %d", n, MaxTrustRequirements)
+	}
+	if err := checkCovering(reqs); err != nil {
+		return err
 	}
 	for i, req := range reqs {
 		if err := checkRequirement(fmt.Sprintf("trust_requirements[%d]", i), req, instances); err != nil {

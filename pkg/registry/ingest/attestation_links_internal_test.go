@@ -137,7 +137,7 @@ func TestIngest_DroppedUnchangedVersionTakesTheFailedOutcome(t *testing.T) {
 	}
 	lc := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: dir, TrustMode: "require",
 		TrustRequirements: []store.TrustRequirement{
-			{Signers: []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: sh.DefaultSAN, Instance: "github"}}},
+			{Signers: []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: sh.DefaultSAN, Instance: "github"}}, CoversLayer: true},
 			{Signers: []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: "carol@acme.com", Instance: "github"}}},
 		}}
 	if err := st.PutLayerConfig(ctx, lc); err != nil {
@@ -149,7 +149,6 @@ func TestIngest_DroppedUnchangedVersionTakesTheFailedOutcome(t *testing.T) {
 		t.Fatal(err)
 	}
 	att := cfg.Cycle(claimed, claim)
-	att.checked = true
 	res, err := Ingest(ctx, st, Request{TenantID: "t", LayerID: "L", IngestClaim: claim, Files: source.ConfinedFS(dir), Attestation: att})
 	if err != nil {
 		t.Fatal(err)

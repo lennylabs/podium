@@ -47,11 +47,14 @@ func TestValidate_DeclaredLayerTrustRefusals(t *testing.T) {
 		name, policy, want string
 	}{
 		{"require without requirement", "      trust_mode: require\n", "trust_mode require needs a requirement"},
-		{"several", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n        - signers: [{issuer: i, identity: alice@acme.com}]\n", "several requirements are not available yet"},
+		{"several", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n        - signers: [{issuer: i, identity: alice@acme.com}]\n", "0 of them set covers_layer"},
+		{"optional covering", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n          optional: true\n", "the covering requirement cannot be optional"},
+		{"unknown type", "      trust_mode: warn\n      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n      trust_require_types: [hooks]\n", `"hooks" is not an artifact type`},
+		{"misspelled types key", "      trust_require_type: [hook]\n", `the key "trust_require_type"`},
 		{"unbound", "      trust_requirements:\n        - signers:\n            - issuer: i\n              identity: https://github.com/acme/.github/.github/workflows/a.yml@refs/heads/main\n", "names no source binding"},
 		{"unknown instance", "      trust_requirements:\n        - signers:\n            - {issuer: i, identity: alice@acme.com, instance: acme}\n", `instance "acme"`},
 		{"misspelled member", "      trust_requirements:\n        - signers:\n            - {issuer: i, identity: alice@acme.com, source_repositry: x}\n", `trust_requirements[0].signers[0] holds the key "source_repositry" (line 10)`},
-		{"requirement key", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n          optional: true\n", `trust_requirements[0] holds the key "optional"`},
+		{"requirement key", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n          optinal: true\n", `trust_requirements[0] holds the key "optinal"`},
 		{"not a list", "      trust_requirements: {signers: []}\n", "is not a list"},
 		{"bad shape", "      trust_requirements:\n        - signers: notalist\n", "trust_requirements:"},
 		{"root on git", "      trust_layer_root: skills\n", "applies to a local layer"},
@@ -102,7 +105,9 @@ func TestBootstrapDeclaredLayers_SeedsTrustPolicy(t *testing.T) {
 	body := "registry:\n  sigstore:\n    instances:\n      - name: github\n        trusted_root: " + filepath.Join(dir, "github.json") + "\n" +
 		strings.TrimPrefix(trustYAMLLayer("      trust_mode: require\n      trust_requirements:\n        - predicate_type: https://slsa.dev/provenance/v1\n          signers:\n"+
 			"            - issuer: https://token.actions.githubusercontent.com\n              identity: https://github.com/acme/finance/.github/workflows/podium-attest.yml@refs/heads/main\n"+
-			"            - {issuer: i, identity: alice@acme.com, instance: github, source_repository_owner_id: 12345, any_ref: true}\n"), "registry:\n")
+			"            - {issuer: i, identity: alice@acme.com, instance: github, source_repository_owner_id: 12345, any_ref: true}\n"+
+			"          covers_layer: true\n        - predicate_type: https://acme.com/scan/v1\n          optional: true\n          signers: [{issuer: i, identity: scanner@acme.com}]\n"+
+			"      trust_require_types: [hook, mcp-server]\n"), "registry:\n")
 	c := loadTrustConfig(t, body, "")
 	if err := c.validate(); err != nil {
 		t.Fatalf("validate = %v", err)
@@ -119,8 +124,8 @@ func TestBootstrapDeclaredLayers_SeedsTrustPolicy(t *testing.T) {
 		{Issuer: "https://token.actions.githubusercontent.com", Identity: "https://github.com/acme/finance/.github/workflows/podium-attest.yml@refs/heads/main",
 			SourceRepository: "https://github.com/acme/finance", SourceRepositoryRef: "refs/heads/main"},
 		{Issuer: "i", Identity: "alice@acme.com", Instance: "github", SourceRepositoryOwnerID: "12345", AnyRef: true},
-	}}}
-	if !layer.TrustPolicyEqual(got, store.LayerConfig{TrustMode: "require", TrustRequirements: want}) {
+	}, CoversLayer: true}, {PredicateType: "https://acme.com/scan/v1", Optional: true, Signers: []store.TrustSigner{{Issuer: "i", Identity: "scanner@acme.com"}}}}
+	if !layer.TrustPolicyEqual(got, store.LayerConfig{TrustMode: "require", TrustRequirements: want, TrustRequireTypes: []string{"hook", "mcp-server"}}) {
 		t.Errorf("seeded policy = %q %+v, want require %+v", got.TrustMode, got.TrustRequirements, want)
 	}
 }

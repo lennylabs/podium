@@ -7,25 +7,26 @@ import (
 	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
-	"github.com/lennylabs/podium/pkg/store"
 )
 
-// refusedBundles lists up to 5 bundles that the signers refused, each with
-// its attestation digest and reason. For a bundle whose signature, chain,
-// and time verified under an instance a signer names, the entry also holds
-// that instance and the certificate fields an operator compares with the
-// layer's signers. A bundle that verified under no configured instance can
-// carry a certificate its sender made, so its entry holds no certificate
-// field.
+// refusedBundles lists up to 5 bundles that the signers of the covering
+// requirement, at position covering, refused, each with its attestation
+// digest and the reason those signers gave. For a bundle whose signature,
+// chain, and time verified under an instance a signer of that requirement
+// names, the entry also holds that instance and the certificate fields an
+// operator compares with the layer's signers. A bundle that verified under
+// no such instance can carry a certificate its sender made, so its entry
+// holds no certificate field.
 //
 // Spec: §4.7.11 (Layer step, Reported strings)
-func refusedBundles(bundles []*snapshotBundle, signers []store.TrustSigner, a *AttestationCycle) []map[string]any {
+func refusedBundles(bundles []*snapshotBundle, covering int, a *AttestationCycle) []map[string]any {
 	out := []map[string]any{}
+	signers := a.layer.TrustRequirements[covering].Signers
 	for _, b := range bundles {
 		if len(out) == detailsBundles {
 			break
 		}
-		entry := map[string]any{"digest": b.digest, "reason": string(b.reason)}
+		entry := map[string]any{"digest": b.digest, "reason": string(b.reasons[covering])}
 		for _, s := range signers {
 			inst, _ := a.instance(s.Instance)
 			if v := b.verified[inst.Name]; v != nil {
@@ -114,7 +115,7 @@ func layerDigestFailure(name, digest string, input attest.Layer, accepted []*sna
 func bundleSubjects(bundles []*snapshotBundle) map[string]map[string]bool {
 	out := map[string]map[string]bool{}
 	for _, b := range bundles {
-		for _, s := range b.accepted[coveringRequirement].Statement.Subjects {
+		for _, s := range b.covering.Statement.Subjects {
 			if s.Name == "" || strings.HasPrefix(s.Name, ".podium/") {
 				continue
 			}

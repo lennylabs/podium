@@ -8,12 +8,16 @@ import (
 
 // TrustRequirement is one requirement of a layer trust policy (§4.7.11): the
 // signers whose accepted bundles meet it and the predicate type their
-// statements carry, when the requirement names one.
+// statements carry, when the requirement names one. CoversLayer marks the
+// covering requirement of a policy with several, and Optional an additional
+// requirement whose bundles are linked and whose absence fails nothing.
 //
 // Spec: §4.7.11 (Layer trust policy)
 type TrustRequirement struct {
 	Signers       []TrustSigner `json:"signers"`
 	PredicateType string        `json:"predicate_type,omitempty"`
+	CoversLayer   bool          `json:"covers_layer,omitempty"`
+	Optional      bool          `json:"optional,omitempty"`
 }
 
 // TrustSigner is a signer of a requirement (§4.7.11): an OIDC issuer and a
@@ -80,12 +84,48 @@ func cloneTrustRequirements(reqs []TrustRequirement) []TrustRequirement {
 	}
 	out := make([]TrustRequirement, len(reqs))
 	for i, r := range reqs {
-		out[i] = TrustRequirement{PredicateType: r.PredicateType}
+		out[i] = r
+		out[i].Signers = nil
 		if len(r.Signers) > 0 {
 			out[i].Signers = append([]TrustSigner(nil), r.Signers...)
 		}
 	}
 	return out
+}
+
+// cloneRequireTypes returns a copy of types, nil for an empty list, so a
+// stored list shares no slice with its caller and an empty list and one
+// never set are one stored value.
+func cloneRequireTypes(types []string) []string {
+	if len(types) == 0 {
+		return nil
+	}
+	return append([]string(nil), types...)
+}
+
+// requireTypesColumn returns the trust_require_types column the SQL stores
+// write: the JSON array, or the empty string for no type. A list of strings
+// always encodes, so the column has no encoding failure.
+func requireTypesColumn(types []string) string {
+	if len(types) == 0 {
+		return ""
+	}
+	b, _ := json.Marshal(types)
+	return string(b)
+}
+
+// parseRequireTypes reads the trust_require_types column back. The empty
+// string, which every row written before the column existed holds, lists no
+// type.
+func parseRequireTypes(col string) ([]string, error) {
+	if col == "" {
+		return nil, nil
+	}
+	var types []string
+	if err := json.Unmarshal([]byte(col), &types); err != nil {
+		return nil, fmt.Errorf("store: decode trust require types: %w", err)
+	}
+	return cloneRequireTypes(types), nil
 }
 
 // trustRequirementsColumn returns the trust_requirements column the SQL stores

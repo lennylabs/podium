@@ -75,6 +75,7 @@ const layerKeepVisibilityAssignments = `source_type = excluded.source_type,
 			repo_userinfo = excluded.repo_userinfo,
 			trust_mode = excluded.trust_mode,
 			trust_requirements = excluded.trust_requirements,
+			trust_require_types = excluded.trust_require_types,
 			trust_layer_root = excluded.trust_layer_root`
 
 // AttestationStatusOK is the status of a cycle that passed the layer step.

@@ -45,8 +45,28 @@ type servingFixture struct {
 	bundle []byte
 }
 
-// newServingFixture ingests a signed two-agent layer into st and serves it.
+// servingPolicy is the trust policy of a serving fixture's layer and the
+// bundles of a second signer that its attestation directory holds beside
+// the covering bundle, built over the layer's subjects.
+type servingPolicy struct {
+	mode    string
+	reqs    []store.TrustRequirement
+	bundles func(h *sh.Harness, subjects []sh.Subject) [][]byte
+}
+
+// newServingFixture ingests a signed two-agent layer into st under require
+// with one requirement and serves it.
 func newServingFixture(t *testing.T, st store.Store) *servingFixture {
+	t.Helper()
+	return newServingFixtureWith(t, st, servingPolicy{mode: "require", reqs: []store.TrustRequirement{{
+		PredicateType: asPredicateType,
+		Signers:       []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: sh.DefaultSAN, Instance: "github"}},
+	}}})
+}
+
+// newServingFixtureWith ingests the signed two-agent layer into st under
+// the policy p and serves it.
+func newServingFixtureWith(t *testing.T, st store.Store, p servingPolicy) *servingFixture {
 	t.Helper()
 	ctx := context.Background()
 	h := sh.New(t)
@@ -83,14 +103,18 @@ func newServingFixture(t *testing.T, st store.Store) *servingFixture {
 	if err := os.WriteFile(filepath.Join(attDir, attest.BundleFileName(bundle)), bundle, 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if p.bundles != nil {
+		for _, b := range p.bundles(h, subjects) {
+			if err := os.WriteFile(filepath.Join(attDir, attest.BundleFileName(b)), b, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
 	if err := st.CreateTenant(ctx, store.Tenant{ID: "default", Name: "default"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "default", ID: "team", SourceType: "local", LocalPath: dir,
-		Users: []string{"alice"}, TrustMode: "require", TrustRequirements: []store.TrustRequirement{{
-			PredicateType: asPredicateType,
-			Signers:       []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: sh.DefaultSAN, Instance: "github"}},
-		}}}); err != nil {
+		Users: []string{"alice"}, TrustMode: p.mode, TrustRequirements: p.reqs}); err != nil {
 		t.Fatal(err)
 	}
 	cfg := &ingest.AttestationConfig{Instances: map[string]sign.AttestationInstance{"github": {Name: "github", Root: root}}}
@@ -451,5 +475,64 @@ func TestAttestServing_BundleEndpointScopeAndWork(t *testing.T) {
 	}
 	if stored := counting.lists.Load(); stored != unknown {
 		t.Errorf("listings: unknown digest %d, stored invisible digest %d", unknown, stored)
+	}
+}
+
+// Spec: §7.2 (Attestation members), §4.7.11 (Verified links, Attestation
+// outcome) — under a policy of a covering requirement, a scan requirement,
+// and an optional review requirement, load_artifact serves a verified link
+// per signer that accepted a bundle of the version, the optional one
+// included, and an artifact the scanner did not list is served under warn
+// with the outcome failed naming requirement 1.
+func TestAttestServing_SeveralRequirements(t *testing.T) {
+	t.Parallel()
+	const scanType, reviewType = "https://acme.com/scan/v1", "https://acme.com/review/v1"
+	signer := func(id string) []store.TrustSigner {
+		return []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: id, Instance: "github"}}
+	}
+	f := newServingFixtureWith(t, store.NewMemory(), servingPolicy{mode: "warn",
+		reqs: []store.TrustRequirement{
+			{PredicateType: asPredicateType, Signers: signer(sh.DefaultSAN), CoversLayer: true},
+			{PredicateType: scanType, Signers: signer("scanner@acme.com")},
+			{PredicateType: reviewType, Signers: signer("bob@acme.com"), Optional: true},
+		},
+		bundles: func(h *sh.Harness, subjects []sh.Subject) [][]byte {
+			var pay []sh.Subject
+			for _, s := range subjects {
+				if strings.HasPrefix(s.Name, "finance/pay@") {
+					pay = append(pay, s)
+				}
+			}
+			at := sh.WithTimestamp(sh.TSAPrimary, sh.WithGenTime(h.Clock().Add(2*time.Minute)))
+			return [][]byte{
+				h.DSSEBundle(sh.Statement(t, scanType, pay...), at, sh.WithLeaf(sh.LeafEmail("scanner@acme.com"))),
+				h.DSSEBundle(sh.Statement(t, reviewType, pay...), at, sh.WithLeaf(sh.LeafEmail("bob@acme.com"))),
+			}
+		}})
+	load := func(id string) provenance {
+		t.Helper()
+		status, _, raw := f.do(t, http.MethodGet, "/v1/load_artifact?id="+id, "alice", nil)
+		var p provenance
+		if status != http.StatusOK || json.Unmarshal(raw, &p) != nil {
+			t.Fatalf("load %s = %d: %s", id, status, raw)
+		}
+		return p
+	}
+	pay := load("finance/pay")
+	var types []string
+	for _, a := range pay.Attestations {
+		if a.Verdict != "verified" || a.Signer == nil {
+			t.Errorf("attestation %+v", a)
+		}
+		types = append(types, a.PredicateType)
+	}
+	if len(types) != 3 || !strings.Contains(strings.Join(types, " "), reviewType) || pay.AttestationOutcome == nil || pay.AttestationOutcome.Outcome != "verified" {
+		t.Fatalf("pay: types %v, outcome %+v", types, pay.AttestationOutcome)
+	}
+	closeP := load("finance/close")
+	o := closeP.AttestationOutcome
+	if len(closeP.Attestations) != 1 || o == nil || o.Outcome != "failed" || o.Failure == nil || o.Failure.Requirement == nil || *o.Failure.Requirement != 1 ||
+		o.Failure.Code != ingest.CodeAttestationMissing {
+		t.Fatalf("close: %+v outcome %+v", closeP.Attestations, o)
 	}
 }

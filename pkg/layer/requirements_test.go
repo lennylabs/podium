@@ -20,7 +20,8 @@ func boundSigner() store.TrustSigner {
 // back to the same requirements, and a file with a member of another name,
 // no trust_requirements array, or data after the object is refused.
 func TestRequirementsFile_RoundTrip(t *testing.T) {
-	reqs := []store.TrustRequirement{{Signers: []store.TrustSigner{boundSigner()}, PredicateType: "https://slsa.dev/provenance/v1"}}
+	reqs := []store.TrustRequirement{{Signers: []store.TrustSigner{boundSigner()}, PredicateType: "https://slsa.dev/provenance/v1", CoversLayer: true},
+		{Signers: []store.TrustSigner{boundSigner()}, PredicateType: "https://acme.com/scan/v1", Optional: true}}
 	b, err := layer.MarshalRequirementsFile(reqs)
 	if err != nil {
 		t.Fatalf("MarshalRequirementsFile: %v", err)
@@ -32,7 +33,8 @@ func TestRequirementsFile_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseRequirementsFile: %v", err)
 	}
-	if len(f.TrustRequirements) != 1 || f.TrustRequirements[0].Signers[0] != boundSigner() || f.TrustRequirements[0].PredicateType != reqs[0].PredicateType {
+	if len(f.TrustRequirements) != 2 || f.TrustRequirements[0].Signers[0] != boundSigner() || f.TrustRequirements[0].PredicateType != reqs[0].PredicateType ||
+		!f.TrustRequirements[0].CoversLayer || !f.TrustRequirements[1].Optional {
 		t.Fatalf("parsed = %+v", f)
 	}
 	// layer_roots is kept as written and not read.
@@ -68,9 +70,16 @@ func TestCheckRequirements(t *testing.T) {
 	if err := layer.CheckRequirements([]store.TrustRequirement{{Signers: []store.TrustSigner{gh}}}, github); err != nil {
 		t.Fatalf("known instance: %v", err)
 	}
+	covering, optional := ok[0], ok[0]
+	covering.CoversLayer, optional.Optional = true, true
+	if err := layer.CheckRequirements([]store.TrustRequirement{optional, covering}, nil); err != nil {
+		t.Fatalf("several with a covering requirement: %v", err)
+	}
 	for name, reqs := range map[string][]store.TrustRequirement{
 		"none":             nil,
-		"two":              {ok[0], ok[0]},
+		"two unmarked":     {ok[0], ok[0]},
+		"two marked":       {covering, covering},
+		"optional only":    {optional},
 		"no signer":        {{}},
 		"no binding":       {{Signers: []store.TrustSigner{signer()}}},
 		"unknown instance": {{Signers: []store.TrustSigner{gh}}},

@@ -244,12 +244,20 @@ func (u LinkUpdate) applies(cur AttestationLink) bool {
 type TrustPolicy struct {
 	Mode         string
 	Requirements []TrustRequirement
+	RequireTypes []string
 	LayerRoot    string
 }
 
 // PolicyOf returns the trust policy lc stores.
 func PolicyOf(lc LayerConfig) TrustPolicy {
-	return TrustPolicy{Mode: lc.TrustMode, Requirements: lc.TrustRequirements, LayerRoot: lc.TrustLayerRoot}
+	return TrustPolicy{Mode: lc.TrustMode, Requirements: lc.TrustRequirements, RequireTypes: lc.TrustRequireTypes, LayerRoot: lc.TrustLayerRoot}
+}
+
+// WithTrustPolicy returns lc holding the trust policy p, so a caller that
+// keeps or replaces a layer's policy moves every member of it together.
+func (lc LayerConfig) WithTrustPolicy(p TrustPolicy) LayerConfig {
+	lc.TrustMode, lc.TrustRequirements, lc.TrustRequireTypes, lc.TrustLayerRoot = p.Mode, p.Requirements, p.RequireTypes, p.LayerRoot
+	return lc
 }
 
 // AttestationWrites is one store write of bundles, links, and outcomes.
@@ -277,9 +285,9 @@ func (w AttestationWrites) empty() bool {
 }
 
 // policyColumns returns the stored form of p for the comparison.
-func policyColumns(p TrustPolicy) (mode, reqs, root string, err error) {
+func policyColumns(p TrustPolicy) (mode, reqs, types, root string, err error) {
 	reqs, err = trustRequirementsColumn(p.Requirements)
-	return p.Mode, reqs, p.LayerRoot, err
+	return p.Mode, reqs, requireTypesColumn(p.RequireTypes), p.LayerRoot, err
 }
 
 // RootRecord is the root record of one Sigstore instance: the digest and the

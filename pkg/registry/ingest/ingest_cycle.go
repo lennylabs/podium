@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/lennylabs/podium/pkg/audit"
@@ -108,6 +109,16 @@ func (v *attestationVerdict) drop(id string) (RejectedArtifact, bool) {
 		return RejectedArtifact{}, false
 	}
 	return RejectedArtifact{ArtifactID: id, Reason: f.Message, Code: f.Code, Details: f.Details}, true
+}
+
+// withholdsRemoval reports whether the cycle keeps the stored row from the
+// §7.3.1 removal: after a failed layer step under warn, a live version of a
+// type trust_require_types lists stays, so an unsigned snapshot that omits
+// a hook removes no hook. A nil verdict and a passed layer step hold none.
+//
+// Spec: §4.7.11 (Layer step)
+func (v *attestationVerdict) withholdsRemoval(row store.ManifestRecord) bool {
+	return v != nil && v.failure != nil && slices.Contains(v.requireTypes, row.Type)
 }
 
 // report is the Result member of the verdict of a cycle that ran the

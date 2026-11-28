@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/layer/source"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
@@ -131,8 +132,48 @@ func TestArtifactStep_PerRequirement(t *testing.T) {
 		}
 	}
 	var none *attestationVerdict
-	if _, ok := none.drop("a/x"); ok || none.report(nil) != nil {
-		t.Error("a nil verdict drops or reports")
+	if _, ok := none.drop("a/x"); ok || none.report(nil) != nil || none.withholdsRemoval(store.ManifestRecord{Type: "hook"}) {
+		t.Error("a nil verdict drops, reports, or holds a removal")
+	}
+}
+
+// Spec: §4.7.11 (Artifact step) — an optional requirement fails no
+// artifact, the first failing requirement that is not optional is reported,
+// and under warn an artifact whose type trust_require_types lists is
+// dropped, read from the manifest or from the resolved field.
+func TestArtifactStep_OptionalAndRequiredTypes(t *testing.T) {
+	t.Parallel()
+	hex := func(c byte) string { return strings.Repeat(string(c), 64) }
+	bundles := []*snapshotBundle{{accepted: []*sign.VerifiedAttestation{
+		verified("a/x@1.0.0="+hex('1'), "a/y@1.0.0="+hex('2'), "a/z@1.0.0="+hex('3')),
+		nil,
+		verified("a/x@1.0.0=" + hex('1')),
+	}}}
+	hook := record("a/y", "1.0.0", '2')
+	hook.Artifact = &manifest.Artifact{Type: manifest.TypeHook}
+	server := record("a/z", "1.0.0", '3')
+	server.Fields.Type = manifest.TypeMCPServer
+	kept := []filesystem.ArtifactRecord{record("a/x", "1.0.0", '1'), hook, server}
+	reqs := []store.TrustRequirement{{CoversLayer: true}, {Optional: true}, {}}
+	a := &AttestationCycle{mode: "warn", layer: store.LayerConfig{TrustRequirements: reqs, TrustRequireTypes: []string{"hook", "mcp-server"}}}
+	drops, outcomes := a.artifactStep(bundles, kept)
+	got := fmt.Sprintf("%v %v %v", outcomes["a/x"], outcomes["a/y"], outcomes["a/z"])
+	want := "{verified    0} {failed ingest.attestation_missing artifact  2} {failed ingest.attestation_missing artifact  2}"
+	if got != want || len(drops) != 2 || drops["a/y"] == nil || drops["a/z"] == nil || drops["a/z"].Details["requirement"] != 2 {
+		t.Errorf("outcomes:\n%s\nwant\n%s\ndrops %v", got, want, drops)
+	}
+	// Every requirement that is not optional met: the optional one, which
+	// accepts no bundle here, fails nothing.
+	a.layer.TrustRequirements = reqs[:2]
+	if drops, outcomes := a.artifactStep(bundles, kept); len(drops) != 0 || outcomes["a/y"].Outcome != OutcomeVerified {
+		t.Errorf("optional requirement: drops %v, outcomes %v", drops, outcomes)
+	}
+	v := &attestationVerdict{failure: &AttestationError{}, requireTypes: a.layer.TrustRequireTypes}
+	if !v.withholdsRemoval(store.ManifestRecord{Type: "hook"}) || v.withholdsRemoval(store.ManifestRecord{Type: "skill"}) {
+		t.Error("withholdsRemoval reads no type")
+	}
+	if (&attestationVerdict{requireTypes: []string{"hook"}}).withholdsRemoval(store.ManifestRecord{Type: "hook"}) {
+		t.Error("a passed layer step held a removal")
 	}
 }
 
@@ -145,7 +186,7 @@ func TestLineageAnswers_Batches(t *testing.T) {
 	candidate := func(commit string) *snapshotBundle {
 		v := &sign.VerifiedAttestation{}
 		v.Certificate.SourceRepositoryDigest = sign.CertField{Value: commit, Present: true}
-		return &snapshotBundle{accepted: []*sign.VerifiedAttestation{v}}
+		return &snapshotBundle{accepted: []*sign.VerifiedAttestation{v}, covering: v}
 	}
 	var cands []*snapshotBundle
 	for i := range 70 {

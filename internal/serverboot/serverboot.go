@@ -881,7 +881,7 @@ func layerConfigFromEntry(tenantID string, entry yamlLayerEntry, order int, cfg 
 	if err != nil {
 		return store.LayerConfig{}, layer.Visibility{}, err
 	}
-	lc.TrustMode, lc.TrustRequirements, lc.TrustLayerRoot = trust.TrustMode, trust.TrustRequirements, trust.TrustLayerRoot
+	lc = lc.WithTrustPolicy(store.PolicyOf(trust))
 	return lc, vis, nil
 }
 

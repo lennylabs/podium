@@ -436,14 +436,14 @@ podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements 
 | `<dir>` | Directory the layer root is resolved from. Default: the current directory. |
 | `--root <subpath>` | The layer's registered `root` below `<dir>`, under the rule of `podium attest`. |
 | `--commit <rev>` | Read the layer's packages from the tree of this commit. The command also lists each package whose files on disk differ from the commit, with the paths that differ, and each `DOMAIN.md` or `.layer-config` file that differs. |
-| `--requirements <file>` | Verify each bundle against the requirement of a requirements file, which `podium layer show <id> --requirements` writes. |
+| `--requirements <file>` | Verify each bundle against the requirements of a requirements file, which `podium layer show <id> --requirements` writes. |
 | `--trusted-root <instance>=<file>` | The trusted root of a Sigstore instance that a signer of the requirements file names. Repeatable. |
 
 The command reads the bundles from the attestation directory on disk in every case, because a signing workflow imports its bundles before it commits them. It refuses a symbolic link or an entry other than a directory at `.podium` or `.podium/attestations`. It passes when a bundle lists the layer subject with the current layer digest and each package of the layer has a subject with its name and package digest. For each package without one, it prints the subject name, the package digest, whether the package resolved, the `type`, `sensitivity`, `deprecated`, and `replaced_by` values that the package digest frames, and each digest under which a bundle lists that name. A reviewer reads those values to see what a signature over the package would attest:
 
 ```
 $ podium attest check --root skills
-note: no signature was verified; --requirements <file> verifies each bundle against a layer's requirement
+note: no signature was verified; --requirements <file> verifies each bundle against a layer's requirements
 missing: no bundle lists finance/close-books@1.4.0 with the package digest sha256:41aa...07
   state: resolved
   type: "skill"
@@ -453,7 +453,7 @@ missing: no bundle lists finance/close-books@1.4.0 with the package digest sha25
   listed with: sha256:9f2c...e1
 ```
 
-Without `--requirements`, every bundle that parses counts, and the command verifies no signature. With `--requirements`, the command verifies each bundle under the acceptance conditions, the identity comparison, and the source and ref bindings that the registry applies, and counts only a bundle that a signer of the requirement accepts and whose predicate type matches the requirement's. It prints `refused: <file>: <reason>` for each other bundle, with a reason from the refusal reasons of spec §4.7.11, such as `identity` or `ref_binding`. A file that does not parse is a warning and counts as no bundle. A file over `PODIUM_ATTESTATION_MAX_BYTES` and a directory with more than `PODIUM_ATTESTATION_MAX_BUNDLES` bundle files fail the check.
+Without `--requirements`, every bundle that parses counts, and the command verifies no signature. With `--requirements`, the command verifies each bundle under the acceptance conditions, the identity comparison, and the source and ref bindings that the registry applies, and counts only a bundle that a signer of the covering requirement accepts and whose predicate type matches the requirement's. A file of several requirements also fails the check for each package that no accepted bundle of an additional requirement lists, unless that requirement is optional, and prints `missing: no bundle of requirement <n> lists <subject> with the package digest <digest>`. It prints `refused: <file>: <reason>` for each bundle that no requirement accepts, with a reason from the refusal reasons of spec §4.7.11, such as `identity` or `ref_binding`. A file that does not parse is a warning and counts as no bundle. A file over `PODIUM_ATTESTATION_MAX_BYTES` and a directory with more than `PODIUM_ATTESTATION_MAX_BUNDLES` bundle files fail the check.
 
 The trusted root of each instance comes from these sources:
 
@@ -1038,6 +1038,8 @@ The trust flags set the layer's trust policy, which ingest verification of autho
 |:--|:--|
 | `--trust <none\|warn\|require>` | Trust mode. A layer without one takes `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
 | `--trust-signer <issuer>=<identity>` | A signer of the layer's requirement: an OIDC issuer and a certificate identity, split at the first `=`. Repeatable. |
+| `--trust-requirements-file <file>` | Send the `trust_requirements` of a requirements file, such as `podium layer show <id> --requirements` writes. The file sets a policy of several requirements, a `predicate_type`, `covers_layer`, or `optional`. Its `layer_roots` is not read. |
+| `--trust-require-type <type>` | An artifact type whose failure drops the artifact under `warn` as under `require`, such as `hook`. Repeatable, and the values replace the stored list. |
 | `--trust-source-repository <uri>` | `source_repository` of each signer. |
 | `--trust-source-owner <uri>` | `source_repository_owner` of each signer. |
 | `--trust-source-repository-id <id>` | `source_repository_id` of each signer, the host's numeric repository identifier. |
@@ -1048,7 +1050,13 @@ The trust flags set the layer's trust policy, which ingest verification of autho
 | `--trust-instance <name>` | Sigstore instance of each signer. Defaults to `public-good`. The name must be configured in `sigstore.instances` of `registry.yaml`. |
 | `--trust-layer-root <root>` | For a `local` layer, the `root` under which its content was signed. |
 
-The signer and binding flags build the one requirement of the policy, and the binding flags apply to every `--trust-signer`. A binding flag given with no `--trust-signer` exits 2 with an error that names the flag. A requirement with a `predicate_type` is set through the HTTP API or a `registry.yaml` declaration.
+The signer and binding flags build a policy of one requirement, and the binding flags apply to every `--trust-signer`. A binding flag given with no `--trust-signer` exits 2 with an error that names the flag. `--trust-requirements-file` beside `--trust-signer` or a binding flag exits 2, and a requirements file that cannot be read or that the file rules refuse exits 1. A policy of [several requirements](../deployment/content/layers#several-requirements) is written as a requirements file:
+
+```
+podium layer show finance --requirements > requirements.json
+# edit requirements.json: add the scanner's requirement, and mark the build requirement covers_layer
+podium layer update --id finance --trust-requirements-file requirements.json --trust-require-type hook
+```
 
 For a signer of a `git` layer whose identity is a workflow in the layer's own repository, such as `https://github.com/acme/finance/.github/workflows/podium-attest.yml@refs/heads/main` on the layer `https://github.com/acme/finance`, the registry derives `source_repository` and `source_repository_ref` when the flags name neither. [Derived source binding](../deployment/content/layers#derived-source-binding) states the conditions. Any other signer with a URI identity needs `--trust-source-repository`, `--trust-source-owner`, `--trust-source-repository-id`, `--trust-source-owner-id`, or `--trust-any-source`, and a bound signer also needs `--trust-source-repository-ref` or `--trust-any-ref`.
 
@@ -1139,7 +1147,7 @@ Prints one layer, with its trust policy.
 podium layer show <id> [--requirements]
 ```
 
-The command reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output. The object includes `trust_mode`, `trust_requirements`, and `trust_layer_root`, with any source binding members the registry derived, and the layer's attestation record: `attestation_mark`, `attested_commit`, `attestation_status`, `attestation_details`, `attestation_dropped`, and `attestation_checked_at`, each present once an ingest cycle has written it. When `attestation_status` is neither empty nor `ok`, the command writes on standard error the next step for that code and constraint. It also writes there the number of artifacts the last cycle dropped, for a layer in the mode `none` that holds a record, that no cycle updates the record in that mode, and, for a `--layer-path` layer that carries `visibility_pending`, the pending visibility beside the visibility in force and how a wider visibility takes effect. A control character in the object is written as a `\u` escape. The command exits 1 when the caller's layer read holds no layer with that ID, which includes a layer the caller cannot read, and when the read fails. It exits 2 on a usage error.
+The command reads `GET /v1/layers` and prints the layer object with that ID as indented JSON on standard output. The object includes `trust_mode`, `trust_requirements`, `trust_require_types`, and `trust_layer_root`, with any source binding members the registry derived, and the layer's attestation record: `attestation_mark`, `attested_commit`, `attestation_status`, `attestation_details`, `attestation_dropped`, and `attestation_checked_at`, each present once an ingest cycle has written it. When `attestation_status` is neither empty nor `ok`, the command writes on standard error the next step for that code and constraint. It also writes there the number of artifacts the last cycle dropped, for a layer in the mode `none` that holds a record, that no cycle updates the record in that mode, and, for a `--layer-path` layer that carries `visibility_pending`, the pending visibility beside the visibility in force and how a wider visibility takes effect. A control character in the object is written as a `\u` escape. The command exits 1 when the caller's layer read holds no layer with that ID, which includes a layer the caller cannot read, and when the read fails. It exits 2 on a usage error.
 
 With `--requirements`, the command prints the layer's `trust_requirements` as a requirements file in place of the layer object, with the members the registry derived, and exits 1 when the layer has no requirement. [`podium attest check --requirements`](#podium-attest-check) reads the file and applies the bindings the registry applies:
 
@@ -1241,7 +1249,7 @@ podium layer update --id <id>
                     [--owner <oidc-sub>] [--public[=false]] [--organization[=false]]
                     [--group <oidc-group>]... [--user <oidc-sub-or-email>]...
                     [--clear-groups] [--clear-users]
-                    [<trust flags>] [--clear-trust-requirements]
+                    [<trust flags>] [--clear-trust-requirements] [--clear-trust-require-types]
 ```
 
 | Flag | Effect |
@@ -1263,13 +1271,15 @@ podium layer update --id <id>
 | `--clear-groups` | Empty the group list. |
 | `--clear-users` | Empty the user list. |
 | Trust flags | The [trust policy flags](#trust-policy-flags) of `podium layer register`. |
-| `--clear-trust-requirements` | Remove the layer's trust requirement. Cannot be combined with `--trust-signer`. |
+| `--clear-trust-requirements` | Remove the layer's trust requirements. Cannot be combined with `--trust-signer` or `--trust-requirements-file`. |
+| `--clear-trust-require-types` | Remove the layer's `trust_require_types`. Cannot be combined with `--trust-require-type`. |
 
 #### Trust policy updates
 
 - `--trust` replaces the stored mode, and `--trust-layer-root` replaces the stored root. Omitting a flag keeps the stored value.
-- A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored one.
-- `--clear-trust-requirements` removes the requirement. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
+- A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored ones. The command first reads the layer through `GET /v1/layers` and exits 1 without sending the update when the layer stores more than one requirement, or when the read fails, because the replacement would drop the additional requirements. Update such a layer with `--trust-requirements-file`. The update carries the requirements the command read as `expected_trust_requirements`, so the registry refuses it, and the command exits 1, when another writer changed the requirements between the read and the update.
+- `--trust-requirements-file` replaces the stored requirements with the file's, and `--trust-require-type` replaces the stored types.
+- `--clear-trust-requirements` removes the requirements, and `--clear-trust-require-types` removes the listed types. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
 - An update that carries no trust flag leaves the stored policy as it is.
 - A trust flag that changes the policy of a layer declared in `registry.yaml` is refused with `registry.invalid_argument` and a message stating that the layer's trust policy is declared in `registry.yaml`, because the next start re-applies the declaration. Change the declaration instead.
 - While `PODIUM_LAYER_TRUST_DEFAULT` is `warn` or `require`, an update that leaves the layer with no `trust_mode` and no requirement is refused, and so is a registration without trust flags.

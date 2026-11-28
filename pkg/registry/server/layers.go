@@ -869,11 +869,13 @@ type LayerRegisterRequest struct {
 	RepoToken RepoSecret `json:"repo_token,omitempty"`
 	// ClearRepoCredential removes the stored repository credential.
 	ClearRepoCredential bool `json:"clear_repo_credential,omitempty"`
-	// TrustMode, TrustRequirements, and TrustLayerRoot are the §4.7.11 layer
-	// trust policy. A registration stores them as carried, with the derived
-	// source binding; an update reads them by presence (decodeTrustPatch).
+	// TrustMode, TrustRequirements, TrustRequireTypes, and TrustLayerRoot are
+	// the §4.7.11 layer trust policy. A registration stores them as carried,
+	// with the derived source binding; an update reads them by presence
+	// (decodeTrustPatch).
 	TrustMode         string                   `json:"trust_mode,omitempty"`
 	TrustRequirements []store.TrustRequirement `json:"trust_requirements,omitempty"`
+	TrustRequireTypes []string                 `json:"trust_require_types,omitempty"`
 	TrustLayerRoot    string                   `json:"trust_layer_root,omitempty"`
 }
 
@@ -1609,6 +1611,14 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
+	// spec: §7.3.1 (Patch semantics on the update body) — an update that
+	// names the requirements it expects to replace applies only while the
+	// layer stores them, so a raced replacement drops no requirement.
+	trustConditional, msg, details := expectedRequirementsError(body, cfg)
+	if msg != "" {
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument", msg, details)
+		return
+	}
 	usernameSent, err := carriesRepoUsername(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
@@ -1755,15 +1765,18 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// with the unchanged layer object and leaves the audit stream reporting
 	// only changes that happened.
 	if layerConfigEqual(before, cfg) {
-		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)})
+		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.responseWarnings(cfg)})
 		return
 	}
 	// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that
 	// keep the visibility) — an update that carries no visibility member
 	// keeps the stored visibility members, so a cycle's narrowing that
 	// landed after the read above stays in force.
-	stored, prior, err := e.writeUpdatedLayer(r.Context(), before, cfg, vis)
+	stored, prior, err := e.writeUpdatedLayer(r.Context(), before, cfg, vis, trustConditional)
 	switch {
+	case errors.Is(err, store.ErrTrustRequirementsChanged):
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument", trustRequirementsChangedMessage(cfg.ID), trustRequirementsChangedDetails())
+		return
 	case errors.Is(err, errVisibilityContended):
 		writeError(w, http.StatusServiceUnavailable, "registry.unavailable", err.Error())
 		return
@@ -1776,7 +1789,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// records the visibility written against the visibility it replaced.
 	e.emitLayerEvent(r, prior, stored, "update", trustEventFields(before, cfg))
 	e.afterTrustWrite(r, before, true, cfg)
-	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
+	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.responseWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -1964,11 +1977,9 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		GitProvider:     req.GitProvider,
 		ForcePushPolicy: req.ForcePushPolicy,
 		CreatedAt:       time.Now().UTC(),
-		// Spec: §4.7.11 (Layer trust policy)
-		TrustMode:         trust.TrustMode,
-		TrustRequirements: trust.TrustRequirements,
-		TrustLayerRoot:    trust.TrustLayerRoot,
 	}
+	// Spec: §4.7.11 (Layer trust policy)
+	cfg = cfg.WithTrustPolicy(store.PolicyOf(trust))
 
 	if userDefined {
 		// spec: §4.6 / §7.3.1 — a user-defined layer has implicit visibility
@@ -2023,7 +2034,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 			return
 		}
-		cfg.TrustMode, cfg.TrustRequirements, cfg.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
+		cfg = cfg.WithTrustPolicy(store.PolicyOf(stored))
 	}
 
 	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity
@@ -2129,7 +2140,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register", trustEventFields(prior, cfg))
 	e.afterTrustWrite(r, prior, exists, cfg)
 
-	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
+	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.responseWarnings(cfg)}
 	if cfg.SourceType == "git" {
 		resp.WebhookURL = e.webhookURL(cfg.TenantID, cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret

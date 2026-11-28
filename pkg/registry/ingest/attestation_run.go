@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/fs"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -35,6 +36,9 @@ func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS,
 	if err := a.readVisibility(files); err != nil {
 		return nil, false, err
 	}
+	if err := a.readStoredTypes(ctx, st); err != nil {
+		return nil, false, err
+	}
 	res, failure, err := a.layerStep(ctx, files, all)
 	if err != nil {
 		if _, rerr := a.RecordSourceFailure(ctx, st, err, onWrite); rerr != nil {
@@ -62,12 +66,28 @@ func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS,
 
 // failedLayerStep writes the record of a failed layer step and refuses the
 // cycle under require. Under warn each version the cycle stores carries the
-// outcome failed with the layer step's code and the scope layer.
+// outcome failed with the layer step's code and the scope layer, apart from
+// an artifact of a type trust_require_types lists, which the cycle withholds
+// as an artifact-step failure, with the layer step's code and details, and
+// counts among the dropped artifacts of the record.
 //
-// Spec: §4.7.11 (Layer step, Attestation outcome)
+// Spec: §4.7.11 (Layer step, Attestation outcome, Attestation record)
 func (a *AttestationCycle) failedLayerStep(ctx context.Context, st store.Store, f *AttestationError, kept []filesystem.ArtifactRecord, onWrite func()) (*attestationVerdict, bool, error) {
 	f.Refusal = a.mode == layer.TrustModeRequire
-	w := store.AttestationWrite{Status: f.Code, Details: f.Details, Visibility: a.recordVisibility(false)}
+	v := &attestationVerdict{failure: f, outcomes: map[string]AttestationOutcome{}, drops: map[string]*AttestationError{},
+		bundles: a.evaluated, requireTypes: a.layer.TrustRequireTypes}
+	if !f.Refusal {
+		for i := range kept {
+			rec := &kept[i]
+			if a.requiredType(rec) {
+				v.drops[rec.ID] = &AttestationError{Code: f.Code, Details: f.Details,
+					Message: fmt.Sprintf("%s: the layer step failed, and trust_require_types lists the type of %s", f.Code, attest.ReportString(rec.ID))}
+				continue
+			}
+			v.outcomes[rec.ID] = AttestationOutcome{Outcome: OutcomeFailed, Code: f.Code, Scope: "layer", Constraint: f.Constraint()}
+		}
+	}
+	w := store.AttestationWrite{Status: f.Code, Details: f.Details, Dropped: len(v.drops), Visibility: a.recordVisibility(false)}
 	if superseded, err := a.write(ctx, st, w, onWrite); superseded || err != nil {
 		return nil, superseded, err
 	}
@@ -75,20 +95,62 @@ func (a *AttestationCycle) failedLayerStep(ctx context.Context, st store.Store, 
 	if f.Refusal {
 		return nil, false, f
 	}
-	v := &attestationVerdict{failure: f, outcomes: map[string]AttestationOutcome{}, bundles: a.evaluated}
-	for i := range kept {
-		v.outcomes[kept[i].ID] = AttestationOutcome{Outcome: OutcomeFailed, Code: f.Code, Scope: "layer", Constraint: f.Constraint()}
-	}
 	return v, false, nil
 }
 
+// requiredType reports whether trust_require_types lists the type of rec,
+// read from its parsed manifest, from the resolved field the package digest
+// frames, and from each live stored version of its ID in the layer. A
+// record whose readings differ is held to the listed type, so a snapshot
+// that declares another type for a stored hook's ID does not take it out of
+// per-type enforcement.
+//
+// Spec: §4.7.11 (Layer trust policy)
+func (a *AttestationCycle) requiredType(rec *filesystem.ArtifactRecord) bool {
+	types := a.layer.TrustRequireTypes
+	if rec.Artifact != nil && slices.Contains(types, string(rec.Artifact.Type)) {
+		return true
+	}
+	if slices.Contains(types, string(rec.Fields.Type)) {
+		return true
+	}
+	return slices.ContainsFunc(a.storedTypes[rec.ID], func(t string) bool { return slices.Contains(types, t) })
+}
+
+// readStoredTypes reads, for a policy that lists types, the type of each
+// live stored version of the layer by ID, which requiredType reads. A read
+// that fails fails the cycle before its record write.
+//
+// Spec: §4.7.11 (Layer trust policy)
+func (a *AttestationCycle) readStoredTypes(ctx context.Context, st store.Store) error {
+	if len(a.layer.TrustRequireTypes) == 0 {
+		return nil
+	}
+	rows, err := listManifestRows(ctx, st, a.layer.TenantID)
+	if err != nil {
+		return err
+	}
+	a.storedTypes = map[string][]string{}
+	for id, versions := range rows {
+		for _, row := range versions {
+			if row.Layer == a.layer.ID && row.DeletedAt == nil && !retired(row) {
+				a.storedTypes[id] = append(a.storedTypes[id], row.Type)
+			}
+		}
+	}
+	return nil
+}
+
 // artifactStep applies the §4.7.11 artifact step to each artifact the
-// pre-lint rules kept, after a passed layer step: for each requirement, a
-// subject with the artifact's subject name and package digest in a bundle
-// the requirement accepts. An artifact that fails a requirement is dropped
-// under require and stored with the outcome failed under warn. The layer
-// step's completeness condition already places every artifact under the
-// covering requirement, so a failure reports an additional requirement.
+// pre-lint rules kept, after a passed layer step: for each requirement that
+// is not optional, a subject with the artifact's subject name and package
+// digest in a bundle the requirement accepts. An optional requirement fails
+// nothing; the cycle links what it accepts. An artifact that fails a
+// requirement is dropped under require and when trust_require_types lists
+// its type, and is stored with the outcome failed under warn otherwise. The
+// layer step's completeness condition already places every artifact under
+// the covering requirement, so a failure reports an additional requirement,
+// the first in policy order that the artifact fails.
 //
 // Spec: §4.7.11 (Artifact step, Attestation outcome)
 func (a *AttestationCycle) artifactStep(bundles []*snapshotBundle, kept []filesystem.ArtifactRecord) (map[string]*AttestationError, map[string]AttestationOutcome) {
@@ -98,13 +160,13 @@ func (a *AttestationCycle) artifactStep(bundles []*snapshotBundle, kept []filesy
 		rec := &kept[i]
 		name, _ := rec.SubjectName()
 		out := AttestationOutcome{Outcome: OutcomeVerified}
-		for r := range a.layer.TrustRequirements {
-			if coveredBy(bundles, r, name, rec.PackageDigest) {
+		for r, req := range a.layer.TrustRequirements {
+			if req.Optional || coveredBy(bundles, r, name, rec.PackageDigest) {
 				continue
 			}
 			f := artifactFailure(bundles, r, rec.ID, name)
 			out = AttestationOutcome{Outcome: OutcomeFailed, Code: f.Code, Scope: "artifact", Constraint: f.Constraint(), Requirement: r}
-			if a.mode == layer.TrustModeRequire {
+			if a.mode == layer.TrustModeRequire || a.requiredType(rec) {
 				drops[rec.ID] = f
 			}
 			break

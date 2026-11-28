@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, ingest verification of author attestations, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, ingest verification of author attestations with several requirements and required types, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -51,6 +51,15 @@ From 0.8.0, every ingest cycle of a layer whose trust mode resolves to `warn` or
 - `PODIUM_ATTESTATION_MAX_BYTES` and `PODIUM_ATTESTATION_MAX_BUNDLES` are read at each start, and a value that is not an integer of at least 1 refuses the start with `config.invalid`.
 - The SQLite and Postgres stores add the attestation record columns to `layer_configs` at the first start. No step is needed.
 - A rollback to 0.7.0 starts on the migrated store and does not read the columns. On SQLite, 0.7.0 replaces a layer row on each layer write, such as the re-seed of a declared or `--layer-path` layer at each start, which clears the attestation mark and the recorded commit. After a return to 0.8.0, the first cycle of such a layer accepts any signed state, as a first ingest does. To restore the protection against a replayed older state, reset the mark to the current signed commit with `podium layer reingest <id> --reset-attestation-mark --to-commit <sha>`. On Postgres the columns keep their values.
+
+### Several requirements and required types
+
+From 0.8.0, a layer trust policy holds several requirements, an optional requirement, and the `trust_require_types` member (spec §4.7.11). [Several requirements](../content/layers#several-requirements) describes them.
+
+- The SQLite and Postgres stores add the column `trust_require_types` to `layer_configs` at the first start, and every existing layer reads with no listed type. No step is needed.
+- A requirement stores its `covers_layer` and `optional` members in the `trust_requirements` column, so no other migration applies.
+- `podium layer update --trust-signer` on a layer whose policy holds several requirements exits 1 and sends nothing, because the flags would replace every requirement with one. Write such a policy with `--trust-requirements-file`.
+- A rollback to 0.7.0 needs no step beyond the one of *Layer trust policy* above. 0.7.0 does not read the column.
 
 ### Attestation links and outcomes
 

@@ -214,6 +214,8 @@ func attestationStorage(t *testing.T, s store.Store) {
 	note("other claim")(s.WriteAttestations(ctx, "t", "L", "c0", store.AttestationWrites{Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
 	note("other policy")(s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{Policy: &store.TrustPolicy{Mode: "require"},
 		Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
+	note("other types")(s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{Policy: &store.TrustPolicy{RequireTypes: []string{"hook"}},
+		Bundles: []store.StoredAttestation{bundle("d1", "L", &idx)}}))
 	note("write")(s.WriteAttestations(ctx, "t", "L", "c1", store.AttestationWrites{Policy: &store.TrustPolicy{},
 		Bundles: []store.StoredAttestation{bundle("d1", "L", &idx), bundle("d2", "L", nil)},
 		Versions: []store.VersionAttestations{{ArtifactID: "a", Version: "1.0.0", Outcome: &verified,
@@ -275,6 +277,7 @@ func attestationStorage(t *testing.T, s store.Store) {
 	want := []string{
 		"other claim: " + store.ErrIngestSuperseded.Error() + " []",
 		"other policy: " + store.ErrIngestSuperseded.Error() + " []",
+		"other types: " + store.ErrIngestSuperseded.Error() + " []",
 		"write: <nil> []",
 		"again: <nil> []",
 		"upsert: <nil> [a@1.0.0 p/github/iss/id=d2:verified:k3]",
