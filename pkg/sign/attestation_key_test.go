@@ -10,6 +10,8 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -319,4 +321,38 @@ func TestInspectAttestationBundle_KeySigned(t *testing.T) {
 	wantReason(t, err, sign.ReasonReservedSubject)
 	_, err = sign.InspectAttestationBundle(h.DSSEBundle(keyStatement(t)))
 	wantReason(t, err, sign.ReasonReservedSubject)
+}
+
+// TestVerifyKeySigned_CosignBundle verifies a bundle that cosign 3.0.6
+// wrote with `cosign attest-blob --key cosign.key --statement
+// statement.json --use-signing-config=false --tlog-upload=false` over a
+// statement of `podium attest --format statement --signed-time`, under the
+// cosign.pub that `cosign generate-key-pair` wrote, and reads its signed
+// time from the statement.
+//
+// Spec: §4.7.11 (Key-based signers)
+func TestVerifyKeySigned_CosignBundle(t *testing.T) {
+	t.Parallel()
+	read := func(name string) []byte {
+		t.Helper()
+		b, err := os.ReadFile(filepath.Join("testdata", "cosign-key", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	k, err := sign.ParseAttestationPublicKey(string(read("cosign.pub")))
+	if err != nil {
+		t.Fatalf("cosign.pub: %v", err)
+	}
+	v, err := sign.VerifyKeySignedAttestation(read("bundle.sigstore.json"), k)
+	if err != nil {
+		t.Fatalf("VerifyKeySignedAttestation: %v", err)
+	}
+	if v.AttestedTime.Unix() != 1795835918 || len(v.Statement.Subjects) != 3 || v.Key != k.ID() {
+		t.Fatalf("verified %+v", v)
+	}
+	if _, err := sign.VerifyKeySignedAttestation(read("bundle.sigstore.json"), mustKey(t, sign.AttestationSigner{PublicKey: sh.PublicKeyPEM(t, sh.NewSigningKey(t).Public())})); err == nil {
+		t.Fatal("the cosign bundle verified under another key")
+	}
 }
