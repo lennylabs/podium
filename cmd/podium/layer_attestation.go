@@ -95,7 +95,13 @@ func writeVisibilityNote(w io.Writer, l layerRecordView) {
 		// failure visible.
 		inForce = []byte(err.Error())
 	}
-	_, _ = fmt.Fprintf(w, "visibility in force: %s\nvisibility pending: %s\n", escapeControls(inForce), escapeControls(*l.VisibilityPending))
+	var pending bytes.Buffer
+	if err := json.Compact(&pending, *l.VisibilityPending); err != nil {
+		// The member decoded with the layer object, so it is valid JSON;
+		// the guard keeps an impossible failure visible.
+		pending.WriteString(err.Error())
+	}
+	_, _ = fmt.Fprintf(w, "visibility in force: %s\nvisibility pending: %s\n", escapeControls(inForce), escapeControls(pending.Bytes()))
 	_, _ = fmt.Fprintln(w, "note: the pending visibility is the .layer-config the last start or cycle read. A wider visibility takes effect when a cycle passes the layer step, or through `podium layer update` once .layer-config holds it.")
 }
 
