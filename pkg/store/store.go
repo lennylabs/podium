@@ -380,10 +380,12 @@ type LayerConfig struct {
 	// TrustMode is the §4.7.11 trust mode: "none", "warn", "require", or
 	// empty, which resolves to PODIUM_LAYER_TRUST_DEFAULT.
 	TrustMode string `json:"trust_mode"`
-	// TrustRequirements is the §4.7.11 requirement list, which holds at most
-	// one requirement in this release. A signer's derived source binding is
-	// stored here as the registry derived it.
+	// TrustRequirements is the §4.7.11 requirement list. A signer's derived
+	// source binding is stored here as the registry derived it.
 	TrustRequirements []TrustRequirement `json:"trust_requirements"`
+	// TrustRequireTypes lists the §4.7.11 artifact types whose failure drops
+	// the artifact under warn as under require. Nil lists none.
+	TrustRequireTypes []string `json:"trust_require_types"`
 	// TrustLayerRoot is the §4.7.11 root under which a local layer's content
 	// was signed. Empty expects the layer subject .podium/layer.
 	TrustLayerRoot string `json:"trust_layer_root"`

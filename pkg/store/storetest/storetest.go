@@ -799,7 +799,7 @@ func layerConfigCRUD(t *testing.T, s store.Store) {
 func layerTrustView(cfgs ...store.LayerConfig) string {
 	lines := make([]string, 0, len(cfgs))
 	for _, c := range cfgs {
-		lines = append(lines, fmt.Sprintf("%s mode=%q root=%q reqs=%+v", c.ID, c.TrustMode, c.TrustLayerRoot, c.TrustRequirements))
+		lines = append(lines, fmt.Sprintf("%s mode=%q root=%q types=%q reqs=%+v", c.ID, c.TrustMode, c.TrustLayerRoot, c.TrustRequireTypes, c.TrustRequirements))
 	}
 	return strings.Join(lines, "\n")
 }
@@ -819,9 +819,13 @@ func layerTrustPolicy(t *testing.T, s store.Store) {
 			SourceRepository: "https://github.com/acme/x", SourceRepositoryOwner: "https://github.com/acme",
 			SourceRepositoryID: "1", SourceRepositoryOwnerID: "2", SourceRepositoryRef: "refs/heads/main", Instance: "github",
 		}, {Issuer: "https://accounts.google.com", Identity: "alice@acme.com", AnySource: true, AnyRef: true}},
+		CoversLayer: true,
+	}, {
+		PredicateType: "https://acme.com/scan/v1", Optional: true,
+		Signers:       []store.TrustSigner{{Issuer: "https://accounts.google.com", Identity: "scanner@acme.com"}},
 	}}
 	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x",
-		TrustMode: "require", TrustRequirements: reqs, TrustLayerRoot: "skills/finance"}
+		TrustMode: "warn", TrustRequirements: reqs, TrustRequireTypes: []string{"hook", "mcp-server"}, TrustLayerRoot: "skills/finance"}
 	must(t, s.PutLayerConfig(ctx, cfg))
 	want := layerTrustView(cfg)
 	got, err := s.GetLayerConfig(ctx, "t", "L")
@@ -843,7 +847,7 @@ func layerTrustPolicy(t *testing.T, s store.Store) {
 	reads = append(reads, list...)
 	reads = append(reads, deleted...)
 	if view := layerTrustView(reads...); len(reads) != 5 || view != strings.Repeat(want+"\n", 4)+want ||
-		cleared.TrustMode != "" || cleared.TrustRequirements != nil || cleared.TrustLayerRoot != "" {
+		cleared.TrustMode != "" || cleared.TrustRequirements != nil || cleared.TrustRequireTypes != nil || cleared.TrustLayerRoot != "" {
 		t.Errorf("reads:\n%s\nwant each:\n%s\ncleared: %s", view, want, layerTrustView(cleared))
 	}
 }

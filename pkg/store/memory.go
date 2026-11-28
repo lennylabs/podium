@@ -537,6 +537,7 @@ func storedLayerForm(cfg LayerConfig) (LayerConfig, error) {
 	}
 	cfg.Repo, cfg.RegisteredRepo = repo, ""
 	cfg.TrustRequirements = cloneTrustRequirements(cfg.TrustRequirements)
+	cfg.TrustRequireTypes = cloneRequireTypes(cfg.TrustRequireTypes)
 	cfg.VisibilityPending = clonePending(cfg.VisibilityPending)
 	return cfg, nil
 }
@@ -572,6 +573,7 @@ func (s *Memory) GetLayerConfig(_ context.Context, tenantID, id string) (LayerCo
 func splitStoredLayer(cfg LayerConfig) LayerConfig {
 	cfg.Repo, cfg.RegisteredRepo = SplitLayerRepo(cfg.Repo, sql.NullString{})
 	cfg.TrustRequirements = cloneTrustRequirements(cfg.TrustRequirements)
+	cfg.TrustRequireTypes = cloneRequireTypes(cfg.TrustRequireTypes)
 	cfg.AttestationRecord = copyAttestationRecord(cfg.AttestationRecord)
 	cfg.VisibilityPending = clonePending(cfg.VisibilityPending)
 	return cfg

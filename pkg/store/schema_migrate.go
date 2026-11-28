@@ -100,6 +100,7 @@ var additiveColumns = []additiveColumn{
 	{"layer_configs", "ingest_claim TEXT", "ingest_claim TEXT"},
 	{"layer_configs", "trust_mode TEXT NOT NULL DEFAULT ''", "trust_mode TEXT NOT NULL DEFAULT ''"},
 	{"layer_configs", "trust_requirements TEXT NOT NULL DEFAULT ''", "trust_requirements TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "trust_require_types TEXT NOT NULL DEFAULT ''", "trust_require_types TEXT NOT NULL DEFAULT ''"},
 	{"layer_configs", "trust_layer_root TEXT NOT NULL DEFAULT ''", "trust_layer_root TEXT NOT NULL DEFAULT ''"},
 	{"layer_configs", "attestation_mark TEXT", "attestation_mark TIMESTAMPTZ"},
 	{"layer_configs", "attested_commit TEXT NOT NULL DEFAULT ''", "attested_commit TEXT NOT NULL DEFAULT ''"},

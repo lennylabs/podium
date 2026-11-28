@@ -13,8 +13,8 @@ func TestTrustPolicy_DecodeRefusesUnknownMembers(t *testing.T) {
 	t.Parallel()
 	for _, body := range []string{
 		`[{"signers":[{"issuer":"i","identity":"a@b","instance_name":"github"}]}]`,
-		`[{"signers":[{"issuer":"i","identity":"a@b"}],"optional":true}]`,
-		`[{"signers":[{"issuer":"i","identity":"a@b"}],"covers_layer":true}]`,
+		`[{"signers":[{"issuer":"i","identity":"a@b"}],"optinal":true}]`,
+		`[{"signers":[{"issuer":"i","identity":"a@b"}],"covers_layer":"true"}]`,
 		`[{"signers":[{"issuer":1}]}]`,
 	} {
 		var reqs []TrustRequirement
@@ -23,9 +23,37 @@ func TestTrustPolicy_DecodeRefusesUnknownMembers(t *testing.T) {
 		}
 	}
 	var reqs []TrustRequirement
-	if err := json.Unmarshal([]byte(`[{"signers":[{"issuer":"i","identity":"a@b","any_ref":true}],"predicate_type":"p"}]`), &reqs); err != nil ||
-		reqs[0].PredicateType != "p" || !reqs[0].Signers[0].AnyRef {
+	if err := json.Unmarshal([]byte(`[{"signers":[{"issuer":"i","identity":"a@b","any_ref":true}],"predicate_type":"p","covers_layer":true},`+
+		`{"signers":[{"issuer":"i","identity":"c@d"}],"optional":true}]`), &reqs); err != nil ||
+		reqs[0].PredicateType != "p" || !reqs[0].Signers[0].AnyRef || !reqs[0].CoversLayer || reqs[0].Optional || !reqs[1].Optional {
 		t.Errorf("valid policy: %+v, %v", reqs, err)
+	}
+	// The clone keeps the covering and optional markers.
+	if back := cloneTrustRequirements(reqs); !back[0].CoversLayer || !back[1].Optional {
+		t.Errorf("clone = %+v", back)
+	}
+}
+
+// Spec: §4.7.11 (Layer trust policy) — the trust_require_types column holds
+// the JSON array, the empty string reads as no type, and a column that does
+// not decode fails the read.
+func TestRequireTypesColumn(t *testing.T) {
+	t.Parallel()
+	if col, err := requireTypesColumn([]string{}); err != nil || col != "" {
+		t.Fatalf("empty column = %q, %v", col, err)
+	}
+	col, err := requireTypesColumn([]string{"hook", "mcp-server"})
+	if err != nil || col != `["hook","mcp-server"]` {
+		t.Fatalf("column = %q, %v", col, err)
+	}
+	if back, err := parseRequireTypes(col); err != nil || len(back) != 2 || back[1] != "mcp-server" {
+		t.Fatalf("round trip = %q, %v", back, err)
+	}
+	if got, err := parseRequireTypes(""); got != nil || err != nil {
+		t.Errorf("empty column read %q, %v", got, err)
+	}
+	if _, err := parseRequireTypes(`{"hook":1}`); err == nil {
+		t.Errorf("a column that does not decode read back")
 	}
 }
 

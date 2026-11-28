@@ -135,7 +135,8 @@ func TestDeriveSourceBinding_SignerForms(t *testing.T) {
 	noRef := store.TrustSigner{Issuer: ghIssuer, Identity: "https://github.com/acme/finance/.github/workflows/a.yml"}
 	emptyRef := store.TrustSigner{Issuer: ghIssuer, Identity: "https://github.com/acme/finance/.github/workflows/a.yml@"}
 	email := store.TrustSigner{Issuer: ghIssuer, Identity: "alice@acme.com"}
-	reqs := []store.TrustRequirement{{PredicateType: "p", Signers: []store.TrustSigner{bound, anySource, namedRef, anyRef, otherRepo, prefixRepo, noRef, emptyRef, email}}}
+	reqs := []store.TrustRequirement{{PredicateType: "p", CoversLayer: true, Optional: true,
+		Signers: []store.TrustSigner{bound, anySource, namedRef, anyRef, otherRepo, prefixRepo, noRef, emptyRef, email}}}
 	got := layer.DeriveSourceBinding("git", repo, reqs)[0]
 	type want struct{ src, ref string }
 	wants := []want{{"", ""}, {"", ""}, {repo, "refs/heads/release"}, {repo, ""}, {"", ""}, {"", ""}, {repo, ""}, {repo, ""}, {"", ""}}
@@ -144,8 +145,8 @@ func TestDeriveSourceBinding_SignerForms(t *testing.T) {
 			t.Errorf("signer %d: (%q, %q), want (%q, %q)", i, s.SourceRepository, s.SourceRepositoryRef, w.src, w.ref)
 		}
 	}
-	if got.PredicateType != "p" {
-		t.Errorf("predicate_type = %q", got.PredicateType)
+	if got.PredicateType != "p" || !got.CoversLayer || !got.Optional {
+		t.Errorf("requirement members = %q, covers_layer %t, optional %t", got.PredicateType, got.CoversLayer, got.Optional)
 	}
 	if local := layer.DeriveSourceBinding("local", repo, reqs)[0].Signers[6]; local.SourceRepository != "" {
 		t.Errorf("a local layer derived %q", local.SourceRepository)
@@ -171,13 +172,34 @@ func TestCheckTrustPolicy_Rules(t *testing.T) {
 		return cfg
 	}
 	twoReqs := ok(func(c *store.LayerConfig) { c.TrustRequirements = append(c.TrustRequirements, c.TrustRequirements[0]) })
+	twoCovering := ok(func(c *store.LayerConfig) {
+		c.TrustRequirements[0].CoversLayer = true
+		c.TrustRequirements = append(c.TrustRequirements, c.TrustRequirements[0])
+	})
+	optionalCovering := ok(func(c *store.LayerConfig) { c.TrustRequirements[0].Optional = true })
+	optionalMarked := ok(func(c *store.LayerConfig) {
+		c.TrustRequirements = append(c.TrustRequirements, c.TrustRequirements[0])
+		c.TrustRequirements[1].CoversLayer, c.TrustRequirements[1].Optional = true, true
+	})
+	types := func(mode string, types ...string) store.LayerConfig {
+		return ok(func(c *store.LayerConfig) { c.TrustMode, c.TrustRequireTypes = mode, types })
+	}
 	for _, tc := range []struct {
 		name string
 		cfg  store.LayerConfig
 		want string
 	}{
 		{"mode", policy("enforce"), `trust_mode "enforce"`},
-		{"several", twoReqs, "several requirements are not available yet"},
+		{"several unmarked", twoReqs, "2 requirements and 0 of them set covers_layer"},
+		{"several marked twice", twoCovering, "2 requirements and 2 of them set covers_layer"},
+		{"optional covering", optionalCovering, "trust_requirements[0] is the covering requirement and sets optional"},
+		{"optional marked covering", optionalMarked, "trust_requirements[1] is the covering requirement and sets optional"},
+		{"unknown type", types("warn", "hooks"), `trust_require_types[0] "hooks" is not an artifact type`},
+		{"empty type", types("warn", ""), `trust_require_types[0] "" is not an artifact type`},
+		{"removed type", types("warn", "command"), `"command" is not an artifact type`},
+		{"type twice", types("warn", "hook", "hook"), `lists "hook" twice`},
+		{"types under none", types("none", "hook"), "trust_mode is none"},
+		{"types without requirement", policy("warn"), "trust_mode warn needs a requirement"},
 		{"require without requirement", policy("require"), "trust_mode require needs a requirement"},
 		{"warn without requirement", policy("warn"), "trust_mode warn needs a requirement"},
 		{"no signer", ok(func(c *store.LayerConfig) { c.TrustRequirements[0].Signers = nil }), "trust_requirements[0] names no signer"},
@@ -201,6 +223,14 @@ func TestCheckTrustPolicy_Rules(t *testing.T) {
 		derived(policy("warn", store.TrustSigner{Issuer: ghIssuer, Identity: "alice@acme.com", Instance: "github"})),
 		policy("none", store.TrustSigner{Issuer: ghIssuer, Identity: "https://x.example/w", AnySource: true, Instance: "public-good"}),
 		policy("require", store.TrustSigner{Issuer: ghIssuer, Identity: "https://x.example/w", SourceRepositoryOwnerID: "7", AnyRef: true}),
+		// One requirement covers the layer with or without the marker; several
+		// mark one, and an additional requirement may be optional.
+		ok(func(c *store.LayerConfig) { c.TrustRequirements[0].CoversLayer = true }),
+		ok(func(c *store.LayerConfig) {
+			c.TrustRequirements = append(c.TrustRequirements, c.TrustRequirements[0], c.TrustRequirements[0])
+			c.TrustRequirements[1].CoversLayer, c.TrustRequirements[2].Optional = true, true
+		}),
+		types("warn", "hook", "mcp-server", "skill"), types("", "agent"), types("require", "rule"),
 	} {
 		if err := layer.CheckTrustPolicy(cfg, known, ""); err != nil {
 			t.Errorf("CheckTrustPolicy(%+v) = %v, want nil", cfg.TrustRequirements, err)
@@ -258,11 +288,14 @@ func TestTrustPolicyEqual(t *testing.T) {
 	if !layer.TrustPolicyEqual(a, b) {
 		t.Fatal("equal policies compared unequal")
 	}
-	if !layer.TrustPolicyEqual(store.LayerConfig{}, store.LayerConfig{TrustRequirements: []store.TrustRequirement{}}) {
+	if !layer.TrustPolicyEqual(store.LayerConfig{}, store.LayerConfig{TrustRequirements: []store.TrustRequirement{}, TrustRequireTypes: []string{}}) {
 		t.Error("nil and empty requirement lists compared unequal")
 	}
 	for _, mut := range []func(*store.LayerConfig){
 		func(c *store.LayerConfig) { c.TrustMode = "warn" },
+		func(c *store.LayerConfig) { c.TrustRequireTypes = []string{"hook"} },
+		func(c *store.LayerConfig) { c.TrustRequirements[0].CoversLayer = true },
+		func(c *store.LayerConfig) { c.TrustRequirements[0].Optional = true },
 		func(c *store.LayerConfig) { c.TrustLayerRoot = "x" },
 		func(c *store.LayerConfig) { c.TrustRequirements = nil },
 		func(c *store.LayerConfig) { c.TrustRequirements[0].PredicateType = "p" },
