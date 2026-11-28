@@ -1895,7 +1895,7 @@ DELETE /v1/admin/tenants/{id}
 | Method | Behavior |
 |:--|:--|
 | `POST` | Requires `name` and derives the tenant ID from it. Creation is idempotent: a new tenant returns `201 Created`, and re-creating an already-provisioned name returns `200 OK` with the existing tenant unchanged, its floor included. |
-| `PATCH` | Overlays only the keys present in the body, so an omitted key keeps its current value. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. A floor member replaces the stored value, and `null` empties a list member. A body that carries a floor member also returns `invalid_layers`: each live layer of the tenant whose trust policy the merged floor makes invalid, as `{"id", "constraint"}`, or an empty list. A change of the floor re-evaluates the links of every layer of the tenant. The name is fixed at creation and cannot be patched. |
+| `PATCH` | Overlays only the keys present in the body, so an omitted key keeps its current value. The write applies only while the tenant still holds the record the request read, and a change by another write in between is read again and the body applied to it, so a concurrent `PATCH` never writes back a floor it did not carry. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. A floor member replaces the stored value, and `null` empties a list member. A body that carries a floor member also returns `invalid_layers`: each live layer of the tenant whose trust policy the merged floor makes invalid, as `{"id", "constraint"}`, or an empty list. A change of the floor re-evaluates the links of every layer of the tenant. The name is fixed at creation and cannot be patched. |
 | `DELETE` | Deactivates the tenant and returns `204 No Content`. The data persists while the tenant stops resolving. |
 
 **Errors.**
@@ -1905,8 +1905,9 @@ DELETE /v1/admin/tenants/{id}
 | `404 registry.tenant_management_unavailable` | The registry is single-tenant, started without `PODIUM_MULTI_TENANT`. This is checked before operator authorization. |
 | `403 auth.forbidden` | The caller does not hold the operator role. |
 | `404 registry.tenant_not_found` | A `PATCH` or `DELETE` names an unknown tenant. |
-| `400 registry.invalid_argument` | A `POST` or `PATCH` carries a floor that breaks a [floor rule](../deployment/content/layers#tenant-trust-floor), such as an entry that names an instance the registry does not configure, a `null` `trust_floor_mode`, a floor member twice under different letter case, or a member whose name begins with `trust` and is none of the three. Nothing is stored. |
+| `400 registry.invalid_argument` | A `POST` or `PATCH` carries a floor that breaks a [floor rule](../deployment/content/layers#tenant-trust-floor), such as an entry that names an instance the registry does not configure, a `null` `trust_floor_mode`, a floor member twice, under the same name or under different letter case, or a member whose name begins with `trust` and is none of the three. Nothing is stored. |
 | `503 registry.read_only` | A `POST`, `PATCH`, or `DELETE` reached a registry in read-only mode. |
+| `503 registry.unavailable` | A `PATCH` found the tenant changed by another write on each of five attempts. Nothing is stored; send the request again. |
 
 ---
 
