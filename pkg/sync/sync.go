@@ -583,11 +583,11 @@ func adaptRecord(a adapter.HarnessAdapter, target string, rec materialRecord) (o
 func contestRun(a adapter.HarnessAdapter, target string, adapted []adaptedRecord, blocked []materialRecord, refused map[string]bool, res *Result) {
 	claims := map[string][]string{}
 	for _, ar := range adapted {
-		claims[ar.rec.ID] = append(claims[ar.rec.ID], standalonePaths(ar.files)...)
+		claims[ar.rec.ID] = append(claims[ar.rec.ID], outputClaims(ar.files)...)
 	}
 	for _, rec := range blocked {
 		if out, skip, err := adaptRecord(a, target, rec); err == nil && !skip {
-			claims[rec.ID] = append(claims[rec.ID], standalonePaths(out)...)
+			claims[rec.ID] = append(claims[rec.ID], outputClaims(out)...)
 		}
 	}
 	contests := contestedOutputs(claims)

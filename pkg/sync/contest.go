@@ -4,9 +4,11 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/materialize"
 )
 
 // outputContest is one ID's contest of an output path: the path it writes
@@ -80,10 +82,56 @@ func standalonePaths(files []adapter.File) []string {
 	return out
 }
 
+// entrySep separates the file path from the entry name in an entry claim.
+// No recorded path holds a control character, so the claim of an entry
+// never equals the claim of a file.
+const entrySep = "\x00"
+
+// outputClaims returns every claim an output makes: the paths it writes
+// whole, and the named entries it adds to shared configuration files.
+func outputClaims(files []adapter.File) []string {
+	return append(standalonePaths(files), namedEntries(files)...)
+}
+
+// namedEntries returns the named entries an output adds to shared files, as
+// path, entrySep, and entry name: each key of a keyed JSON map that a merge
+// fragment records in its x-podium index, such as mcpServers.<name>, and
+// each TOML table that an inject block of a .toml file opens, such as
+// [mcp_servers.<name>]. The name of such an entry comes from the artifact's
+// name field rather than its ID, so two IDs can add one entry. An array of
+// tables ([[hooks.X]]) appends and an entry keyed by the artifact ID is the
+// artifact's own, so neither is claimed.
+//
+// Spec: §7.5 (Output paths of distinct IDs)
+func namedEntries(files []adapter.File) []string {
+	var out []string
+	for _, f := range files {
+		switch {
+		case f.Op == adapter.OpMergeJSON:
+			for _, loc := range materialize.IndexedEntries(f.Content) {
+				out = append(out, f.Path+entrySep+strings.Join(loc, "."))
+			}
+		case f.Op == adapter.OpInject && strings.HasSuffix(f.Path, ".toml"):
+			for _, line := range strings.Split(string(f.Content), "\n") {
+				line = strings.TrimSpace(line)
+				if strings.HasPrefix(line, "[") && !strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]") {
+					out = append(out, f.Path+entrySep+strings.TrimSpace(line[1:len(line)-1]))
+				}
+			}
+		}
+	}
+	return out
+}
+
 // conflictFailure is the materialize.output_conflict refusal of id, which
-// names the path and the other ID. Both IDs passed the well-formed rule, and
-// the path is reported through attest.ReportString.
+// names the path, the entry for a named entry, and the other ID. Both IDs
+// passed the well-formed rule, and the path and the entry are reported
+// through attest.ReportString.
 func conflictFailure(id string, c outputContest) *attest.Failure {
+	if path, entry, ok := strings.Cut(c.path, entrySep); ok {
+		return attest.NewFailure(attest.CodeOutputConflict, attest.ConstraintEntry,
+			fmt.Sprintf("%s and %s both add the entry %s to %s", id, c.other, attest.ReportString(entry), attest.ReportString(path)))
+	}
 	return attest.NewFailure(attest.CodeOutputConflict, attest.ConstraintFile,
 		fmt.Sprintf("%s and %s both write %s", id, c.other, attest.ReportString(c.path)))
 }

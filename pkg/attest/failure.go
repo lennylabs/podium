@@ -46,6 +46,7 @@ const (
 	ConstraintOverlay         = "overlay"
 	ConstraintDuplicateID     = "duplicate_id"
 	ConstraintFile            = "file"
+	ConstraintEntry           = "entry"
 	ConstraintLayerRootUnlist = "layer_root_unlisted"
 )
 

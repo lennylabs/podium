@@ -174,10 +174,10 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 func contestRendered(rendered []renderedFile) error {
 	claims := map[string][]string{}
 	for _, rf := range rendered {
-		if rf.ownerID == manifestOwner || mergeKind(rf.file.Op) != "" {
+		if rf.ownerID == manifestOwner {
 			continue
 		}
-		claims[rf.ownerID] = append(claims[rf.ownerID], rf.file.Path)
+		claims[rf.ownerID] = append(claims[rf.ownerID], outputClaims([]adapter.File{rf.file})...)
 	}
 	contests := contestedOutputs(claims)
 	if len(contests) == 0 {
