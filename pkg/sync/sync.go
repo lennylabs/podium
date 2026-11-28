@@ -370,40 +370,33 @@ func Run(opts Options) (*Result, error) {
 	// Spec: §7.5 — the well-formed rule, the request binding, and the
 	// attestation check decide each selected record before anything is
 	// written. A refused record is skipped and its previous output kept.
-	records, refused := checkSelected(context.Background(), selectRecords(opts.Scope, view.records, toggles), priorLock, view.att, res)
-	all := withoutIDs(view.records, refused)
+	records, refused, blocked := checkSelected(context.Background(), selectRecords(opts.Scope, view.records, toggles), priorLock, view.att, res)
 
-	allFiles := []adapter.File{}
+	adapted := make([]adaptedRecord, 0, len(records))
 	for _, rec := range records {
-		// §4.3 target_harnesses: an artifact that opts out of this
-		// adapter is not materialized for it. Skip it before adapting
-		// so its files are neither written nor counted as current
-		// (stale-file cleanup then removes any prior output for it).
-		if rec.Artifact != nil && !manifest.TargetsHarness(rec.Artifact.TargetHarnesses, a.ID()) {
+		out, skip, err := adaptRecord(a, opts.Target, rec)
+		if err != nil {
+			return nil, err
+		}
+		if skip {
 			res.Skipped = append(res.Skipped, rec.ID)
 			continue
 		}
-		// §6.9 "Adapter cannot translate an artifact": refuse to
-		// materialize a field the selected harness has no §6.7.1
-		// equivalent for (a ✗ cell). The MCP server load_artifact path
-		// runs the same guard before adapting (cmd/podium-mcp/main.go),
-		// so both canonical-Adapt consumers fail an untranslatable
-		// artifact identically (§2.2) instead of one writing a verbatim
-		// copy and the other silently producing no output.
-		if terr := adapter.TranslationError(a.ID(), rec.Artifact); terr != nil {
-			return nil, fmt.Errorf("adapter %q cannot translate %s: %w", a.ID(), rec.ID, terr)
+		adapted = append(adapted, adaptedRecord{rec: rec, files: out})
+	}
+	// Spec: §7.5 (Output paths of distinct IDs) — two IDs that write one
+	// output path refuse each other before anything is written, and a
+	// record the attestation check refused still blocks the paths its
+	// output would write.
+	contestRun(a, opts.Target, adapted, blocked, refused, res)
+	all := withoutIDs(view.records, refused)
+
+	allFiles := []adapter.File{}
+	for _, ar := range adapted {
+		rec, out := ar.rec, ar.files
+		if refused[rec.ID] {
+			continue
 		}
-		out, err := a.Adapt(context.Background(), adapter.Source{
-			ArtifactID:    rec.ID,
-			ArtifactBytes: rec.ArtifactBytes,
-			SkillBytes:    rec.SkillBytes,
-			Resources:     rec.Resources,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("adapter %q failed for %s: %w", a.ID(), rec.ID, err)
-		}
-		stripHarnessConfigPrefix(opts.Target, out)
-		out = dropUnrecordablePaths(rec.ID, out)
 		paths := make([]string, len(out))
 		for i, f := range out {
 			paths[i] = f.Path
@@ -538,6 +531,73 @@ func Run(opts Options) (*Result, error) {
 		fmt.Fprintf(os.Stderr, "sync: lock write failed: %v\n", err)
 	}
 	return res, nil
+}
+
+// adaptedRecord is a selected record with the output its adapter computed.
+type adaptedRecord struct {
+	rec   materialRecord
+	files []adapter.File
+}
+
+// adaptRecord computes the output of rec under the adapter a, with the
+// paths the run would record. skip reports a record whose
+// target_harnesses opts out of the adapter.
+func adaptRecord(a adapter.HarnessAdapter, target string, rec materialRecord) (out []adapter.File, skip bool, err error) {
+	// §4.3 target_harnesses: an artifact that opts out of this adapter is
+	// not materialized for it. It is skipped before adapting so its files
+	// are neither written nor counted as current (stale-file cleanup then
+	// removes any prior output for it).
+	if rec.Artifact != nil && !manifest.TargetsHarness(rec.Artifact.TargetHarnesses, a.ID()) {
+		return nil, true, nil
+	}
+	// §6.9 "Adapter cannot translate an artifact": refuse to materialize a
+	// field the selected harness has no §6.7.1 equivalent for (a ✗ cell).
+	// The MCP server load_artifact path runs the same guard before adapting
+	// (cmd/podium-mcp/main.go), so both canonical-Adapt consumers fail an
+	// untranslatable artifact identically (§2.2) instead of one writing a
+	// verbatim copy and the other silently producing no output.
+	if terr := adapter.TranslationError(a.ID(), rec.Artifact); terr != nil {
+		return nil, false, fmt.Errorf("adapter %q cannot translate %s: %w", a.ID(), rec.ID, terr)
+	}
+	out, err = a.Adapt(context.Background(), adapter.Source{
+		ArtifactID:    rec.ID,
+		ArtifactBytes: rec.ArtifactBytes,
+		SkillBytes:    rec.SkillBytes,
+		Resources:     rec.Resources,
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("adapter %q failed for %s: %w", a.ID(), rec.ID, err)
+	}
+	stripHarnessConfigPrefix(target, out)
+	return dropUnrecordablePaths(rec.ID, out), false, nil
+}
+
+// contestRun refuses each ID whose output path another ID of the run
+// writes, under every mode: the records the run adapted, and the records
+// the attestation check refused, whose output stays blocked. A refused ID
+// is added to refused and reported once, so its previous output and lock
+// entries are kept. The output of a blocked record that cannot be adapted
+// claims nothing.
+//
+// Spec: §7.5 (Output paths of distinct IDs)
+func contestRun(a adapter.HarnessAdapter, target string, adapted []adaptedRecord, blocked []materialRecord, refused map[string]bool, res *Result) {
+	claims := map[string][]string{}
+	for _, ar := range adapted {
+		claims[ar.rec.ID] = append(claims[ar.rec.ID], standalonePaths(ar.files)...)
+	}
+	for _, rec := range blocked {
+		if out, skip, err := adaptRecord(a, target, rec); err == nil && !skip {
+			claims[rec.ID] = append(claims[rec.ID], standalonePaths(out)...)
+		}
+	}
+	contests := contestedOutputs(claims)
+	for _, id := range slices.Sorted(maps.Keys(contests)) {
+		if refused[id] {
+			continue
+		}
+		refused[id] = true
+		res.Dropped = append(res.Dropped, refusalDrop(id, conflictFailure(id, contests[id])))
+	}
 }
 
 // stripHarnessConfigPrefix removes the leading path segment from each

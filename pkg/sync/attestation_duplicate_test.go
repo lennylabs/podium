@@ -216,7 +216,7 @@ func TestCheckSelected_RefusedIDIsNotWritten(t *testing.T) {
 	t.Parallel()
 	res := &Result{}
 	refusal := attest.NewFailure(attest.CodeAttestationMissing, "", "none")
-	kept, refused := checkSelected(context.Background(),
+	kept, refused, _ := checkSelected(context.Background(),
 		[]materialRecord{{ID: "a"}, {ID: "a", refusal: refusal}, {ID: "a", refusal: refusal}, {ID: "b"}}, nil, &Attestation{}, res)
 	if len(kept) != 1 || kept[0].ID != "b" || !refused["a"] || len(res.Dropped) != 1 {
 		t.Fatalf("kept %+v refused %v dropped %+v", kept, refused, res.Dropped)

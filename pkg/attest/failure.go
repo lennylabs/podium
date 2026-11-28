@@ -15,6 +15,7 @@ const (
 	CodeAttestationRootStale = "materialize.attestation_root_stale"
 	CodePolicyUnavailable    = "config.attestation_policy_unavailable"
 	CodeRegistryUnreachable  = "network.registry_unreachable"
+	CodeOutputConflict       = "materialize.output_conflict"
 )
 
 // The details.constraint values of the consumer codes (§4.7.11, §6.10). A
@@ -44,6 +45,8 @@ const (
 	ConstraintPinnedSigner    = "pinned_signer"
 	ConstraintOverlay         = "overlay"
 	ConstraintDuplicateID     = "duplicate_id"
+	ConstraintFile            = "file"
+	ConstraintLayerRootUnlist = "layer_root_unlisted"
 )
 
 // Failure is a refusal or a warning of the consumer procedure (§4.7.11): a

@@ -460,7 +460,7 @@ func TestLockAttestations_Dedupes(t *testing.T) {
 func TestCheckSelected_OverlayRecord(t *testing.T) {
 	t.Parallel()
 	res := &Result{}
-	kept, refused := checkSelected(context.Background(), []materialRecord{{ID: "a"}}, nil, &Attestation{}, res)
+	kept, refused, _ := checkSelected(context.Background(), []materialRecord{{ID: "a"}}, nil, &Attestation{}, res)
 	if len(kept) != 1 || len(refused) != 0 {
 		t.Fatalf("kept %+v refused %v", kept, refused)
 	}

@@ -34,6 +34,11 @@ type Attestation struct {
 	// was signed under, from defaults.attestation.layer_roots of the user's
 	// sync.yaml (§7.5, §13.11.3).
 	LayerRoots map[string]string
+	// UserLayerRoots reports that the user's sync.yaml sets layer_roots.
+	// The layer ID is a directory name the repository chooses, so every
+	// layer that holds an artifact the user sources resolve to require must
+	// then be listed (§13.11.3).
+	UserLayerRoots bool
 	// PinSigners refuses an artifact whose signers differ from those its
 	// prior lock entries record (§7.5.3).
 	PinSigners bool
@@ -172,6 +177,9 @@ func (l *fsLayer) attestation(att *Attestation) *attest.LocalLayer {
 // localCheck returns the check of one filesystem-source package.
 func localCheck(c *attest.Checker, att *Attestation, l *fsLayer, rec filesystem.ArtifactRecord) recordCheck {
 	return func(ctx context.Context) (attest.Result, error) {
+		if err := att.layerListed(l.layer.ID, rec.ID); err != nil {
+			return attest.Result{}, err
+		}
 		p := attest.LocalPackage{ID: rec.ID, PackageDigest: rec.PackageDigest}
 		p.SubjectName, p.SubjectErr = rec.SubjectName()
 		if att.aboveNone() {
@@ -179,6 +187,23 @@ func localCheck(c *attest.Checker, att *Attestation, l *fsLayer, rec filesystem.
 		}
 		return c.VerifyLocal(ctx, p)
 	}
+}
+
+// layerListed refuses an artifact that the user sources resolve to require
+// in a layer that the user's layer_roots does not list, once the user sets
+// layer_roots: a repository that renames its layer directory would
+// otherwise escape the root the user expects.
+//
+// Spec: §13.11.3 (Layer subject)
+func (a *Attestation) layerListed(layerID, id string) error {
+	if !a.UserLayerRoots || a.Policy == nil {
+		return nil
+	}
+	if _, ok := a.LayerRoots[layerID]; ok || a.Policy.Resolve(id).UserMode != attest.ModeRequire {
+		return nil
+	}
+	return attest.NewFailure(attest.CodeAttestationMismatch, attest.ConstraintLayerRootUnlist,
+		"the user's layer_roots lists no root for the artifact's layer")
 }
 
 // refusalDrop is the dropped-artifact entry of a record that the
@@ -201,18 +226,27 @@ func refusalDrop(id string, err error) layer.Drop {
 // or the request binding refused at load, or that the attestation check
 // refuses under require, is left out of the returned records, added to the
 // result's dropped artifacts with its code, and named in the returned set,
-// so the run keeps its previous output and lock entries. A failure under
+// so the run keeps its previous output and lock entries. A record the
+// attestation check refused is also returned as blocked, because the paths
+// its output would write stay closed to other IDs of the run. A failure under
 // warn is a warning of the result. Each kept record carries the package
 // digest and the accepted bundles its lock entries record, and its signers
 // are compared with those the prior lock records (§7.5.3).
 //
 // Spec: §7.5 (Author attestation), §7.5.3, §13.11.3
-func checkSelected(ctx context.Context, records []materialRecord, prior *LockFile, att *Attestation, res *Result) ([]materialRecord, map[string]bool) {
-	refused := map[string]bool{}
+func checkSelected(ctx context.Context, records []materialRecord, prior *LockFile, att *Attestation, res *Result) (kept []materialRecord, refused map[string]bool, blocked []materialRecord) {
+	refused = map[string]bool{}
 	priorSigners := lockSigners(prior)
 	checked := make([]materialRecord, 0, len(records))
 	for _, rec := range records {
+		loaded := rec.refusal == nil
 		if err := checkRecord(ctx, &rec, priorSigners, att, res); err != nil {
+			if loaded {
+				// The record passed the load checks, so its content is
+				// the content of its ID, and its output stays blocked
+				// (§7.5 Output paths of distinct IDs).
+				blocked = append(blocked, rec)
+			}
 			// An ID is reported once, with the refusal of its first refused
 			// record.
 			if !refused[rec.ID] {
@@ -225,7 +259,7 @@ func checkSelected(ctx context.Context, records []materialRecord, prior *LockFil
 	}
 	// A record whose ID another record refused is not written either, so an
 	// ID is never both written and refused in one run.
-	return withoutIDs(checked, refused), refused
+	return withoutIDs(checked, refused), refused, blocked
 }
 
 // checkRecord checks one selected record and fills its lock members. It

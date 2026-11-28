@@ -176,6 +176,7 @@ func (b *syncPolicyBuilder) files(att *sync.Attestation) ([]*sync.AttestationBlo
 			for id, root := range blk.LayerRoots {
 				att.LayerRoots[id] = root
 			}
+			att.UserLayerRoots = len(blk.LayerRoots) > 0
 			blocks = append(blocks, blk)
 		}
 	}

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -147,6 +149,11 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Spec: §7.8 (Author attestation) — two IDs that render one component
+	// file fail the target before it writes, whatever their modes.
+	if err := contestRendered(rendered); err != nil {
+		return nil, fmt.Errorf("publish %q: %w", opts.OutputID, err)
+	}
 
 	res, err := reconcile(opts.Workdir, opts.OutputID, rendered)
 	if err != nil {
@@ -155,6 +162,29 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 	res.Dropped = view.dropped
 	res.Warnings = append(view.warnings, warnings...)
 	return res, nil
+}
+
+// contestRendered fails a render in which two distinct IDs write one
+// component file path, compared byte for byte and with ASCII letters folded.
+// The emitters name a skill directory by the last ID segment, so team/pay
+// and finance/pay render to one skills/pay/. The merged manifests belong to
+// no ID and are not contested.
+//
+// Spec: §7.8 (Author attestation)
+func contestRendered(rendered []renderedFile) error {
+	claims := map[string][]string{}
+	for _, rf := range rendered {
+		if rf.ownerID == manifestOwner || mergeKind(rf.file.Op) != "" {
+			continue
+		}
+		claims[rf.ownerID] = append(claims[rf.ownerID], rf.file.Path)
+	}
+	contests := contestedOutputs(claims)
+	if len(contests) == 0 {
+		return nil
+	}
+	id := slices.Sorted(maps.Keys(contests))[0]
+	return &RecordRefusedError{ID: id, Err: conflictFailure(id, contests[id])}
 }
 
 // checkAssigned runs the §4.7.11 attestation check on each record a plugin
