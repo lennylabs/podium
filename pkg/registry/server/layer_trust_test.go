@@ -701,11 +701,11 @@ func (s *racingTrustStore) race(ctx context.Context, cfg store.LayerConfig) {
 		return
 	}
 	s.fire = false
-	cur, _ := s.Memory.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
+	cur, _ := s.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
 	cur.TrustRequirements[0].CoversLayer = true
 	cur.TrustRequirements = append(cur.TrustRequirements, store.TrustRequirement{
 		Signers: []store.TrustSigner{{Issuer: trustIssuer, Identity: "scanner@acme.com", AnySource: true, AnyRef: true}}})
-	_ = s.Memory.PutLayerConfig(ctx, cur)
+	_ = s.PutLayerConfig(ctx, cur)
 }
 
 func (s *racingTrustStore) PutLayerConfigKeepingVisibility(ctx context.Context, cfg store.LayerConfig) error {
@@ -740,7 +740,7 @@ func TestLayerTrust_ExpectedRequirementsConditionTheWrite(t *testing.T) {
 		ts := httptest.NewServer(server.NewLayerEndpoint(st, "default", server.NewModeTracker()).Handler())
 		t.Cleanup(ts.Close)
 		alice := map[string]any{"issuer": trustIssuer, "identity": "alice@acme.com", "any_source": true, "any_ref": true}
-		if err := st.Memory.PutLayerConfig(ctx, store.LayerConfig{TenantID: "default", ID: "finance", SourceType: "git", Repo: trustRepo, Ref: "main", TrustMode: "warn",
+		if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "default", ID: "finance", SourceType: "git", Repo: trustRepo, Ref: "main", TrustMode: "warn",
 			TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: trustIssuer, Identity: "alice@acme.com", AnySource: true, AnyRef: true}}}}}); err != nil {
 			t.Fatal(err)
 		}
@@ -751,7 +751,7 @@ func TestLayerTrust_ExpectedRequirementsConditionTheWrite(t *testing.T) {
 			body[k] = v
 		}
 		resp, out := mustPut(t, ts.URL, "/v1/layers/update?id=finance", body)
-		cfg, _ := st.Memory.GetLayerConfig(ctx, "default", "finance")
+		cfg, _ := st.GetLayerConfig(ctx, "default", "finance")
 		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(out), "trust_requirements_changed") || len(cfg.TrustRequirements) != 2 || cfg.Public {
 			t.Errorf("%v: %d %s, %d requirements, public %v", extra, resp.StatusCode, out, len(cfg.TrustRequirements), cfg.Public)
 		}
