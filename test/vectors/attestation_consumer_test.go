@@ -31,18 +31,26 @@ const consumerDescription = "Cross-language vectors for the §4.7.11 consumer pr
 	"the first failure's code and constraint, or the synthesized-document verdict, the package digest candidates " +
 	"in ascending order, and the expected subject name. signed_digest is the package digest the signer's podium " +
 	"computes for the package the record was served from, and matches_signed reports whether a candidate equals it. " +
-	"policy_resolution cases give policy sources and the mode, the user mode, and the rule identity of each ID."
+	"policy_resolution cases give policy sources and, for each ID, the mode, the user mode, the rule identity, " +
+	"and the step 1 plan: the step 1 failure, the rules the record meets, the rules whose failures are warnings, " +
+	"and the step 1 warnings. references cases give an attestations member and the usable digests or the failure. " +
+	"fetch_outcome cases give what the fetch of each reference yields and the outcome of steps 8 to 10 under " +
+	"a key-based require rule. requirement_codes cases give the step 10 observation of each bundle and signer " +
+	"and the outcome of the requirement."
 
 // consumerFile is the layout of attestation-consumer.json. Every section is
 // sorted by case name.
 type consumerFile struct {
-	Description      string                 `json:"description"`
-	WellFormed       []wellFormedVector     `json:"well_formed"`
-	RequestBinding   []requestBindingVector `json:"request_binding"`
-	BatchBinding     []batchBindingVector   `json:"batch_binding"`
-	PatternMatch     []patternMatchVector   `json:"pattern_match"`
-	RecordChecks     []recordCheckVector    `json:"record_checks"`
-	PolicyResolution []policyResolutionCase `json:"policy_resolution"`
+	Description      string                  `json:"description"`
+	WellFormed       []wellFormedVector      `json:"well_formed"`
+	RequestBinding   []requestBindingVector  `json:"request_binding"`
+	BatchBinding     []batchBindingVector    `json:"batch_binding"`
+	PatternMatch     []patternMatchVector    `json:"pattern_match"`
+	RecordChecks     []recordCheckVector     `json:"record_checks"`
+	PolicyResolution []policyResolutionCase  `json:"policy_resolution"`
+	References       []referencesVector      `json:"references"`
+	FetchOutcome     []fetchOutcomeVector    `json:"fetch_outcome"`
+	RequirementCodes []requirementCodeVector `json:"requirement_codes"`
 }
 
 type wellFormedVector struct {
@@ -122,6 +130,19 @@ type policyIDVector struct {
 	// of the rule the ID resolves to, -1 for none; two IDs share a rule
 	// exactly when the lists are equal.
 	RuleIndexes []int `json:"rule_indexes"`
+	// Checked reports whether the attestation check runs (mode above
+	// none). Step1Code and Step1Constraint are the step 1 failure, which
+	// refuses under require and warns under warn. Enforced lists the rules
+	// the record meets, a failure refusing it; Reported the rules whose
+	// failures are warnings; each as [file index, rule index] over the
+	// applying files in source order. Warnings lists the constraints of the
+	// step 1 warnings.
+	Checked         bool     `json:"checked"`
+	Step1Code       string   `json:"step1_code"`
+	Step1Constraint string   `json:"step1_constraint"`
+	Enforced        [][2]int `json:"enforced"`
+	Reported        [][2]int `json:"reported"`
+	Warnings        []string `json:"warnings"`
 }
 
 type policyResolutionCase struct {
@@ -155,7 +176,7 @@ func wellFormedVectors(t *testing.T) []wellFormedVector {
 		"id question": "a?b", "id zwnj git": "\u200c.git", "id bom": "\ufeffx", "id hfs podium": ".POD\u200cIUM",
 		"id con space ext": "CON .txt", "id nul spaces": "nul  .md", "id short ext": "ABCDEF~1.TXT",
 		"id release tilde": "release~2", "id long ext": "ABCDEF~1.TEXT", "id two dots": "a~1.b.c", "id backup": "file.txt.~1~",
-		"id empty": "",
+		"id empty": "", "id at sign": "finance/close-books@1.2.0", "id at sign alone": "a@b",
 	}
 	paths := map[string]string{
 		"path plain": "scripts/run.sh", "path dot prefix": ".github/workflow.yml", "path dotdot": "../x",
@@ -433,6 +454,21 @@ func policyResolutionVectors(t *testing.T) []policyResolutionCase {
 		{"first matching rule", []policySourceVector{
 			{Class: "user", Files: []string{file(rule(`"finance/pay"`, "warn"), rule(`"finance/**"`, "require"))}},
 		}, []string{"finance/pay", "finance/close", "x"}},
+		{"repository require keeps user warn", []policySourceVector{
+			{Class: "user", Files: []string{file(rule(`"**"`, "warn"))}},
+			{Class: "repository", Files: []string{file(rule(`"**"`, "require"))}},
+		}, []string{"finance/pay"}},
+		{"user require met by repository only", []policySourceVector{
+			{Class: "user", DefaultMode: "require", Files: []string{file()}},
+			{Class: "repository", Files: []string{file(rule(`"finance/**"`, "require"))}},
+		}, []string{"finance/pay"}},
+		{"user warn default unmet", []policySourceVector{
+			{Class: "user", DefaultMode: "warn"},
+			{Class: "repository", Files: []string{file(rule(`"finance/**"`, "require"))}},
+		}, []string{"finance/pay"}},
+		{"rule without requirements under default", []policySourceVector{
+			{Class: "repository", DefaultMode: "require", Files: []string{file(`{"ids":["bare/**"]}`)}},
+		}, []string{"bare/x", "other/x"}},
 	}
 	var out []policyResolutionCase
 	for _, c := range cases {
@@ -466,7 +502,7 @@ func policyResolutionVectors(t *testing.T) []policyResolutionCase {
 		pc := policyResolutionCase{Name: c.name, Sources: c.sources}
 		for _, id := range c.ids {
 			r := p.Resolve(id)
-			pc.IDs = append(pc.IDs, policyIDVector{ID: id, Mode: string(r.Mode), UserMode: string(r.UserMode), RuleIndexes: ruleIndexes(sources, r)})
+			pc.IDs = append(pc.IDs, planVector(t, sources, r))
 		}
 		out = append(out, pc)
 	}
@@ -482,6 +518,34 @@ func publicGoodForVectors(t *testing.T) sign.AttestationInstance {
 		t.Fatal(err)
 	}
 	return sign.AttestationInstance{Root: root}
+}
+
+// planVector records the resolution and the step 1 plan of one ID.
+func planVector(t *testing.T, sources []attest.Source, r attest.Resolution) policyIDVector {
+	t.Helper()
+	v := policyIDVector{ID: r.ID, Mode: string(r.Mode), UserMode: string(r.UserMode), RuleIndexes: ruleIndexes(sources, r),
+		Checked: r.Mode.AboveNone(), Enforced: [][2]int{}, Reported: [][2]int{}, Warnings: []string{}}
+	if !v.Checked {
+		return v
+	}
+	index := map[*attest.PolicyFile]int{}
+	for _, s := range sources {
+		for _, f := range s.Files {
+			index[f] = len(index)
+		}
+	}
+	plan, err := r.Plan()
+	v.Step1Code, v.Step1Constraint = failureParts(t, err)
+	for _, m := range plan.Enforced {
+		v.Enforced = append(v.Enforced, [2]int{index[m.File], m.Index})
+	}
+	for _, m := range plan.Reported {
+		v.Reported = append(v.Reported, [2]int{index[m.File], m.Index})
+	}
+	for _, w := range plan.Warnings {
+		v.Warnings = append(v.Warnings, w.Constraint)
+	}
+	return v
 }
 
 // ruleIndexes lists the matched rule index of each applying file, -1 for
@@ -517,6 +581,9 @@ func TestAttestationConsumerVectors_MatchGo(t *testing.T) {
 		PatternMatch:     sortByName(patternMatchVectors(), func(v patternMatchVector) string { return v.Name }),
 		RecordChecks:     sortByName(recordCheckVectors(t), func(v recordCheckVector) string { return v.Name }),
 		PolicyResolution: sortByName(policyResolutionVectors(t), func(v policyResolutionCase) string { return v.Name }),
+		References:       sortByName(referencesVectors(t), func(v referencesVector) string { return v.Name }),
+		FetchOutcome:     sortByName(fetchOutcomeVectors(t), func(v fetchOutcomeVector) string { return v.Name }),
+		RequirementCodes: sortByName(requirementCodeVectors(t), func(v requirementCodeVector) string { return v.Name }),
 	}
 	testharness.AssertGoldenFile(t, filepath.Join(".", consumerFileName), encodeVectors(t, file))
 }

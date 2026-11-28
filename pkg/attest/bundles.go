@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -20,6 +21,16 @@ import (
 // ErrBundleNotFound reports a digest the registry answers with not found.
 // The consumer procedure treats its reference as unusable (§4.7.11 step 8).
 var ErrBundleNotFound = errors.New("attest: the registry holds no bundle under the digest")
+
+// ErrBundleUnavailable reports a registry that answered a bundle fetch with
+// a 5xx status. The consumer procedure treats the reference as unusable
+// and goes on with the others (§4.7.11 step 8).
+var ErrBundleUnavailable = errors.New("attest: the registry could not serve the bundle")
+
+// DefaultBundleFetchTimeout bounds a bundle fetch of an HTTPBundleSource
+// that has no client of its own. A consumer that passes its registry
+// client uses that client's deadline instead, as §4.7.11 step 8 states.
+const DefaultBundleFetchTimeout = 30 * time.Second
 
 // BundleSource supplies the bytes of a bundle by its attestation digest,
 // sha256:<hex>. An implementation returns ErrBundleNotFound for a digest
@@ -51,15 +62,19 @@ type HTTPBundleSource struct {
 	// MaxBytes is the consumer's PODIUM_ATTESTATION_MAX_BYTES; zero is the
 	// §13.12 default.
 	MaxBytes int64
+	// Timeout bounds each fetch when Client is nil; zero is
+	// DefaultBundleFetchTimeout.
+	Timeout time.Duration
 }
 
 // Bundle fetches the bundle with the digest. The body is read up to the
 // base64 length of a bundle at the size limit plus 1 KiB, and a longer body
 // is a materialize.attestation_invalid Failure with the constraint limits.
 // A body that is not a JSON object whose bundle member is a canonical base64
-// string, and an answer other than 200 and 404, are invalid with the
-// constraint fetch. A request that does not reach the registry is a
-// network.registry_unreachable Failure.
+// string, and a 4xx answer other than 404, are invalid with the constraint
+// fetch. A 5xx answer is ErrBundleUnavailable, and a request that does not
+// reach the registry is a network.registry_unreachable Failure. A nil
+// Client is replaced by one bounded by Timeout.
 //
 // Spec: §4.7.11 (Attestation check, step 8), §7.3.5
 func (s HTTPBundleSource) Bundle(ctx context.Context, digest string) ([]byte, error) {
@@ -73,18 +88,23 @@ func (s HTTPBundleSource) Bundle(ctx context.Context, digest string) ([]byte, er
 	}
 	client := s.Client
 	if client == nil {
-		client = http.DefaultClient
+		timeout := s.Timeout
+		if timeout <= 0 {
+			timeout = DefaultBundleFetchTimeout
+		}
+		client = &http.Client{Timeout: timeout}
 	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fail(CodeRegistryUnreachable, "", "the bundle fetch did not reach the registry", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusNotFound:
+	switch {
+	case resp.StatusCode == http.StatusNotFound:
 		return nil, ErrBundleNotFound
-	default:
+	case resp.StatusCode >= 500:
+		return nil, fmt.Errorf("%w: status %d", ErrBundleUnavailable, resp.StatusCode)
+	case resp.StatusCode != http.StatusOK:
 		return nil, fail(CodeAttestationInvalid, ConstraintFetch, fmt.Sprintf("the registry answered the bundle fetch with %d", resp.StatusCode), nil)
 	}
 	limit := base64Len(maxBytesOr(s.MaxBytes)) + responseSlack

@@ -348,3 +348,65 @@ func TestPolicy_DefaultAndRefusals(t *testing.T) {
 		t.Fatal("Stricter")
 	}
 }
+
+// Spec: §4.7.11 (Consumer trust policy) — matching collapses runs of ** and
+// runs in polynomial time, so a pattern a repository commits cannot stall a
+// consumer.
+func TestMatchPattern_Bounded(t *testing.T) {
+	t.Parallel()
+	pat := strings.Repeat("**/", 40) + "z"
+	id := strings.TrimSuffix(strings.Repeat("a/", 200), "/")
+	start := time.Now()
+	if attest.MatchPattern(pat, id) {
+		t.Fatal("matched")
+	}
+	if !attest.MatchPattern(pat, id+"/z") || !attest.MatchPattern("**/**/a/**", "a") {
+		t.Fatal("did not match")
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("matching took %v", d)
+	}
+}
+
+// Spec: §4.7.11 (Consumer trust policy) — a literal pattern segment that no
+// well-formed requested ID can hold is refused at load.
+func TestParsePolicyDocument_UnmatchablePatterns(t *testing.T) {
+	t.Parallel()
+	for _, p := range []string{"finance/./**", "finance/../**", "finance/.hidden", "finance/a@1.0.0", "GIT~1/**", "a\\\\b", "con/x"} {
+		_, err := attest.ParsePolicyDocument([]byte(`{"version":1,"rules":[{"ids":["` + p + `"],"mode":"none"}]}`))
+		if f, ok := attest.FailureOf(err); !ok || f.Code != attest.CodePolicyUnavailable {
+			t.Errorf("pattern %q: %v", p, err)
+		}
+	}
+	if _, err := attest.ParsePolicyDocument([]byte(`{"version":1,"rules":[{"ids":["Finance/**","*/x"],"mode":"none"}]}`)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Spec: §4.7.11 (Attestation check, steps 1 and 10) — the plan of an ID
+// and the code a failed requirement reports.
+func TestPlanAndRequirementFailure(t *testing.T) {
+	t.Parallel()
+	user := fileOf(t, `{"version":1,"rules":[`+keyRule(t, "warn", "**")+`]}`)
+	repo := fileOf(t, `{"version":1,"rules":[`+keyRule(t, "require", "finance/**")+`,{"ids":["bare/**"]}]}`)
+	p, _ := attest.NewPolicy(
+		attest.Source{Class: attest.UserSource, Files: []*attest.PolicyFile{user}},
+		attest.Source{Class: attest.RepositorySource, DefaultMode: attest.ModeRequire, Files: []*attest.PolicyFile{repo}},
+	)
+	plan, err := p.Resolve("finance/pay").Plan()
+	if err != nil || len(plan.Enforced) != 1 || len(plan.Reported) != 1 {
+		t.Fatalf("plan = %+v, %v", plan, err)
+	}
+	alone, _ := attest.NewPolicy(attest.Source{Class: attest.RepositorySource, DefaultMode: attest.ModeRequire, Files: []*attest.PolicyFile{repo}})
+	_, err = alone.Resolve("other/x").Plan()
+	wantFailure(t, err, attest.CodeAttestationUntrusted, attest.ConstraintNoRule)
+	_, err = p.Resolve("bare/x").Plan()
+	if f, ok := attest.FailureOf(err); !ok || f.Constraint != attest.ConstraintNoRequirements {
+		t.Fatalf("bare: %v", err)
+	}
+	if err := attest.RequirementFailure([]attest.SignerObservation{{Reason: sign.ReasonChain}, {Verified: true, Accepted: true, PredicateType: true, Subject: true}}); err != nil {
+		t.Fatal(err)
+	}
+	wantFailure(t, attest.RequirementFailure(nil), attest.CodeAttestationInvalid, string(sign.ReasonSignature))
+	wantFailure(t, attest.RequirementFailure([]attest.SignerObservation{{Reason: sign.ReasonChain}, {Reason: sign.ReasonTime}}), attest.CodeAttestationInvalid, string(sign.ReasonChain))
+}

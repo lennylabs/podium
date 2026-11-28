@@ -121,14 +121,14 @@ func asFailure(err error) *Failure {
 	return fail(CodeAttestationInvalid, "", "the attestation check failed", err)
 }
 
-// check runs the attestation check steps. Under require the first failure
-// is returned. Under warn a failure that stops the check is returned, and
-// the failure of one rule among several is added as a warning while the
-// check goes on to the next rule.
+// check runs the attestation check steps. A failure of steps 1 to 8, and
+// of a rule the record meets under require, is returned: Verify refuses it
+// under require and reports it as a warning under warn. The failure of a
+// rule whose failures are reported is added as a warning and the check
+// goes on to the next rule.
 func (c *Checker) check(ctx context.Context, d Delivery, res *Result) error {
-	r := res.Resolution
-	mode := r.Mode
-	rules, err := c.selectRules(r, res)
+	plan, err := res.Resolution.Plan()
+	res.Warnings = append(res.Warnings, plan.Warnings...)
 	if err != nil {
 		return err
 	}
@@ -153,49 +153,33 @@ func (c *Checker) check(ctx context.Context, d Delivery, res *Result) error {
 	if err != nil {
 		return err
 	}
-	for _, m := range rules {
-		accepted, err := c.meetRule(ctx, m, bundles, res.SubjectName, res.Candidates)
-		if err != nil {
-			if mode == ModeRequire {
-				return err
-			}
-			res.Warnings = append(res.Warnings, asFailure(err))
-			continue
+	for _, m := range plan.Enforced {
+		if err := c.applyRule(ctx, m, bundles, res); err != nil {
+			return err
 		}
-		for _, a := range accepted {
-			if res.PackageDigest == "" {
-				res.PackageDigest = a.digest
-			}
-			res.Accepted = append(res.Accepted, a.AcceptedBundle)
+	}
+	for _, m := range plan.Reported {
+		if err := c.applyRule(ctx, m, bundles, res); err != nil {
+			res.Warnings = append(res.Warnings, asFailure(err))
 		}
 	}
 	return nil
 }
 
-// selectRules applies step 1: the rules of the ID's mode that hold a
-// requirement, after the user mode rule. A user mode of warn that no
-// user-source rule meets adds a warning and the check goes on.
-func (c *Checker) selectRules(r Resolution, res *Result) ([]RuleMatch, error) {
-	if r.UserMode.AboveNone() && !r.userRuleMet() {
-		f := fail(CodeAttestationUntrusted, ConstraintUserRule, "no rule of a user-source file with a requirement matches the ID", nil)
-		if r.UserMode == ModeRequire {
-			return nil, f
+// applyRule runs steps 9 and 10 for one rule and records the bundles that
+// met its requirements.
+func (c *Checker) applyRule(ctx context.Context, m RuleMatch, bundles []fetched, res *Result) error {
+	accepted, err := c.meetRule(ctx, m, bundles, res.SubjectName, res.Candidates)
+	if err != nil {
+		return err
+	}
+	for _, a := range accepted {
+		if res.PackageDigest == "" {
+			res.PackageDigest = a.digest
 		}
-		res.Warnings = append(res.Warnings, f)
+		res.Accepted = append(res.Accepted, a.AcceptedBundle)
 	}
-	var rules []RuleMatch
-	for _, m := range r.metRules(r.Mode) {
-		if len(m.Rule().Requirements) > 0 {
-			rules = append(rules, m)
-		}
-	}
-	switch {
-	case len(r.Matches) == 0:
-		return nil, fail(CodeAttestationUntrusted, ConstraintNoRule, "no rule matches the ID, and the default mode is above none", nil)
-	case len(rules) == 0:
-		return nil, fail(CodeAttestationUntrusted, ConstraintNoRequirements, "the rules of the ID's mode hold no requirement", nil)
-	}
-	return rules, nil
+	return nil
 }
 
 // fetched is one bundle of step 8 with its digest.
@@ -205,7 +189,10 @@ type fetched struct {
 }
 
 // fetch applies steps 7 and 8: it reads the usable references and fetches
-// each bundle, checking its size and its digest.
+// each bundle, checking its size and its digest. A reference whose bundle is
+// not found, unavailable, unreachable, or not cached offline is unusable,
+// and the others are still fetched, so one such reference does not hide a
+// bundle that meets the rule.
 func (c *Checker) fetch(ctx context.Context, served version.Served) ([]fetched, error) {
 	refs, err := ReadReferences(served.Members)
 	if err != nil {
@@ -219,16 +206,20 @@ func (c *Checker) fetch(ctx context.Context, served version.Served) ([]fetched, 
 	}
 	limit := maxBytesOr(c.MaxBytes)
 	var out []fetched
+	var unreachable error
 	for _, d := range refs {
 		b, err := c.Bundles.Bundle(ctx, d)
-		switch {
-		case errors.Is(err, ErrBundleNotFound):
-			continue
-		case err != nil:
-			if f, ok := FailureOf(err); ok {
-				return nil, f
+		if err != nil {
+			usable, reached := classifyFetchError(err)
+			if usable != nil {
+				return nil, usable
 			}
-			return nil, fail(CodeRegistryUnreachable, "", "the bundle fetch did not reach the registry", err)
+			if !reached {
+				unreachable = err
+			}
+			continue
+		}
+		switch {
 		case int64(len(b)) > limit:
 			return nil, fail(CodeAttestationInvalid, ConstraintLimits, "a bundle exceeds the size limit", nil)
 		case AttestationDigest(b) != d:
@@ -236,10 +227,32 @@ func (c *Checker) fetch(ctx context.Context, served version.Served) ([]fetched, 
 		}
 		out = append(out, fetched{digest: d, raw: b})
 	}
-	if len(out) == 0 {
-		return nil, fail(CodeAttestationMissing, "", "the registry holds no referenced bundle", nil)
+	switch {
+	case len(out) > 0:
+		return out, nil
+	case unreachable != nil:
+		return nil, fail(CodeRegistryUnreachable, "", "no referenced bundle could be fetched, and the registry could not be reached", unreachable)
 	}
-	return out, nil
+	return nil, fail(CodeAttestationMissing, "", "no referenced bundle can be read", nil)
+}
+
+// classifyFetchError sorts the error of one bundle fetch. A refusal that
+// stops the check (a body over the size limit, a malformed response) is
+// returned as stop. Every other error makes the reference unusable, and
+// reached is false when the fetch did not reach the registry.
+func classifyFetchError(err error) (stop error, reached bool) {
+	switch {
+	case errors.Is(err, ErrBundleNotFound), errors.Is(err, ErrBundleUnavailable):
+		return nil, true
+	}
+	f, ok := FailureOf(err)
+	switch {
+	case !ok, f.Code == CodeRegistryUnreachable:
+		return nil, false
+	case f.Code == CodeAttestationMissing:
+		return nil, true
+	}
+	return f, true
 }
 
 // acceptedFor is an accepted bundle with the candidate its subject lists.
@@ -290,69 +303,103 @@ func (c *Checker) checkRootAge(ctx context.Context, f *PolicyFile, rule PolicyRu
 	return nil
 }
 
-// closeness ranks how near a bundle came to meeting a requirement, which
-// chooses the code of a failed requirement.
-type closeness int
-
-const (
-	closeInvalid closeness = iota
-	closeUntrusted
-	closePredicate
-	closeSubject
-)
-
-// meetRequirement applies step 10 to one requirement and reports a failed
-// requirement by the bundle that came closest to meeting it: an accepted
-// bundle with no matching subject, then one of another predicate type, then
-// a bundle that verifies under a named instance and that no signer accepts,
-// and otherwise the latest refusal reason in the §4.7.11 order.
+// meetRequirement applies step 10 to one requirement. Each pair of a
+// fetched bundle and a signer of the requirement gives an observation, and
+// the first observation that meets the requirement wins; otherwise
+// RequirementFailure chooses the code.
 func (c *Checker) meetRequirement(ctx context.Context, f *PolicyFile, req PolicyRequirement,
 	bundles []fetched, name string, candidates []string) (acceptedFor, error) {
-	best := closeInvalid
-	var reason sign.AttestationReason
+	var obs []SignerObservation
 	for _, b := range bundles {
 		for _, s := range req.Signers {
 			v, err := c.verifyFor(ctx, f, s, b)
 			if err != nil {
-				if r, ok := sign.AttestationReasonOf(err); ok {
-					reason = sign.LaterAttestationReason(reason, r)
+				r, ok := sign.AttestationReasonOf(err)
+				switch {
+				case ok:
+					obs = append(obs, SignerObservation{Reason: r})
 					continue
-				}
-				if errors.Is(err, sign.ErrAttestationRootStale) {
+				case errors.Is(err, sign.ErrAttestationRootStale):
 					return acceptedFor{}, fail(CodeAttestationRootStale, "", "the public-good root is past its maximum age", err)
 				}
 				return acceptedFor{}, fail(CodeAttestationInvalid, "", "a trusted root cannot verify the bundle", err)
 			}
-			if v.AcceptsSigner(s.Signer) != nil {
-				best = max(best, closeUntrusted)
-				continue
-			}
-			if req.PredicateType != "" && v.Statement.PredicateType != req.PredicateType {
-				best = max(best, closePredicate)
-				continue
-			}
-			if d, ok := listedCandidate(v.Statement, name, candidates); ok {
+			o := SignerObservation{Verified: true, Accepted: v.AcceptsSigner(s.Signer) == nil}
+			o.PredicateType = o.Accepted && (req.PredicateType == "" || v.Statement.PredicateType == req.PredicateType)
+			d, listed := listedCandidate(v.Statement, name, candidates)
+			o.Subject = o.PredicateType && listed
+			if o.Subject {
 				return acceptedFor{digest: d, AcceptedBundle: AcceptedBundle{
 					Digest: b.digest, PredicateType: v.Statement.PredicateType,
 					Instance: v.Instance, Issuer: v.SignerIssuer(), Identity: v.SignerIdentity(),
 					AttestedTime: v.AttestedTime,
 				}}, nil
 			}
-			best = closeSubject
+			obs = append(obs, o)
+		}
+	}
+	return acceptedFor{}, RequirementFailure(obs)
+}
+
+// SignerObservation is what one fetched bundle showed for one signer of a
+// requirement in step 10 of the §4.7.11 attestation check. Each flag holds
+// only when the ones before it hold.
+type SignerObservation struct {
+	// Verified reports that the bundle verified under the signer's
+	// instance or key; Reason is the refusal reason otherwise.
+	Verified bool
+	Reason   sign.AttestationReason
+	// Accepted reports that the signer accepts the verified bundle.
+	Accepted bool
+	// PredicateType reports that the accepted bundle carries the
+	// requirement's predicate type, or that the requirement names none.
+	PredicateType bool
+	// Subject reports that the statement lists the expected subject name
+	// with a candidate package digest.
+	Subject bool
+}
+
+// RequirementFailure chooses the outcome of a requirement from the
+// observations of step 10: nil when one observation meets it, and
+// otherwise the failure of the observation that came closest: an accepted
+// bundle of the predicate type with no matching subject is
+// materialize.attestation_mismatch (subject), an accepted bundle of
+// another predicate type is materialize.attestation_mismatch
+// (predicate_type), a verified bundle that no signer accepts is
+// materialize.attestation_untrusted (signer), and otherwise the failure is
+// materialize.attestation_invalid with the latest refusal reason in the
+// §4.7.11 order, signature when there is none.
+//
+// Spec: §4.7.11 (Attestation check, step 10)
+func RequirementFailure(obs []SignerObservation) error {
+	best := 0
+	var reason sign.AttestationReason
+	for _, o := range obs {
+		switch {
+		case o.Subject:
+			return nil
+		case o.PredicateType:
+			best = max(best, 3)
+		case o.Accepted:
+			best = max(best, 2)
+		case o.Verified:
+			best = max(best, 1)
+		default:
+			reason = sign.LaterAttestationReason(reason, o.Reason)
 		}
 	}
 	switch best {
-	case closeSubject:
-		return acceptedFor{}, fail(CodeAttestationMismatch, ConstraintSubject, "no accepted bundle lists the expected subject with a candidate package digest", nil)
-	case closePredicate:
-		return acceptedFor{}, fail(CodeAttestationMismatch, ConstraintPredicateType, "an accepted bundle carries another predicate type", nil)
-	case closeUntrusted:
-		return acceptedFor{}, fail(CodeAttestationUntrusted, ConstraintSigner, "no bundle is accepted for a signer of the requirement", nil)
+	case 3:
+		return fail(CodeAttestationMismatch, ConstraintSubject, "no accepted bundle lists the expected subject with a candidate package digest", nil)
+	case 2:
+		return fail(CodeAttestationMismatch, ConstraintPredicateType, "an accepted bundle carries another predicate type", nil)
+	case 1:
+		return fail(CodeAttestationUntrusted, ConstraintSigner, "no bundle is accepted for a signer of the requirement", nil)
 	}
 	if reason == "" {
 		reason = sign.ReasonSignature
 	}
-	return acceptedFor{}, fail(CodeAttestationInvalid, string(reason), "no bundle verifies for a signer of the requirement", nil)
+	return fail(CodeAttestationInvalid, string(reason), "no bundle verifies for a signer of the requirement", nil)
 }
 
 // listedCandidate returns the candidate that the statement lists under

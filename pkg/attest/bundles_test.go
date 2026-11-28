@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/version"
@@ -79,7 +80,11 @@ func TestHTTPBundleSource(t *testing.T) {
 	wantFailure(t, err, attest.CodeAttestationInvalid, attest.ConstraintFetch)
 
 	broken := bundleServer(t, nil, http.StatusInternalServerError)
-	_, err = attest.HTTPBundleSource{BaseURL: broken.URL, Prepare: src.Prepare}.Bundle(ctx, d)
+	if _, err = (attest.HTTPBundleSource{BaseURL: broken.URL, Prepare: src.Prepare}).Bundle(ctx, d); !errors.Is(err, attest.ErrBundleUnavailable) {
+		t.Fatalf("5xx: %v", err)
+	}
+	forbidden := bundleServer(t, nil, http.StatusForbidden)
+	_, err = attest.HTTPBundleSource{BaseURL: forbidden.URL, Prepare: src.Prepare}.Bundle(ctx, d)
 	wantFailure(t, err, attest.CodeAttestationInvalid, attest.ConstraintFetch)
 
 	closed := httptest.NewServer(http.NotFoundHandler())
@@ -205,5 +210,24 @@ func TestReadReferences(t *testing.T) {
 	m, _ = version.DecodeJSONObject([]byte(`{"attestations":null}`))
 	if refs, err := attest.ReadReferences(m); err != nil || refs != nil {
 		t.Fatalf("null: %v, %v", refs, err)
+	}
+}
+
+// Spec: §4.7.11 (Attestation check, step 8) — a source with no client of
+// its own bounds each fetch, so a registry that does not answer does not
+// hold the check.
+func TestHTTPBundleSource_DefaultTimeout(t *testing.T) {
+	t.Parallel()
+	release := make(chan struct{})
+	ts := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { <-release }))
+	t.Cleanup(func() { close(release); ts.Close() })
+	start := time.Now()
+	_, err := attest.HTTPBundleSource{BaseURL: ts.URL, Timeout: 50 * time.Millisecond}.Bundle(context.Background(), "sha256:"+strings.Repeat("a", 64))
+	wantFailure(t, err, attest.CodeRegistryUnreachable, "")
+	if time.Since(start) > 5*time.Second {
+		t.Fatalf("the fetch took %v", time.Since(start))
+	}
+	if attest.DefaultBundleFetchTimeout <= 0 {
+		t.Fatal("no default timeout")
 	}
 }

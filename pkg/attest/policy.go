@@ -435,8 +435,16 @@ func checkPattern(p string) error {
 		switch {
 		case seg == "":
 			return fmt.Errorf("pattern %q holds an empty segment", p)
-		case strings.Contains(seg, "*") && seg != "*" && seg != "**":
+		case seg == "*" || seg == "**":
+		case strings.Contains(seg, "*"):
 			return fmt.Errorf("pattern %q holds the segment %q; * stands alone in a segment as * or **", p, seg)
+		default:
+			// A literal segment that no well-formed requested ID holds
+			// would match nothing, which reads as a rule that protects an
+			// ID and never applies.
+			if why := segmentViolation(seg, true); why != "" {
+				return fmt.Errorf("pattern %q: the segment %q cannot occur in a well-formed requested ID, because such an ID %s, so the pattern matches no ID", p, seg, why)
+			}
 		}
 	}
 	return nil
@@ -445,36 +453,48 @@ func checkPattern(p string) error {
 // MatchPattern reports whether the §4.7.11 ID pattern p matches id: the
 // segment * matches one ID segment, ** matches zero or more ID segments,
 // and every other segment matches the ID segment that equals it byte for
-// byte.
+// byte. It runs in time proportional to the product of the segment counts,
+// because a pattern can come from a file a repository commits.
 //
 // Spec: §4.7.11 (Consumer trust policy)
 func MatchPattern(p, id string) bool {
-	return matchSegments(strings.Split(p, "/"), strings.Split(id, "/"))
+	return matchSegments(collapseStars(strings.Split(p, "/")), strings.Split(id, "/"))
 }
 
-// matchSegments matches pattern segments against ID segments.
+// collapseStars replaces each run of ** segments with one, which matches
+// the same IDs.
+func collapseStars(p []string) []string {
+	out := make([]string, 0, len(p))
+	for _, seg := range p {
+		if seg == "**" && len(out) > 0 && out[len(out)-1] == "**" {
+			continue
+		}
+		out = append(out, seg)
+	}
+	return out
+}
+
+// matchSegments matches pattern segments against ID segments with a table:
+// m[i][j] reports whether p[i:] matches id[j:].
 func matchSegments(p, id []string) bool {
-	for len(p) > 0 {
-		switch p[0] {
-		case "**":
-			for i := 0; i <= len(id); i++ {
-				if matchSegments(p[1:], id[i:]) {
-					return true
-				}
-			}
-			return false
-		case "*":
-			if len(id) == 0 {
-				return false
-			}
-		default:
-			if len(id) == 0 || id[0] != p[0] {
-				return false
+	m := make([][]bool, len(p)+1)
+	for i := range m {
+		m[i] = make([]bool, len(id)+1)
+	}
+	m[len(p)][len(id)] = true
+	for i := len(p) - 1; i >= 0; i-- {
+		for j := len(id); j >= 0; j-- {
+			switch {
+			case p[i] == "**":
+				m[i][j] = m[i+1][j] || (j < len(id) && m[i][j+1])
+			case j == len(id):
+				m[i][j] = false
+			case p[i] == "*" || p[i] == id[j]:
+				m[i][j] = m[i+1][j+1]
 			}
 		}
-		p, id = p[1:], id[1:]
 	}
-	return len(id) == 0
+	return m[0][0]
 }
 
 // strictObject decodes raw as one JSON object and returns its members by
