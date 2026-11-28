@@ -267,13 +267,19 @@ func TestCheckTrustPolicy_LayerRoot(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.11 (Layer trust policy) — the empty mode resolves to the
-// default, then to none.
+// Spec: §4.7.11 (Layer trust policy, Tenant trust floor) — an explicit
+// mode is kept, and the empty mode resolves to the stricter of the floor's
+// mode and the default, then to none.
 func TestResolveTrustMode(t *testing.T) {
 	t.Parallel()
-	for _, tc := range [][3]string{{"warn", "require", "warn"}, {"", "require", "require"}, {"", "", "none"}} {
-		if got := layer.ResolveTrustMode(tc[0], tc[1]); got != tc[2] {
-			t.Errorf("ResolveTrustMode(%q, %q) = %q, want %q", tc[0], tc[1], got, tc[2])
+	for _, tc := range [][4]string{
+		{"warn", "", "require", "warn"}, {"none", "require", "require", "none"},
+		{"", "", "require", "require"}, {"", "", "", "none"},
+		{"", "warn", "", "warn"}, {"", "warn", "require", "require"},
+		{"", "require", "warn", "require"}, {"", "none", "warn", "warn"}, {"", "none", "", "none"},
+	} {
+		if got := layer.ResolveTrustMode(tc[0], tc[1], tc[2]); got != tc[3] {
+			t.Errorf("ResolveTrustMode(%q, %q, %q) = %q, want %q", tc[0], tc[1], tc[2], got, tc[3])
 		}
 	}
 }

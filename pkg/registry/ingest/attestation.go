@@ -142,8 +142,12 @@ type AttestationConfig struct {
 	// Instances are the configured Sigstore instances by name.
 	Instances map[string]sign.AttestationInstance
 	// DefaultMode is PODIUM_LAYER_TRUST_DEFAULT, which an empty trust_mode
-	// resolves to.
+	// resolves to unless the tenant floor's mode is stricter.
 	DefaultMode string
+	// Floors returns the §4.7.11 trust floor of a tenant. Nil sets no
+	// floor. A floor that cannot be read fails the cycle, the
+	// re-evaluation, and the served-outcome decision that needs it.
+	Floors layer.TrustFloors
 	// MaxBundleBytes and MaxBundles are PODIUM_ATTESTATION_MAX_BYTES and
 	// PODIUM_ATTESTATION_MAX_BUNDLES. Zero takes the default.
 	MaxBundleBytes int64
@@ -174,6 +178,9 @@ type AttestationCycle struct {
 	layer store.LayerConfig
 	claim string
 	mode  string
+	// floor is the trust floor of the layer's tenant, which CheckPolicy
+	// reads before it resolves mode.
+	floor store.TrustFloor
 	// lineage and reference are set for a provider that answers lineage
 	// queries (WithLineage).
 	lineage   LineageFunc
@@ -218,9 +225,9 @@ type AttestationCycle struct {
 //
 // Spec: §4.7.11 (Ingest verification, Policy that became invalid, Unverified links)
 func (c *AttestationConfig) Cycle(lc store.LayerConfig, claim string) *AttestationCycle {
-	mode := layer.ResolveTrustMode(lc.TrustMode, "")
+	mode := layer.ResolveTrustMode(lc.TrustMode, "", "")
 	if c != nil {
-		mode = layer.ResolveTrustMode(lc.TrustMode, c.DefaultMode)
+		mode = layer.ResolveTrustMode(lc.TrustMode, "", c.DefaultMode)
 	}
 	if c == nil {
 		if mode == layer.TrustModeNone {
@@ -274,6 +281,9 @@ func (a *AttestationCycle) CheckPolicy(ctx context.Context, st store.Store, onWr
 		return false, nil
 	}
 	a.checked = true
+	if err := a.readFloor(ctx); err != nil {
+		return false, err
+	}
 	failure := a.policyFailure()
 	if failure == nil {
 		return a.reevaluate(ctx, st, onWrite)
@@ -286,14 +296,52 @@ func (a *AttestationCycle) CheckPolicy(ctx context.Context, st store.Store, onWr
 	return false, failure
 }
 
+// readFloor reads the trust floor of the layer's tenant and resolves the
+// cycle's mode under it, because an empty trust_mode resolves to the
+// stricter of the floor's mode and the trust default. A floor that cannot
+// be read fails the cycle before it writes anything.
+//
+// Spec: §4.7.11 (Tenant trust floor)
+func (a *AttestationCycle) readFloor(ctx context.Context) error {
+	floor, err := a.cfg.Floors.Floor(ctx, a.layer.TenantID)
+	if err != nil {
+		return fmt.Errorf("ingest: read the trust floor of tenant %s for layer %s: %w", a.layer.TenantID, a.layer.ID, err)
+	}
+	a.floor = floor
+	a.mode = layer.ResolveTrustMode(a.layer.TrustMode, floor.Mode, a.cfg.DefaultMode)
+	return nil
+}
+
 // policyFailure applies the per-cycle policy rules: a resolved mode above
-// none with no requirement, and a signer whose instance the registry no
-// longer configures. Any other rule a stored policy breaks, which the layer
-// endpoints refuse, fails closed under the constraint policy_rule.
+// none with no requirement, a signer whose instance the registry no longer
+// configures, and in every mode the tenant floor (below_floor,
+// missing_required_type, signer_outside_floor). Any other rule a stored
+// policy breaks, which the layer endpoints refuse, fails closed under the
+// constraint policy_rule.
 func (a *AttestationCycle) policyFailure() *AttestationError {
+	if a.mode != layer.TrustModeNone {
+		if f := a.modeFailure(); f != nil {
+			return f
+		}
+	}
+	if r := layer.CheckFloor(a.layer, a.floor, a.cfg.DefaultMode); r != nil {
+		return attestFailure(CodeAttestationPolicyInvalid, r.Constraint,
+			fmt.Sprintf("the trust policy of layer %s does not meet the tenant trust floor: %s", a.layer.ID, r.Message))
+	}
 	if a.mode == layer.TrustModeNone {
 		return nil
 	}
+	known := func(name string) bool { _, ok := a.cfg.Instances[name]; return ok }
+	if err := layer.CheckTrustPolicy(a.layer, known, a.cfg.DefaultMode); err != nil {
+		return attestFailure(CodeAttestationPolicyInvalid, "policy_rule",
+			fmt.Sprintf("the trust policy of layer %s breaks a rule: %v", a.layer.ID, err))
+	}
+	return nil
+}
+
+// modeFailure applies the rules of a mode above none: a mode the registry
+// can read, a requirement, and configured instances.
+func (a *AttestationCycle) modeFailure() *AttestationError {
 	if !layer.ValidTrustMode(a.mode) {
 		return attestFailure(CodeAttestationPolicyInvalid, "policy_rule",
 			fmt.Sprintf("layer %s has the trust mode %q, which is not none, warn, or require", a.layer.ID, a.mode),
@@ -312,30 +360,30 @@ func (a *AttestationCycle) policyFailure() *AttestationError {
 			}
 		}
 	}
-	known := func(name string) bool { _, ok := a.cfg.Instances[name]; return ok }
-	if err := layer.CheckTrustPolicy(a.layer, known, a.cfg.DefaultMode); err != nil {
-		return attestFailure(CodeAttestationPolicyInvalid, "policy_rule",
-			fmt.Sprintf("the trust policy of layer %s breaks a rule: %v", a.layer.ID, err))
-	}
 	return nil
 }
 
 // PolicyConstraint returns the constraint of the policy rule that the
-// resolved trust policy of lc breaks under the configured instances and the
-// trust default, and the empty string for a valid policy. Serving reads it
-// to decide the outcome of a verified version, with the rules a cycle
-// applies when it refuses an invalid policy.
+// resolved trust policy of lc breaks under the configured instances, the
+// trust default, and the floor of lc's tenant as the running process reads
+// it now, and the empty string for a valid policy. Serving reads it to
+// decide the outcome of a verified version, and a floor update to list the
+// layers it makes invalid, with the rules a cycle applies when it refuses
+// an invalid policy. A floor that cannot be read is an error.
 //
 // Spec: §4.7.11 (Policy that became invalid, Served outcome)
-func (c *AttestationConfig) PolicyConstraint(lc store.LayerConfig) string {
+func (c *AttestationConfig) PolicyConstraint(ctx context.Context, lc store.LayerConfig) (string, error) {
 	a := c.Cycle(lc, "")
 	if a == nil {
-		return ""
+		return "", nil
+	}
+	if err := a.readFloor(ctx); err != nil {
+		return "", err
 	}
 	if f := a.policyFailure(); f != nil {
-		return f.Constraint()
+		return f.Constraint(), nil
 	}
-	return ""
+	return "", nil
 }
 
 // instance returns the configured instance a signer names; an empty name is

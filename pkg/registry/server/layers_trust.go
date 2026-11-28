@@ -34,6 +34,38 @@ func (e *LayerEndpoint) WithTrustDefault(mode string) *LayerEndpoint {
 	return e
 }
 
+// WithTrustFloors installs the §4.7.11 trust floor of each tenant, which a
+// registration, and an update that carries a trust policy member, meets.
+// serverboot passes the tenant object's floor on a multi-tenant registry and
+// the deployment setting on a single-tenant one.
+//
+// Spec: §4.7.11 (Tenant trust floor), §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) WithTrustFloors(fn layer.TrustFloors) *LayerEndpoint {
+	e.trustFloors = fn
+	return e
+}
+
+// meetsTrustFloor refuses a policy that does not meet the trust floor of
+// cfg's tenant with 400 registry.invalid_argument and a message that names
+// the floor rule, and a floor the store cannot read with 500
+// registry.unavailable, and reports whether the request may proceed. Both
+// refusals precede every write of the request.
+//
+// Spec: §4.7.11 (Tenant trust floor), §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) meetsTrustFloor(w http.ResponseWriter, r *http.Request, cfg store.LayerConfig) bool {
+	floor, err := e.trustFloors.Floor(r.Context(), cfg.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable",
+			fmt.Sprintf("read the trust floor of the tenant: %v", err))
+		return false
+	}
+	if refusal := layer.CheckFloor(cfg, floor, e.trustDefault); refusal != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", refusal.Error())
+		return false
+	}
+	return true
+}
+
 // WithTrustPolicyChange installs the §4.7.11 re-evaluation that a register or
 // an update runs after it changed a layer's stored trust policy. It receives
 // the layer as written, and the caller that made the change. A failure is

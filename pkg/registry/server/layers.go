@@ -147,6 +147,10 @@ type LayerEndpoint struct {
 	// trustDefault is PODIUM_LAYER_TRUST_DEFAULT, which the no-requirement
 	// rule reads at the endpoints. Empty is none.
 	trustDefault string
+	// trustFloors returns the §4.7.11 trust floor of a tenant, which a
+	// registration and an update that carries a trust member meet. Nil sets
+	// no floor.
+	trustFloors layer.TrustFloors
 	// declaredLayer reports whether a layer is declared in registry.yaml,
 	// whose declaration alone sets its trust policy. Nil declares none.
 	declaredLayer func(tenantID, id string) bool
@@ -1682,6 +1686,8 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		} else if msg := e.trustPolicyError(patched); msg != "" {
 			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 			return
+		} else if !e.meetsTrustFloor(w, r, patched) {
+			return
 		}
 	}
 	// spec: §7.3.1 — the repository credential rule, read against the stored
@@ -1778,7 +1784,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// records the visibility written against the visibility it replaced.
 	e.emitLayerEvent(r, prior, stored, "update", trustEventFields(before, cfg))
 	e.afterTrustWrite(r, before, true, cfg)
-	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
+	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(r.Context(), prior, stored)...)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -1865,6 +1871,10 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	if !declared {
 		if msg := e.trustPolicyError(trust); msg != "" {
 			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
+			return
+		}
+		trust.TenantID = tenantID
+		if !e.meetsTrustFloor(w, r, trust) {
 			return
 		}
 	}

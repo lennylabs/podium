@@ -105,12 +105,21 @@ func withVisibilityOf(cfg, from store.LayerConfig) store.LayerConfig {
 // update lasts until then.
 //
 // Spec: §7.3.1, §4.7.11 (Visibility of a path-bootstrapped layer: Updates)
-func (e *LayerEndpoint) signedVisibilityWarning(before, cfg store.LayerConfig) []string {
+//
+// The mode reads the floor of the layer's tenant. A floor that cannot be
+// read is read as the floor's mode require, so the warning is given rather
+// than dropped; it changes nothing the update stored.
+func (e *LayerEndpoint) signedVisibilityWarning(ctx context.Context, before, cfg store.LayerConfig) []string {
 	if cfg.VisibilitySource == "" || layer.SameVisibility(core.VisibilityOf(before), core.VisibilityOf(cfg)) {
 		return nil
 	}
-	if mode := layer.ResolveTrustMode(cfg.TrustMode, e.trustDefault); mode != layer.TrustModeWarn && mode != layer.TrustModeRequire {
+	floor, err := e.trustFloors.Floor(ctx, cfg.TenantID)
+	if err != nil {
+		floor.Mode = layer.TrustModeRequire
+	}
+	mode := layer.ResolveTrustMode(cfg.TrustMode, floor.Mode, e.trustDefault)
+	if mode != layer.TrustModeWarn && mode != layer.TrustModeRequire {
 		return nil
 	}
-	return []string{fmt.Sprintf("layer %q is loaded from --layer-path under trust mode %s: the next ingest cycle that passes the layer step applies the signed .layer-config again, so this visibility lasts until then; make a lasting narrowing in .layer-config", cfg.ID, layer.ResolveTrustMode(cfg.TrustMode, e.trustDefault))}
+	return []string{fmt.Sprintf("layer %q is loaded from --layer-path under trust mode %s: the next ingest cycle that passes the layer step applies the signed .layer-config again, so this visibility lasts until then; make a lasting narrowing in .layer-config", cfg.ID, mode)}
 }

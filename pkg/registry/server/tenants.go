@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 
@@ -35,9 +36,23 @@ type tenantOut struct {
 	Quota              tenantQuotaOut `json:"quota"`
 	ExposeScopePreview *bool          `json:"expose_scope_preview,omitempty"`
 	Active             bool           `json:"active"`
+	// The §4.7.11 tenant trust floor. An empty mode is "", and an empty
+	// list is null, as the layer object reports trust_require_types.
+	TrustFloorMode         string                   `json:"trust_floor_mode"`
+	TrustFloorRequireTypes []string                 `json:"trust_floor_require_types"`
+	TrustFloorSigners      []store.TrustFloorSigner `json:"trust_floor_signers"`
+}
+
+// tenantUpdateOut is the PATCH response: the tenant object, and when the
+// body carried a floor member, the live layers whose trust policy is
+// invalid under the merged record (§7.3.3).
+type tenantUpdateOut struct {
+	tenantOut
+	InvalidLayers *[]core.InvalidTrustLayer `json:"invalid_layers,omitempty"`
 }
 
 func tenantToWire(t store.Tenant) tenantOut {
+	floor := t.TrustFloor.Clone()
 	return tenantOut{
 		ID:   t.ID,
 		Name: t.Name,
@@ -48,8 +63,11 @@ func tenantToWire(t store.Tenant) tenantOut {
 			AuditVolumePerDay: t.Quota.AuditVolumePerDay,
 			MaxUserLayers:     t.Quota.MaxUserLayers,
 		},
-		ExposeScopePreview: t.ExposeScopePreview,
-		Active:             t.Active,
+		ExposeScopePreview:     t.ExposeScopePreview,
+		Active:                 t.Active,
+		TrustFloorMode:         floor.Mode,
+		TrustFloorRequireTypes: floor.RequireTypes,
+		TrustFloorSigners:      floor.Signers,
 	}
 }
 
@@ -147,7 +165,17 @@ func (s *Server) handleTenantCreate(w http.ResponseWriter, r *http.Request) {
 		Quota              *tenantQuotaIn `json:"quota"`
 		ExposeScopePreview *bool          `json:"expose_scope_preview"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	raw, err := io.ReadAll(r.Body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	var members map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &members); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	if err := json.Unmarshal(raw, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
@@ -155,11 +183,24 @@ func (s *Server) handleTenantCreate(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", "name is required")
 		return
 	}
+	// Spec: §7.3.3, §4.7.11 (Tenant trust floor) — the floor a create
+	// carries meets the floor rules before anything is stored; a re-create
+	// of a provisioned name changes no floor.
+	fp, err := decodeFloorPatch(members)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	floor := fp.applyTo(store.TrustFloor{})
+	if err := s.checkFloor(floor); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	var quota store.Quota
 	if body.Quota != nil {
 		quota = body.Quota.applyTo(quota)
 	}
-	t, created, err := s.core.ProvisionTenant(r.Context(), body.Name, quota, body.ExposeScopePreview)
+	t, created, err := s.core.ProvisionTenant(r.Context(), body.Name, quota, body.ExposeScopePreview, floor)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
@@ -226,6 +267,18 @@ func (s *Server) handleTenantUpdate(w http.ResponseWriter, r *http.Request) {
 		}
 		merged.Active = v
 	}
+	// Spec: §7.3.3, §4.7.11 (Tenant trust floor) — the merged floor meets
+	// the floor rules before the record is written.
+	fp, err := decodeFloorPatch(raw)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
+	merged.TrustFloor = fp.applyTo(current.TrustFloor.Clone())
+	if err := s.checkFloor(merged.TrustFloor); err != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
+		return
+	}
 	if err := s.core.UpdateTenant(r.Context(), merged); err != nil {
 		s.writeTenantLookupError(w, id, err)
 		return
@@ -234,9 +287,30 @@ func (s *Server) handleTenantUpdate(w http.ResponseWriter, r *http.Request) {
 	// 0051). withTenantRouting passes /v1/admin/tenants through unrouted, so
 	// the shared label rule yields "" even when the operator's org names a
 	// provisioned tenant.
-	emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventTenantManaged, id,
-		map[string]string{"action": "update"})
-	writeJSON(w, http.StatusOK, tenantToWire(merged))
+	fields := map[string]string{"action": "update"}
+	changed := floorEventFields(current.TrustFloor, merged.TrustFloor)
+	for k, v := range changed {
+		fields[k] = v
+	}
+	emitAuditEvent(s.auditSink, r, s.identity(r), audit.EventTenantManaged, id, fields)
+	out := tenantUpdateOut{tenantOut: tenantToWire(merged)}
+	if changed != nil && s.floorChanged != nil {
+		// Spec: §4.7.11 (Re-evaluation) — the floor decides the mode an
+		// empty trust_mode resolves to, so its change re-evaluates the
+		// tenant's layers.
+		s.floorChanged(r.Context(), id, s.identity(r).Sub)
+	}
+	if fp.carried() {
+		// Spec: §7.3.3 — a floor update lists the layers whose policy the
+		// merged record makes invalid.
+		invalid, err := s.core.InvalidTrustLayers(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
+			return
+		}
+		out.InvalidLayers = &invalid
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // handleTenantDeactivate serves DELETE /v1/admin/tenants/{id} (§7.3.3). Soft:

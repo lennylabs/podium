@@ -523,7 +523,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// write) — under warn and require a file that admits fewer callers
 		// applies here, before the startup ingest stores anything, and one
 		// that admits more waits for a cycle that passes the layer step.
-		cfg, rowCreated, err := startVisibility(ctx, st, cfg, layer.ResolveTrustMode(cfg.TrustMode, trust.defaultMode), dir, vis, trust.audit)
+		_, rowCreated, err := startVisibility(ctx, st, cfg, trust.mode(cfg), dir, vis, trust.audit)
 		if err != nil {
 			return nil, err
 		}
@@ -1083,6 +1083,9 @@ func run(ctx context.Context, stop func()) error {
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
+	// Spec: §4.7.11 (Tenant trust floor) — every cycle, re-evaluation, and
+	// served-outcome decision reads the floor of the layer's tenant.
+	cfg.ingestAttest.Floors = cfg.trustFloors(st)
 	// A graceful shutdown returns from run, so release the store's connection
 	// pool (and its background opener goroutine) rather than leaking it. The
 	// in-memory store is not an io.Closer and needs no release.
@@ -1353,8 +1356,15 @@ func run(ctx context.Context, stop func()) error {
 	// visibility declared in its .layer-config (§4.6) when present, and the
 	// deployment default (§4.6 / §13.10) otherwise. They append after the
 	// declared layers.
+	// Spec: §4.7.11 (Tenant trust floor, Trust of bootstrap layers) — the
+	// bootstrap layers resolve their mode under the floor of the tenant
+	// they are seeded into, and a floor the start cannot read aborts it.
+	bootFloor, err := cfg.ingestAttest.Floors.Floor(ctx, tenantID)
+	if err != nil {
+		return fmt.Errorf("read the trust floor of tenant %s: %w", tenantID, err)
+	}
 	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes,
-		bootstrapTrust{file: cfg.bootstrapReqs, defaultMode: cfg.layerTrust.mode, att: cfg.ingestAttest, audit: startupAuditEmitter(ctx, auditSink, scrubber, tenantID)})
+		bootstrapTrust{file: cfg.bootstrapReqs, defaultMode: cfg.layerTrust.mode, floorMode: bootFloor.Mode, att: cfg.ingestAttest, audit: startupAuditEmitter(ctx, auditSink, scrubber, tenantID)})
 	if err != nil {
 		return err
 	}
@@ -1743,7 +1753,11 @@ func run(ctx context.Context, stop func()) error {
 		// multi-tenant registry that serves requests installs this router.
 		// WithTenantRouter also selects the §8.1 audit tenant-label rule.
 		rejectUnknownTenant := cfg.identityProvider != "trusted-headers"
-		bootOpts = append(bootOpts, server.WithTenantRouter(tenantResolver(st), rejectUnknownTenant))
+		bootOpts = append(bootOpts, server.WithTenantRouter(tenantResolver(st), rejectUnknownTenant),
+			// §4.7.11 (Tenant trust floor): a floor entry names a configured
+			// instance, and a floor change re-evaluates the tenant's layers.
+			server.WithTrustFloorInstances(cfg.trustInstanceKnown),
+			server.WithTenantFloorChange(tenantFloorChangeHook(st, cfg.ingestAttest, auditSink, scrubber)))
 		log.Printf("multi-tenant mode: routing requests by organization")
 	}
 
@@ -1759,6 +1773,9 @@ func run(ctx context.Context, stop func()) error {
 	// §4.7.11 (Policy changes): name each stored layer that the trust default
 	// leaves with no requirement, after the declared and --layer-path seed.
 	logUnrequiredTrustLayers(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.layerTrust.mode, log.Printf)
+	// §4.7.11 (Tenant trust floor): name each stored layer whose policy the
+	// floor of its tenant makes invalid.
+	logFloorInvalidLayers(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.ingestAttest.Floors, log.Printf)
 	// §4.7.11 (Trusted root refresh): a stored policy that verifies on the
 	// public-good instance starts the refresh at the start.
 	startRefreshForStoredPolicies(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.ingestAttest)
@@ -1829,6 +1846,9 @@ func run(ctx context.Context, stop func()) error {
 		// endpoints, and §7.3.1: a declared layer's policy is set in
 		// registry.yaml alone.
 		WithTrustDefault(cfg.layerTrust.mode).
+		// §4.7.11: a registration, and an update that carries a trust
+		// member, meets the floor of its tenant.
+		WithTrustFloors(cfg.ingestAttest.Floors).
 		WithDeclaredLayers(cfg.isDeclaredLayer(tenantID)).
 		WithMaxUserLayers(cfg.maxUserLayers).
 		WithPublicBaseURL(cfg.publicURL).
@@ -2458,6 +2478,9 @@ type Config struct {
 	// bootstrapReqs is the §13.12 PODIUM_LAYER_TRUST_REQUIREMENTS_FILE of
 	// the layers PODIUM_LAYER_PATH bootstraps.
 	bootstrapReqs bootstrapRequirements
+	// trustFloor is the §13.12 PODIUM_LAYER_TRUST_FLOOR_FILE or trust_floor
+	// key: the §4.7.11 trust floor of a single-tenant registry's org.
+	trustFloor trustFloorSetting
 	// ingestAttest is the §4.7.11 ingest verification every cycle runs,
 	// built once the instances are loaded.
 	ingestAttest *ingest.AttestationConfig
@@ -2667,6 +2690,7 @@ func (c *Config) Settings() []Setting {
 		{gitFetchTimeoutKey, c.gitFetch.display(), c.gitFetch.source},
 		{"layers.trust_default", c.layerTrust.display(), c.layerTrust.source},
 		{"layers.trust_requirements_file", c.bootstrapReqs.path, envOrSrc(layerTrustRequirementsFileEnv, "")},
+		{"layers.trust_floor", c.trustFloor.display(), envOrSrc(layerTrustFloorFileEnv, yamlSrc)},
 		{gitFetchDepthKey, c.gitFetchDepth.display(), c.gitFetchDepth.source},
 		{"tenant.expose_scope_preview", boolStr(c.exposeScopePreview == nil || *c.exposeScopePreview), envOrSrc("PODIUM_EXPOSE_SCOPE_PREVIEW", yamlSrc)},
 		{"read_only.probe_failures", intStr(c.readOnlyProbeFailures), envOrSrc("PODIUM_READONLY_PROBE_FAILURES", defaultSrc)},
@@ -2844,6 +2868,7 @@ func LoadConfig() *Config {
 	// provider, layers, and store settings (§13.12).
 	fileGitFetchTimeout, fileGitFetchDepth := "", ""
 	var fileSigstore yamlSigstore
+	var fileTrustFloor yaml.Node
 	if y, err := readYAMLConfig(); err != nil {
 		c.configFileErr = err
 	} else {
@@ -2852,6 +2877,7 @@ func LoadConfig() *Config {
 			fileGitFetchTimeout = y.GitFetchTimeout
 			fileGitFetchDepth = y.GitFetchDepth
 			fileSigstore = y.Sigstore
+			fileTrustFloor = y.TrustFloor
 		}
 	}
 	c.gitFetch = resolveGitFetchTimeout(os.Getenv(source.FetchTimeoutSetting), fileGitFetchTimeout)
@@ -2862,6 +2888,9 @@ func LoadConfig() *Config {
 	// relative trusted_root resolves beside registry.yaml.
 	c.attestation = resolveAttestation(os.Getenv, fileSigstore, filepath.Dir(registryYAMLPath()), clock.Real{}.Now())
 	c.bootstrapReqs = resolveBootstrapRequirements(os.Getenv(layerTrustRequirementsFileEnv), c.trustInstanceKnown)
+	// §4.7.11: the trust floor of a single-tenant registry, checked against
+	// the instances resolved above.
+	c.trustFloor = resolveTrustFloor(os.Getenv(layerTrustFloorFileEnv), fileTrustFloor, c.multiTenant, c.trustInstanceKnown)
 	// §13.12: the Pinecone namespace prefix defaults to "default"
 	// when neither the env var nor registry.yaml set it.
 	if c.pineconeNS == "" {
@@ -3003,6 +3032,9 @@ func (c *Config) SettingErrors() []error {
 	if c.bootstrapReqs.err != nil {
 		errs = append(errs, c.bootstrapReqs.err)
 	}
+	if c.trustFloor.err != nil {
+		errs = append(errs, c.trustFloor.err)
+	}
 	return append(errs, c.attestation.errs...)
 }
 
@@ -3103,6 +3135,11 @@ func (c *Config) validate() error {
 	}
 	if c.bootstrapReqs.err != nil {
 		return c.bootstrapReqs.err
+	}
+	// §4.7.11, §13.12: a floor setting the registry cannot use, and a floor
+	// setting on a multi-tenant registry, refuse the start.
+	if c.trustFloor.err != nil {
+		return c.trustFloor.err
 	}
 	return c.semanticOverlapGuard()
 }

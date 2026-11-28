@@ -38,6 +38,11 @@ import (
 type Server struct {
 	core       *core.Registry
 	publicMode bool
+	// floorInstances reports the Sigstore instances a tenant floor entry
+	// may name, and floorChanged re-evaluates a tenant's layers after its
+	// floor changed (§4.7.11). Nil knows public-good alone and runs none.
+	floorInstances layer.TrustInstances
+	floorChanged   func(ctx context.Context, tenantID, caller string)
 	// unauthenticatedReembed records that the deployment authenticates no
 	// caller, which the boot path decides from its own configuration
 	// (§4.7). handleReembed and handleOverlapRebuild are the only readers:

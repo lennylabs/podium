@@ -93,7 +93,11 @@ func layerRoots(raw json.RawMessage) (map[string]string, error) {
 type bootstrapTrust struct {
 	file        bootstrapRequirements
 	defaultMode string
-	att         *ingest.AttestationConfig
+	// floorMode is the mode of the trust floor of the tenant the bootstrap
+	// layers are seeded into, which an empty trust_mode resolves to when it
+	// is stricter than the default.
+	floorMode string
+	att       *ingest.AttestationConfig
 	// audit receives the layer.config_changed event of a visibility that
 	// the start write or the startup ingest changes. Nil records none.
 	audit ingest.AuditEmitterFunc
@@ -116,12 +120,20 @@ func (b bootstrapTrust) apply(ctx context.Context, st store.Store, cfg store.Lay
 		cfg.TrustRequirements, cfg.TrustLayerRoot = b.file.reqs, b.file.roots[cfg.ID]
 		return cfg, nil
 	}
-	mode := layer.ResolveTrustMode(cfg.TrustMode, b.defaultMode)
+	mode := b.mode(cfg)
 	if mode != layer.TrustModeNone && len(cfg.TrustRequirements) == 0 {
 		return cfg, fmt.Errorf("config.invalid_layer_trust: layer %s resolves to trust mode %s and carries no requirement; set %s",
 			cfg.ID, mode, layerTrustRequirementsFileEnv)
 	}
 	return cfg, nil
+}
+
+// mode resolves the trust mode of the bootstrap layer cfg under the floor
+// and the trust default.
+//
+// Spec: §4.7.11 (Layer trust policy, Tenant trust floor)
+func (b bootstrapTrust) mode(cfg store.LayerConfig) string {
+	return layer.ResolveTrustMode(cfg.TrustMode, b.floorMode, b.defaultMode)
 }
 
 // publicGoodRefresh starts the refresh of the public-good trusted root once,
@@ -194,8 +206,14 @@ func startRefreshForStoredPolicies(ctx context.Context, st store.Store, tenants 
 		if err != nil {
 			continue
 		}
+		// A floor that cannot be read is read as require, which can only
+		// start the refresh earlier than the first cycle would.
+		floor, err := att.Floors.Floor(ctx, tenant)
+		if err != nil {
+			floor.Mode = layer.TrustModeRequire
+		}
 		for _, lc := range layers {
-			if verifiesOnPublicGood(lc, att.DefaultMode) {
+			if verifiesOnPublicGood(lc, floor.Mode, att.DefaultMode) {
 				att.OnPublicGood()
 				return
 			}
@@ -206,8 +224,8 @@ func startRefreshForStoredPolicies(ctx context.Context, st store.Store, tenants 
 // verifiesOnPublicGood reports whether a cycle of lc verifies on the
 // public-good instance: its resolved mode is warn or require and a signer
 // names that instance, which an empty instance names.
-func verifiesOnPublicGood(lc store.LayerConfig, def string) bool {
-	if layer.ResolveTrustMode(lc.TrustMode, def) == layer.TrustModeNone {
+func verifiesOnPublicGood(lc store.LayerConfig, floorMode, def string) bool {
+	if layer.ResolveTrustMode(lc.TrustMode, floorMode, def) == layer.TrustModeNone {
 		return false
 	}
 	for _, req := range lc.TrustRequirements {

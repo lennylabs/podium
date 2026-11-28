@@ -209,8 +209,8 @@ func TestAttestation_StoredPolicyWithoutCoveringRequirementIsRefused(t *testing.
 	if code != ingest.CodeAttestationPolicyInvalid || details["constraint"] != "policy_rule" || len(f.stored()) != 0 {
 		t.Fatalf("refusal %s %v, stored %v", code, details, f.stored())
 	}
-	if c := f.cfg.PolicyConstraint(f.claimed()); c != "policy_rule" {
-		t.Errorf("served constraint = %q", c)
+	if c, err := f.cfg.PolicyConstraint(context.Background(), f.claimed()); c != "policy_rule" || err != nil {
+		t.Errorf("served constraint = %q, %v", c, err)
 	}
 }
 
