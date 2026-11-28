@@ -135,10 +135,11 @@ func TestLayerWrites_KeepAVisibilityACycleNarrowed(t *testing.T) {
 	}
 }
 
-// alwaysChanged reports every conditional visibility write as contended.
+// alwaysChanged reports every conditional write as contended, as a row
+// another writer keeps changing does.
 type alwaysChanged struct{ store.Store }
 
-func (alwaysChanged) SetLayerVisibilityIf(context.Context, string, string, store.VisibilityState, store.VisibilityState) error {
+func (alwaysChanged) PutLayerConfigIf(context.Context, store.LayerConfig, store.VisibilityState) error {
 	return store.ErrVisibilityChanged
 }
 
@@ -205,5 +206,46 @@ func TestLayerUpdate_PartialVisibilityKeepsAConcurrentNarrowing(t *testing.T) {
 	}
 	if lc, _ := mem.GetLayerConfig(ctx, "t", "boot"); lc.Organization {
 		t.Fatal("a contended update wrote the visibility")
+	}
+}
+
+// Spec: §7.3.1 — a contended update that carries a visibility member and
+// another member, here a local path and organization, is answered 503 and
+// persists nothing, not even the local path, and records no event; the same
+// body against a row that holds what the handler read writes both and
+// records its event.
+func TestLayerUpdate_ContendedUpdatePersistsNothing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := store.NewMemory()
+	if err := mem.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "boot", SourceType: "local", LocalPath: "/x", Order: 10,
+		Public: true, VisibilitySource: store.VisibilitySourceDeclared}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		st     store.Store
+		status int
+		path   string
+		events int
+	}{
+		{alwaysChanged{mem}, http.StatusServiceUnavailable, "/x", 0},
+		{mem, http.StatusOK, "/elsewhere", 1},
+	} {
+		rec := &eventRecorder{}
+		ts := httptest.NewServer(server.NewLayerEndpoint(tc.st, "t", server.NewModeTracker()).WithEventPublisher(rec.publish).Handler())
+		req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/layers/update?id=boot", bytes.NewReader([]byte(`{"local_path":"/elsewhere","organization":true}`)))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		ts.Close()
+		lc, _ := mem.GetLayerConfig(ctx, "t", "boot")
+		if resp.StatusCode != tc.status || lc.LocalPath != tc.path || len(rec.typesFor()) != tc.events {
+			t.Fatalf("status %d local_path %s events %d; want %d %s %d", resp.StatusCode, lc.LocalPath, len(rec.typesFor()), tc.status, tc.path, tc.events)
+		}
 	}
 }

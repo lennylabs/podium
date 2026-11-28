@@ -50,21 +50,22 @@ var errVisibilityContended = errors.New("the layer's visibility changed during e
 // writeUpdatedLayer stores an updated layer and returns the row as stored and
 // the row it replaced, both with the visibility members the store held.
 //
-// The non-visibility members are written with the keeping write, so the
-// stored visibility members stay as they are. An update that carries a
-// visibility member then writes the visibility members conditional on the
-// values its handler read, before; when another writer, such as an ingest
-// cycle, changed them in between, it reads the row again, applies the
-// members the body carries to the fresh values, and retries, so a narrowing
-// of a member the body omits is kept. An update that carries none reads the
-// row back so the response reports the members the store kept.
+// An update that carries a visibility member writes the whole row in one
+// write conditional on the visibility members its handler read, before; when
+// another writer, such as an ingest cycle, changed them in between, nothing
+// is written, and it reads the row again, applies the members the body
+// carries to the fresh values, and retries, so a narrowing of a member the
+// body omits is kept. A refused or failed write therefore persists nothing,
+// and the caller records events only after a write that succeeded. An update
+// that carries none writes with the keeping write and reads the row back so
+// the response reports the members the store kept.
 //
 // Spec: §7.3.1, §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility)
 func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, before, cfg store.LayerConfig, vis visibilityPatch) (store.LayerConfig, store.LayerConfig, error) {
-	if err := e.store.PutLayerConfigKeepingVisibility(ctx, cfg); err != nil {
-		return cfg, before, err
-	}
 	if !vis.carried() {
+		if err := e.store.PutLayerConfigKeepingVisibility(ctx, cfg); err != nil {
+			return cfg, before, err
+		}
 		stored, err := e.store.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
 		if err != nil {
 			return cfg, before, nil
@@ -73,10 +74,10 @@ func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, before, cfg store
 	}
 	read := before
 	for range updateVisibilityRetries {
-		next := declareUpdatedVisibility(read, vis.applyTo(read))
-		switch err := e.store.SetLayerVisibilityIf(ctx, cfg.TenantID, cfg.ID, read.VisibilityState(), next.VisibilityState()); {
+		next := withVisibilityOf(cfg, declareUpdatedVisibility(read, vis.applyTo(read)))
+		switch err := e.store.PutLayerConfigIf(ctx, next, read.VisibilityState()); {
 		case err == nil:
-			return withVisibilityOf(cfg, next), withVisibilityOf(before, read), nil
+			return next, withVisibilityOf(before, read), nil
 		case !errors.Is(err, store.ErrVisibilityChanged):
 			return cfg, before, err
 		}
