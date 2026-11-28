@@ -12,8 +12,10 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 	"unicode"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/lint"
@@ -27,7 +29,7 @@ import (
 // or ./check.
 //
 //	podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>]
-//	              [--max-subjects <n>] [--format checksums|statement]
+//	              [--max-subjects <n>] [--format checksums|statement] [--signed-time]
 //	podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]
 //	podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements <file>]
 func attestCmd(args []string) int {
@@ -53,18 +55,32 @@ type attestOptions struct {
 	output      attest.Output
 	// layerName is the layer subject name built from root.
 	layerName string
+	// signedTime adds the §4.7.11 signed-time subject of signedAt to each
+	// file, and signedAt is the clock reading of the run.
+	signedTime bool
+	signedAt   time.Time
 }
 
-// runAttest is attestCmd with its streams and context injected. It exits 2 on
-// a usage error, 1 on a refusal or a failed write, and 0 once it wrote the
-// files. Every refusal comes before the first file is removed or written, so
-// a refused layer leaves --out as it was.
-//
-// Spec: §7.3.5
+// runAttest is attestCmd with its streams and context injected, under the
+// real clock.
 func runAttest(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	return runAttestAt(ctx, clock.Real{}, args, stdout, stderr)
+}
+
+// runAttestAt is runAttest with the clock that --signed-time reads injected.
+// It exits 2 on a usage error, 1 on a refusal or a failed write, and 0 once
+// it wrote the files. Every refusal comes before the first file is removed
+// or written, so a refused layer leaves --out as it was. The clock is read
+// once, so every file of a run carries one signed time.
+//
+// Spec: §7.3.5, §4.7.11 (Key-based signers)
+func runAttestAt(ctx context.Context, clk clock.Clock, args []string, stdout, stderr io.Writer) int {
 	opts, code := parseAttestArgs(args, stderr)
 	if code >= 0 {
 		return code
+	}
+	if opts.signedTime {
+		opts.signedAt = clk.Now()
 	}
 	records, files, err := readAttestLayer(ctx, opts, stderr)
 	if err != nil {
@@ -95,11 +111,12 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 	maxSubjects := flags.Int("max-subjects", attest.DefaultMaxSubjects, "most subjects in one file, the layer subject included")
 	format := flags.String("format", string(attest.FormatChecksums), "checksums|statement")
 	predicateType := flags.String("predicate-type", "", "predicateType of the statement format (default "+attest.DefaultPredicateType+")")
+	signedTime := flags.Bool("signed-time", false, "list the signed-time subject of this run in each file, for a signer that signs with a key")
 	ops, err := parseOperands(flags, args)
 	if err != nil {
 		return attestOptions{}, parseExit(err)
 	}
-	opts := attestOptions{dir: ".", commit: *commit, out: *out, maxSubjects: *maxSubjects}
+	opts := attestOptions{dir: ".", commit: *commit, out: *out, maxSubjects: *maxSubjects, signedTime: *signedTime}
 	if len(ops) > 1 {
 		_, _ = fmt.Fprintf(stderr, "error: podium attest takes at most one <dir>, got %d\n", len(ops))
 		return opts, 2
@@ -113,6 +130,10 @@ func parseAttestArgs(args []string, stderr io.Writer) (attestOptions, int) {
 	}
 	if opts.maxSubjects < 2 {
 		_, _ = fmt.Fprintf(stderr, "error: --max-subjects %d: %v\n", opts.maxSubjects, attest.ErrMaxSubjects)
+		return opts, 2
+	}
+	if opts.signedTime && opts.maxSubjects < 3 {
+		_, _ = fmt.Fprintf(stderr, "error: --max-subjects %d: %v\n", opts.maxSubjects, attest.ErrMaxSubjectsSignedTime)
 		return opts, 2
 	}
 	if opts.root, opts.layerName, err = parseLayerRoot(*root); err != nil {
@@ -243,7 +264,7 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 	if err != nil {
 		return nil, err
 	}
-	groups, err := attest.SubjectFiles(layer, content.Subjects, opts.maxSubjects)
+	groups, err := subjectGroups(opts, layer, content.Subjects)
 	if err != nil {
 		return nil, err
 	}
@@ -256,6 +277,22 @@ func renderAttestFiles(ctx context.Context, opts attestOptions, records []filesy
 		rendered = append(rendered, b.Bytes())
 	}
 	return rendered, nil
+}
+
+// subjectGroups divides the subjects into the files of the run, with the
+// signed-time subject of the run after the layer subject of each file under
+// --signed-time.
+//
+// Spec: §7.3.5, §4.7.11 (Key-based signers)
+func subjectGroups(opts attestOptions, layer attest.Subject, artifacts []attest.Subject) ([][]attest.Subject, error) {
+	if !opts.signedTime {
+		return attest.SubjectFiles(layer, artifacts, opts.maxSubjects)
+	}
+	signedAt, err := attest.SignedTimeSubject(opts.signedAt, layer)
+	if err != nil {
+		return nil, err
+	}
+	return attest.SignedSubjectFiles(layer, signedAt, artifacts, opts.maxSubjects)
 }
 
 // attestLayerSubjects writes the portable-name warnings of records, checks

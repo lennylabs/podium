@@ -308,7 +308,7 @@ The command exits 1 and names the directory in these cases:
 Writes the subjects that an author attestation of one layer signs: the layer subject with the layer digest, and one subject per artifact with its package digest. The command does not sign and sends no request to a registry. A signing tool, such as GitHub's `actions/attest-build-provenance` or `cosign attest-blob --statement`, signs the files it writes.
 
 ```
-podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-subjects <n>] [--format checksums|statement] [--predicate-type <uri>]
+podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-subjects <n>] [--format checksums|statement] [--predicate-type <uri>] [--signed-time]
 ```
 
 | Flag | Effect |
@@ -320,6 +320,7 @@ podium attest [<dir>] [--root <subpath>] [--commit <rev>] [--out <dir>] [--max-s
 | `--max-subjects <n>` | Most subjects in one file, the layer subject included. At least 2. Default: 1024, the limit of GitHub's attestation action. |
 | `--format <format>` | `checksums` (the default) or `statement`. |
 | `--predicate-type <uri>` | The `predicateType` of the statement format. Default: `https://lennylabs.github.io/podium/attestation/subjects/v1`. Applies to `--format statement` alone. |
+| `--signed-time` | List the signed-time subject `.podium/signed-at/<seconds>`, with the layer digest, after the layer subject of each file. `<seconds>` is the time at which the command runs, read once for every file. The subject counts toward `--max-subjects`, which is then at least 3. A [key-based signer](../deployment/content/layers#key-based-signers) needs it, and a certificate signer refuses a statement that lists it. |
 
 The layer subject is named `.podium/layer` for a layer at the root of its source and `.podium/layer/<root>` for a layer with a `root`. Each artifact subject is named `<id>@<version>`, or the bare ID for a skill with no authored version and for a package whose manifest does not parse.
 
@@ -381,14 +382,14 @@ A package whose ID holds a control character, a white space character, or a back
 |:--|:--|
 | `0` | The files were written. |
 | `1` | The layer root does not exist or is not a directory, `--commit` names no commit, `<dir>` lies below the top of its working tree under `--commit`, the commit holds no directory at the layer's path, the walk of the layer failed, a package has no subject name, or a file could not be removed or written. |
-| `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, a `--root` the rule above refuses, a `--predicate-type` that is not an absolute URI or that comes with `--format checksums`, or more than one `<dir>`. |
+| `2` | Usage error: an unknown `--format`, a `--max-subjects` below 2, or below 3 with `--signed-time`, a `--root` the rule above refuses, a `--predicate-type` that is not an absolute URI or that comes with `--format checksums`, or more than one `<dir>`. |
 
 ### `podium attest import`
 
 Copies signed bundles into the attestation directory of one layer and removes the bundles there that the import supersedes. The attestation directory is `.podium/attestations/` at the layer root, and the command creates `.podium` and `.podium/attestations` when they are absent. A symbolic link or an entry other than a directory at either path is refused, so the command never writes or removes a file outside the layer root.
 
 ```
-podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]
+podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune] [--public-key <file>]
 ```
 
 | Flag | Effect |
@@ -398,8 +399,9 @@ podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit
 | `--root <subpath>` | The layer's registered `root` below `--dir`, under the rule of `podium attest`. |
 | `--commit <rev>` | Read the layer's packages from the tree of this commit, as `podium attest --commit` does. The bundles are written to the directory on disk in either case. |
 | `--no-prune` | Write the bundles and remove nothing. The command then does not read the layer. |
+| `--public-key <file>` | The PEM public key of a [key-based signer](../deployment/content/layers#key-based-signers), such as `cosign.pub`. A key-signed bundle is imported only with it, and only when its signature verifies under the key. |
 
-Each imported bundle carries a leaf certificate, and its DSSE signature verifies under that certificate's public key; the command refuses any other bundle and then writes nothing. It does not verify the certificate against a trusted root, so the check stops a corrupted or substituted signature and does not establish the signer. The command writes each bundle to `<hex>.sigstore.json`, where `<hex>` is the 64 lowercase hexadecimal digits of the SHA-256 digest of the bytes it writes. Before it writes, it removes the certificates that each RFC 3161 timestamp of the bundle embeds. Those certificates lie outside the timestamp's signature and outside the signed statement, and a verifier takes the authority's certificates from the trusted root, so the bundle verifies as before. The Python Sigstore library refuses a timestamp whose embedded certificates are not in DER order, and the removal keeps the bundle valid for every consumer. The command changes no other member, so the envelope, its signature, the certificate, and the log entry are the ones the signing tool wrote. A bundle whose timestamps embed no certificate keeps its bytes, and a bundle the command changed has another digest than the copy the signing tool stored, such as the copy in GitHub's attestation store.
+Each imported certificate-signed bundle has a DSSE signature that verifies under its leaf certificate's public key, and each imported key-signed bundle has one that verifies under the `--public-key` key; the command refuses any other bundle and then writes nothing. The pruning groups key-signed bundles by the key their signature verifies under, so an existing key-signed bundle of another key stays. It does not verify the certificate against a trusted root, so the check stops a corrupted or substituted signature and does not establish the signer. The command writes each bundle to `<hex>.sigstore.json`, where `<hex>` is the 64 lowercase hexadecimal digits of the SHA-256 digest of the bytes it writes. Before it writes, it removes the certificates that each RFC 3161 timestamp of the bundle embeds. Those certificates lie outside the timestamp's signature and outside the signed statement, and a verifier takes the authority's certificates from the trusted root, so the bundle verifies as before. The Python Sigstore library refuses a timestamp whose embedded certificates are not in DER order, and the removal keeps the bundle valid for every consumer. The command changes no other member, so the envelope, its signature, the certificate, and the log entry are the ones the signing tool wrote. A bundle whose timestamps embed no certificate keeps its bytes, and a bundle the command changed has another digest than the copy the signing tool stored, such as the copy in GitHub's attestation store.
 
 After it writes, the command removes each `*.sigstore.json` file of the directory that it did not write in this run and that one of these cases describes:
 
@@ -436,7 +438,7 @@ podium attest check [<dir>] [--root <subpath>] [--commit <rev>] [--requirements 
 | `<dir>` | Directory the layer root is resolved from. Default: the current directory. |
 | `--root <subpath>` | The layer's registered `root` below `<dir>`, under the rule of `podium attest`. |
 | `--commit <rev>` | Read the layer's packages from the tree of this commit. The command also lists each package whose files on disk differ from the commit, with the paths that differ, and each `DOMAIN.md` or `.layer-config` file that differs. |
-| `--requirements <file>` | Verify each bundle against the requirements of a requirements file, which `podium layer show <id> --requirements` writes. |
+| `--requirements <file>` | Verify each bundle against the requirements of a requirements file, which `podium layer show <id> --requirements` writes. A key-based signer verifies a key-signed bundle under its `public_key` with no trusted root and no signed-time bound. |
 | `--trusted-root <instance>=<file>` | The trusted root of a Sigstore instance that a signer of the requirements file names. Repeatable. |
 
 The command reads the bundles from the attestation directory on disk in every case, because a signing workflow imports its bundles before it commits them. It refuses a symbolic link or an entry other than a directory at `.podium` or `.podium/attestations`. It passes when a bundle lists the layer subject with the current layer digest and each package of the layer has a subject with its name and package digest. For each package without one, it prints the subject name, the package digest, whether the package resolved, the `type`, `sensitivity`, `deprecated`, and `replaced_by` values that the package digest frames, and each digest under which a bundle lists that name. A reviewer reads those values to see what a signature over the package would attest:
@@ -1038,6 +1040,7 @@ The trust flags set the layer's trust policy, which ingest verification of autho
 |:--|:--|
 | `--trust <none\|warn\|require>` | Trust mode. A layer without one takes `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
 | `--trust-signer <issuer>=<identity>` | A signer of the layer's requirement: an OIDC issuer and a certificate identity, split at the first `=`. Repeatable. |
+| `--trust-public-key <file>` | A [key-based signer](../deployment/content/layers#key-based-signers) of the layer's requirement, whose `public_key` is the PEM text of the file, such as `cosign.pub`. Repeatable, and it can stand beside `--trust-signer`. A file the command cannot read exits 1. |
 | `--trust-requirements-file <file>` | Send the `trust_requirements` of a requirements file, such as `podium layer show <id> --requirements` writes. The file sets a policy of several requirements, a `predicate_type`, `covers_layer`, or `optional`. Its `layer_roots` is not read. |
 | `--trust-require-type <type>` | An artifact type whose failure drops the artifact under `warn` as under `require`, such as `hook`. Repeatable, and the values replace the stored list. |
 | `--trust-source-repository <uri>` | `source_repository` of each signer. |
@@ -1050,7 +1053,7 @@ The trust flags set the layer's trust policy, which ingest verification of autho
 | `--trust-instance <name>` | Sigstore instance of each signer. Defaults to `public-good`. The name must be configured in `sigstore.instances` of `registry.yaml`. |
 | `--trust-layer-root <root>` | For a `local` layer, the `root` under which its content was signed. |
 
-The signer and binding flags build a policy of one requirement, and the binding flags apply to every `--trust-signer`. A binding flag given with no `--trust-signer` exits 2 with an error that names the flag. `--trust-requirements-file` beside `--trust-signer` or a binding flag exits 2, and a requirements file that cannot be read or that the file rules refuse exits 1. A policy of [several requirements](../deployment/content/layers#several-requirements) is written as a requirements file:
+The signer and binding flags build a policy of one requirement, and the binding flags apply to every `--trust-signer` and to no key-based signer. A binding flag given with no `--trust-signer` exits 2 with an error that names the flag. `--trust-requirements-file` beside `--trust-signer`, `--trust-public-key`, or a binding flag exits 2, and a requirements file that cannot be read or that the file rules refuse exits 1. A policy of [several requirements](../deployment/content/layers#several-requirements) is written as a requirements file:
 
 ```
 podium layer show finance --requirements > requirements.json
@@ -1271,13 +1274,13 @@ podium layer update --id <id>
 | `--clear-groups` | Empty the group list. |
 | `--clear-users` | Empty the user list. |
 | Trust flags | The [trust policy flags](#trust-policy-flags) of `podium layer register`. |
-| `--clear-trust-requirements` | Remove the layer's trust requirements. Cannot be combined with `--trust-signer` or `--trust-requirements-file`. |
+| `--clear-trust-requirements` | Remove the layer's trust requirements. Cannot be combined with `--trust-signer`, `--trust-public-key`, or `--trust-requirements-file`. |
 | `--clear-trust-require-types` | Remove the layer's `trust_require_types`. Cannot be combined with `--trust-require-type`. |
 
 #### Trust policy updates
 
 - `--trust` replaces the stored mode, and `--trust-layer-root` replaces the stored root. Omitting a flag keeps the stored value.
-- A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored ones. The command first reads the layer through `GET /v1/layers` and exits 1 without sending the update when the layer stores more than one requirement, or when the read fails, because the replacement would drop the additional requirements. Update such a layer with `--trust-requirements-file`. The update carries the requirements the command read as `expected_trust_requirements`, so the registry refuses it, and the command exits 1, when another writer changed the requirements between the read and the update.
+- A `--trust-signer` or a `--trust-public-key` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored ones. The command first reads the layer through `GET /v1/layers` and exits 1 without sending the update when the layer stores more than one requirement, or when the read fails, because the replacement would drop the additional requirements. Update such a layer with `--trust-requirements-file`. The update carries the requirements the command read as `expected_trust_requirements`, so the registry refuses it, and the command exits 1, when another writer changed the requirements between the read and the update.
 - `--trust-requirements-file` replaces the stored requirements with the file's, and `--trust-require-type` replaces the stored types.
 - `--clear-trust-requirements` removes the requirements, and `--clear-trust-require-types` removes the listed types. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
 - An update that carries no trust flag leaves the stored policy as it is.

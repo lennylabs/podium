@@ -22,8 +22,9 @@ type TrustRequirement struct {
 
 // TrustSigner is a signer of a requirement (§4.7.11): an OIDC issuer and a
 // certificate identity, the source and ref binding members, and the Sigstore
-// instance whose trusted root verifies its bundles. An empty member is not
-// named, and an empty Instance is public-good.
+// instance whose trusted root verifies its bundles, or, for a key-based
+// signer, PublicKey alone. An empty member is not named, and an empty
+// Instance of a certificate signer is public-good.
 //
 // Spec: §4.7.11 (Layer trust policy)
 type TrustSigner struct {
@@ -37,6 +38,9 @@ type TrustSigner struct {
 	SourceRepositoryRef     string `json:"source_repository_ref,omitempty"`
 	AnyRef                  bool   `json:"any_ref,omitempty"`
 	Instance                string `json:"instance,omitempty"`
+	// PublicKey is the PEM block of a key-based signer's ECDSA P-256 key,
+	// stored as given.
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 // UnmarshalJSON decodes a requirement and refuses a member of another name.

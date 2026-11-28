@@ -152,6 +152,11 @@ type AttestationConfig struct {
 	// PODIUM_ATTESTATION_MAX_BUNDLES. Zero takes the default.
 	MaxBundleBytes int64
 	MaxBundles     int
+	// SignedTimeAllowance is PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE: how
+	// far the signed time of a key-signed layer subject can lie ahead of the
+	// registry's clock. Zero is a valid setting that allows nothing ahead,
+	// so serverboot always sets it, to the 5-minute default when unset.
+	SignedTimeAllowance time.Duration
 	// DefaultVisibility is the deployment default visibility of a layer that
 	// --layer-path bootstraps (PODIUM_DEFAULT_LAYER_VISIBILITY): the directory
 	// visibility of a .layer-config that declares none, and the baseline of a
@@ -356,6 +361,11 @@ func (a *AttestationCycle) modeFailure() *AttestationError {
 	}
 	for _, req := range a.layer.TrustRequirements {
 		for _, s := range req.Signers {
+			if layer.IsKeySigner(s) {
+				// A key-based signer names no instance; CheckTrustPolicy
+				// refuses one that does.
+				continue
+			}
 			if _, ok := a.instance(s.Instance); !ok {
 				return attestFailure(CodeAttestationPolicyInvalid, "unknown_instance",
 					fmt.Sprintf("a signer of layer %s names the Sigstore instance %q, which this registry does not configure", a.layer.ID, s.Instance),

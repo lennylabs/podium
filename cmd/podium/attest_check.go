@@ -298,26 +298,9 @@ type instanceVerification struct {
 func acceptBundle(ctx context.Context, raw []byte, req store.TrustRequirement, insts *checkInstances, byInstance map[string]instanceVerification) (bool, sign.AttestationReason, error) {
 	var reason sign.AttestationReason
 	for _, s := range req.Signers {
-		name := s.Instance
-		if name == "" {
-			name = sign.PublicGoodInstance
-		}
-		res, ok := byInstance[name]
-		if !ok {
-			inst, err := insts.instance(name)
-			if err != nil {
-				return false, "", err
-			}
-			v, err := sign.VerifyAttestationBundle(ctx, raw, inst)
-			if err != nil {
-				rr, isRefusal := sign.AttestationReasonOf(err)
-				if !isRefusal {
-					return false, "", err
-				}
-				res.reason = rr
-			}
-			res.v = v
-			byInstance[name] = res
+		res, err := verifyForSigner(ctx, raw, s, insts, byInstance)
+		if err != nil {
+			return false, "", err
 		}
 		if res.v == nil {
 			reason = sign.LaterAttestationReason(reason, res.reason)
@@ -335,6 +318,59 @@ func acceptBundle(ctx context.Context, raw []byte, req store.TrustRequirement, i
 		return true, "", nil
 	}
 	return false, reason, nil
+}
+
+// verifyForSigner verifies raw for the signer s once per verification, kept
+// in byInstance: under the signer's instance for a certificate signer, and
+// under its public key for a key-based signer, which needs no trusted root
+// and applies no signed-time bound, because the command keeps no mark.
+//
+// Spec: §7.3.5, §4.7.11 (Key-based signers)
+func verifyForSigner(ctx context.Context, raw []byte, s store.TrustSigner, insts *checkInstances, byInstance map[string]instanceVerification) (instanceVerification, error) {
+	if layer.IsKeySigner(s) {
+		key, err := sign.ParseAttestationPublicKey(s.PublicKey)
+		if err != nil {
+			// The requirements file passed the policy rules, which refuse
+			// such a key; a signer that reaches here accepts nothing.
+			return instanceVerification{reason: sign.ReasonSignature}, nil
+		}
+		name := "key:" + key.ID()
+		if res, ok := byInstance[name]; ok {
+			return res, nil
+		}
+		res, err := verification(sign.VerifyKeySignedAttestation(raw, key))
+		if err == nil {
+			byInstance[name] = res
+		}
+		return res, err
+	}
+	name := layer.SignerInstance(s)
+	if res, ok := byInstance[name]; ok {
+		return res, nil
+	}
+	inst, err := insts.instance(name)
+	if err != nil {
+		return instanceVerification{}, err
+	}
+	res, err := verification(sign.VerifyAttestationBundle(ctx, raw, inst))
+	if err == nil {
+		byInstance[name] = res
+	}
+	return res, err
+}
+
+// verification turns the result of a verifier into the verified
+// attestation or the reason of its refusal. An error that is no refusal of
+// the bundle is returned.
+func verification(v *sign.VerifiedAttestation, err error) (instanceVerification, error) {
+	if err == nil {
+		return instanceVerification{v: v}, nil
+	}
+	rr, isRefusal := sign.AttestationReasonOf(err)
+	if !isRefusal {
+		return instanceVerification{}, err
+	}
+	return instanceVerification{reason: rr}, nil
 }
 
 // checkConditions writes a finding for a layer subject that no counted

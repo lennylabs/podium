@@ -3,6 +3,7 @@ package sign
 import (
 	"bytes"
 	"encoding/json"
+	"io"
 	"strings"
 	"unicode/utf8"
 
@@ -20,7 +21,8 @@ const (
 	inTotoPayloadType             = "application/vnd.in-toto+json"
 	inTotoStatementV1             = "https://in-toto.io/Statement/v1"
 	// reservedSignedAtPrefix is the subject prefix that no accepted
-	// certificate-signed bundle lists.
+	// certificate-signed bundle lists, and under which a key-signed bundle
+	// lists its one signed-time subject.
 	reservedSignedAtPrefix = ".podium/signed-at/"
 )
 
@@ -153,13 +155,34 @@ func parseSigstoreBundle(raw []byte) (*bundle.Bundle, *protobundle.Bundle, error
 
 // parseAttestationStatement reads payload as an in-toto Statement v1 under
 // the §4.7.10 JSON rule, by exact member name, and refuses a statement
-// that lists a subject under .podium/signed-at/.
+// that lists a subject under .podium/signed-at/, which no
+// certificate-signed bundle may list.
 //
 // Spec: §4.7.11.
 func parseAttestationStatement(payload []byte) (AttestationStatement, error) {
+	st, err := parseStatementPayload(payload)
+	if err != nil {
+		return AttestationStatement{}, err
+	}
+	if err := refuseSignedTimeSubjects(st); err != nil {
+		return AttestationStatement{}, err
+	}
+	return st, nil
+}
+
+// parseStatementPayload reads payload as an in-toto Statement v1 under the
+// §4.7.10 JSON rule, by exact member name. The reserved names are the
+// caller's: a certificate-signed bundle refuses every subject under
+// .podium/signed-at/, and a key-signed one applies the signed-time rule.
+//
+// Spec: §4.7.11.
+func parseStatementPayload(payload []byte) (AttestationStatement, error) {
 	members, err := version.DecodeJSONObject(payload)
 	if err != nil {
 		return AttestationStatement{}, refuse(ReasonPayload, "the payload fails the JSON rule", err)
+	}
+	if hasDuplicateMember(payload) {
+		return AttestationStatement{}, refuse(ReasonPayload, "an object of the payload names one member twice", nil)
 	}
 	if t, ok := jsonString(members["_type"]); !ok || t != inTotoStatementV1 {
 		return AttestationStatement{}, refuse(ReasonPayload, "the payload is not an in-toto Statement v1", nil)
@@ -173,12 +196,64 @@ func parseAttestationStatement(payload []byte) (AttestationStatement, error) {
 	if st.Subjects, err = parseSubjects(members["subject"]); err != nil {
 		return AttestationStatement{}, err
 	}
-	for _, s := range st.Subjects {
-		if strings.HasPrefix(s.Name, reservedSignedAtPrefix) {
-			return AttestationStatement{}, refuse(ReasonReservedSubject, "the statement lists a subject under .podium/signed-at/", nil)
+	return st, nil
+}
+
+// hasDuplicateMember reports whether an object of text, which passed the
+// §4.7.10 JSON rule, names one member twice, comparing the names after
+// their escapes are decoded. encoding/json keeps the last of two members
+// and other readers keep the first, so such a statement reads two ways.
+//
+// Spec: §4.7.11 (Bundle format)
+func hasDuplicateMember(text []byte) bool {
+	type level struct {
+		object, wantKey bool
+		keys            map[string]bool
+	}
+	var stack []*level
+	// valueDone marks the end of a value inside the enclosing object, whose
+	// next string token is then a member name.
+	valueDone := func() {
+		if n := len(stack); n > 0 && stack[n-1].object {
+			stack[n-1].wantKey = true
 		}
 	}
-	return st, nil
+	dec := json.NewDecoder(bytes.NewReader(text))
+	dec.UseNumber()
+	for {
+		tok, err := dec.Token()
+		if err == io.EOF {
+			return false
+		}
+		if err != nil {
+			// The text passed the JSON rule, so the decoder reads it whole; a
+			// failure reads as a duplicate, which fails closed.
+			return true
+		}
+		switch v := tok.(type) {
+		case json.Delim:
+			switch v {
+			case '{':
+				stack = append(stack, &level{object: true, wantKey: true, keys: map[string]bool{}})
+			case '[':
+				stack = append(stack, &level{})
+			default:
+				stack = stack[:len(stack)-1]
+				valueDone()
+			}
+		case string:
+			if top := len(stack) - 1; top >= 0 && stack[top].object && stack[top].wantKey {
+				if stack[top].keys[v] {
+					return true
+				}
+				stack[top].keys[v], stack[top].wantKey = true, false
+				continue
+			}
+			valueDone()
+		default:
+			valueDone()
+		}
+	}
 }
 
 // parseSubjects reads a non-empty subject array whose entries each carry a

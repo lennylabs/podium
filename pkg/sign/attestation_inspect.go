@@ -19,6 +19,14 @@ type BundleSummary struct {
 	// Certificate holds every §4.7.11 field of the leaf, read as
 	// VerifyAttestationBundle reads it, without a check of the chain.
 	Certificate CertificateFields
+	// KeySigned marks a bundle whose verification material is a public key
+	// hint, whose statement met the signed-time rule of a key-signed
+	// bundle, and which carries no signer a reader can take from it.
+	KeySigned bool
+	// Key is the identifier of the key-based signer a caller verified the
+	// bundle under, which `podium attest import` sets to group the bundle;
+	// InspectAttestationBundle leaves it empty.
+	Key string
 }
 
 // MatchesSigner applies the §4.7.11 identity comparison and the source and
@@ -37,7 +45,9 @@ func (b BundleSummary) MatchesSigner(s AttestationSigner) error {
 // InspectAttestationBundle parses raw under the §4.7.11 bundle format, with
 // the parse that VerifyAttestationBundle applies, and reads its statement
 // and the issuer and identity of its leaf certificate without verifying
-// anything. A bundle that is not in the format returns an
+// anything. A bundle with a public key hint is read under the signed-time
+// rule of a key-signed bundle, and any other under the refusal of every
+// subject under .podium/signed-at/. A bundle that is not in the format returns an
 // *AttestationRefusal. A certificate field that is absent or malformed
 // leaves its member empty and refuses nothing, because a verifier refuses
 // such a bundle for every signer and the caller only groups bundles.
@@ -48,11 +58,20 @@ func InspectAttestationBundle(raw []byte) (BundleSummary, error) {
 	if err != nil {
 		return BundleSummary{}, err
 	}
-	stmt, err := parseAttestationStatement(pb.GetDsseEnvelope().GetPayload())
+	stmt, err := parseStatementPayload(pb.GetDsseEnvelope().GetPayload())
 	if err != nil {
 		return BundleSummary{}, err
 	}
-	out := BundleSummary{Statement: stmt}
+	keySigned := pb.GetVerificationMaterial().GetPublicKey() != nil
+	if keySigned {
+		_, _, err = keySignedTime(stmt)
+	} else {
+		err = refuseSignedTimeSubjects(stmt)
+	}
+	if err != nil {
+		return BundleSummary{}, err
+	}
+	out := BundleSummary{Statement: stmt, KeySigned: keySigned}
 	// A bundle that passed the library parse carries verification content;
 	// a bundle with a public key hint has no leaf, and its signer is empty.
 	vc, err := b.VerificationContent()

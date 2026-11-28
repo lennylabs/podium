@@ -23,6 +23,10 @@ type importOptions struct {
 	layer   attestOptions
 	noPrune bool
 	limits  attestLimits
+	// keyFile is --public-key, the file that holds the public key of a
+	// key-based signer, and key the key read from it.
+	keyFile string
+	key     *sign.AttestationPublicKey
 }
 
 // importedBundle is one bundle an import writes: its bytes after the
@@ -65,6 +69,9 @@ func importBundles(ctx context.Context, opts importOptions, stdout, stderr io.Wr
 	if err := checkRootSegments(opts.layer.dir, opts.layer.root); err != nil {
 		return err
 	}
+	if err := opts.readKey(); err != nil {
+		return err
+	}
 	imported, err := readImportInputs(opts)
 	if err != nil {
 		return err
@@ -87,7 +94,7 @@ func importBundles(ctx context.Context, opts importOptions, stdout, stderr io.Wr
 		if _, _, err := attestationDir(opts.layer.dir, opts.layer.root, false); err != nil {
 			return err
 		}
-		if err := pruneBundleDir(dir, imported, cur, opts.limits, stdout, stderr); err != nil {
+		if err := pruneBundleDir(dir, imported, cur, opts, stdout, stderr); err != nil {
 			return err
 		}
 	}
@@ -117,13 +124,14 @@ func parseImportArgs(args []string, getenv func(string) string, stderr io.Writer
 	root := flags.String("root", "", "the layer's registered root below --dir")
 	commit := flags.String("commit", "", "read the layer's packages from this commit's tree")
 	noPrune := flags.Bool("no-prune", false, "write the bundles and remove nothing")
+	publicKey := flags.String("public-key", "", "file holding the PEM public key that key-signed bundles verify under, such as cosign.pub")
 	ops, err := parseOperands(flags, args)
 	if err != nil {
 		return importOptions{}, parseExit(err)
 	}
-	opts := importOptions{files: ops, noPrune: *noPrune, layer: attestOptions{dir: *dir, commit: *commit}}
+	opts := importOptions{files: ops, noPrune: *noPrune, layer: attestOptions{dir: *dir, commit: *commit}, keyFile: *publicKey}
 	if len(ops) == 0 {
-		_, _ = fmt.Fprintln(stderr, "usage: podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune]")
+		_, _ = fmt.Fprintln(stderr, "usage: podium attest import <bundle-file>... [--dir <dir>] [--root <subpath>] [--commit <rev>] [--no-prune] [--public-key <file>]")
 		return opts, 2
 	}
 	if opts.layer.root, opts.layer.layerName, err = parseLayerRoot(*root); err != nil {
@@ -135,6 +143,27 @@ func parseImportArgs(args []string, getenv func(string) string, stderr io.Writer
 		return opts, 2
 	}
 	return opts, -1
+}
+
+// readKey reads the --public-key file under the §4.7.11 public_key rules. A
+// file that cannot be read or that the rules refuse fails the import before
+// any input is read.
+//
+// Spec: §7.3.5, §4.7.11 (Key-based signers)
+func (opts *importOptions) readKey() error {
+	if opts.keyFile == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(opts.keyFile)
+	if err != nil {
+		return fmt.Errorf("read the --public-key file: %w", err)
+	}
+	key, err := sign.ParseAttestationPublicKey(string(raw))
+	if err != nil {
+		return fmt.Errorf("--public-key %s: %w", opts.keyFile, err)
+	}
+	opts.key = &key
+	return nil
 }
 
 // readImportInputs reads every input file and returns its bundles with the
@@ -156,7 +185,7 @@ func readImportInputs(opts importOptions) ([]importedBundle, error) {
 			return nil, fmt.Errorf("%s: %w", file, err)
 		}
 		for i, v := range values {
-			b, err := prepareBundle(v, opts.limits)
+			b, err := prepareBundle(v, opts.limits, opts.key)
 			if err != nil {
 				return nil, fmt.Errorf("%s: bundle %d: %w", file, i+1, err)
 			}
@@ -172,15 +201,20 @@ func readImportInputs(opts importOptions) ([]importedBundle, error) {
 }
 
 // prepareBundle checks one bundle, removes its timestamp certificates, and
-// names it by the attestation digest of the bytes it will be written as.
-func prepareBundle(v []byte, limits attestLimits) (importedBundle, error) {
-	if _, err := sign.InspectAttestationBundle(v); err != nil {
+// names it by the attestation digest of the bytes it will be written as. A
+// key-signed bundle names its key in no signed byte, so it is accepted only
+// when it meets the acceptance conditions of a key-based signer with key.
+//
+// Spec: §7.3.5, §4.7.11 (Key-based signers)
+func prepareBundle(v []byte, limits attestLimits, key *sign.AttestationPublicKey) (importedBundle, error) {
+	sum, err := sign.InspectAttestationBundle(v)
+	if err != nil {
 		return importedBundle{}, err
 	}
-	// The import groups the bundle by the signer its certificate names, so
-	// a bundle whose signature that certificate's key did not make could
-	// remove a valid bundle of that signer.
-	if err := sign.CheckAttestationSelfSignature(v); err != nil {
+	// The import groups the bundle by its signer, so a bundle whose
+	// signature that signer's key did not make could remove a valid bundle
+	// of that signer.
+	if err := checkImportSignature(v, sum, key); err != nil {
 		return importedBundle{}, err
 	}
 	out, _, err := attest.RemoveTimestampCertificates(v)
@@ -196,7 +230,38 @@ func prepareBundle(v []byte, limits attestLimits) (importedBundle, error) {
 	if err != nil {
 		return importedBundle{}, err
 	}
+	if summary.KeySigned {
+		summary.Key = key.ID()
+	}
 	return importedBundle{name: attest.BundleFileName(out), raw: out, summary: summary}, nil
+}
+
+// checkImportSignature verifies the signature of a bundle before an import
+// groups it: under its own leaf certificate's key for a certificate-signed
+// bundle, and under the --public-key key for a key-signed one, which the
+// import refuses without that flag.
+func checkImportSignature(v []byte, sum sign.BundleSummary, key *sign.AttestationPublicKey) error {
+	if !sum.KeySigned {
+		return sign.CheckAttestationSelfSignature(v)
+	}
+	if key == nil {
+		return errors.New("the bundle is key-signed and names its key in no signed byte; name the key with --public-key")
+	}
+	_, err := sign.VerifyKeySignedAttestation(v, *key)
+	return err
+}
+
+// keyGroup sets the key identifier of an existing key-signed bundle whose
+// signature verifies under the --public-key key, so the pruning groups it
+// with the imported bundles of that key. A key-signed bundle that does not
+// verify under it groups with no imported bundle.
+func keyGroup(b *dirBundle, key *sign.AttestationPublicKey) {
+	if !b.summary.KeySigned || key == nil {
+		return
+	}
+	if _, err := sign.VerifyKeySignedAttestation(b.raw, *key); err == nil {
+		b.summary.Key = key.ID()
+	}
 }
 
 // currentSubjects reads the layer with the walk of `podium attest` and
@@ -293,7 +358,8 @@ func createImportTemp(dir string) (*os.File, error) {
 // with a warning.
 //
 // Spec: §7.3.5
-func pruneBundleDir(dir string, imported []importedBundle, cur attest.CurrentSubjects, limits attestLimits, stdout, stderr io.Writer) error {
+func pruneBundleDir(dir string, imported []importedBundle, cur attest.CurrentSubjects, opts importOptions, stdout, stderr io.Writer) error {
+	limits := opts.limits
 	existing, err := readBundleDir(dir, limits)
 	if err != nil {
 		return err
@@ -314,6 +380,7 @@ func pruneBundleDir(dir string, imported []importedBundle, cur attest.CurrentSub
 			_, _ = fmt.Fprintf(stderr, "warning: %s %s; it stays\n", oneLine(b.path), reason)
 			continue
 		case reason == "":
+			keyGroup(&b, opts.key)
 			reason = string(attest.Prune(b.summary, summaries, cur))
 		}
 		if reason == "" {

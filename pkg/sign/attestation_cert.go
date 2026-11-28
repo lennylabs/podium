@@ -208,6 +208,11 @@ type AttestationSigner struct {
 	SourceRepositoryRef string
 	// AnyRef accepts any source repository ref for a bound signer.
 	AnyRef bool
+
+	// PublicKey is the §4.7.11 public_key of a key-based signer, one PEM
+	// block of an ECDSA P-256 key. A signer that names it names no other
+	// member.
+	PublicKey string
 }
 
 // ErrAttestationSignerInvalid signals a signer entry that a policy loader
@@ -222,11 +227,15 @@ func (s AttestationSigner) bound() bool {
 
 // Validate applies the §4.7.11 load rules: an issuer and an identity are
 // named, a signer whose identity is a URI names a source binding member or
-// AnySource, and a bound signer names a ref or AnyRef. A loader refuses a
-// policy that holds a signer this rejects.
+// AnySource, and a bound signer names a ref or AnyRef. A key-based signer
+// names a public key that ParseAttestationPublicKey admits and no other
+// member. A loader refuses a policy that holds a signer this rejects.
 //
 // Spec: §4.7.11.
 func (s AttestationSigner) Validate() error {
+	if s.PublicKey != "" {
+		return s.validateKey()
+	}
 	switch {
 	case s.Issuer == "":
 		return errors.Join(ErrAttestationSignerInvalid, errors.New("the signer names no issuer"))
@@ -236,6 +245,17 @@ func (s AttestationSigner) Validate() error {
 		return errors.Join(ErrAttestationSignerInvalid, errors.New("a signer with a URI identity names no source binding and no any_source"))
 	case s.bound() && s.SourceRepositoryRef == "" && !s.AnyRef:
 		return errors.Join(ErrAttestationSignerInvalid, errors.New("a signer with a source binding names no source_repository_ref and no any_ref"))
+	}
+	return nil
+}
+
+// validateKey applies the load rules of a key-based signer.
+func (s AttestationSigner) validateKey() error {
+	if s.Issuer != "" || s.Identity != "" || s.bound() || s.AnySource || s.SourceRepositoryRef != "" || s.AnyRef {
+		return errors.Join(ErrAttestationSignerInvalid, errors.New("a signer that names public_key names no issuer, identity, source binding member, any_source, source_repository_ref, or any_ref"))
+	}
+	if _, err := ParseAttestationPublicKey(s.PublicKey); err != nil {
+		return errors.Join(ErrAttestationSignerInvalid, err)
 	}
 	return nil
 }

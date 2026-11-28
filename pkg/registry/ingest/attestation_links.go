@@ -25,14 +25,19 @@ type linkCandidate struct {
 }
 
 // key returns the link key of the candidate: the statement's predicate type
-// and the instance, issuer, and identity of its verification.
+// and the instance, issuer, and identity of its verification, which for a
+// key-signed bundle are the empty instance and issuer and the key's
+// identifier.
+//
+// Spec: §4.7.11 (Attestation storage, Key-based signers)
 func (c linkCandidate) key() store.LinkKey {
 	return store.LinkKey{PredicateType: c.v.Statement.PredicateType, Instance: c.v.Instance,
-		Issuer: c.v.Certificate.Issuer.Value, Identity: c.v.Certificate.Identity.Value}
+		Issuer: c.v.SignerIssuer(), Identity: c.v.SignerIdentity()}
 }
 
 // sortCandidates orders candidates by descending attested time and then by
-// ascending attestation digest.
+// ascending attestation digest. A key-signed bundle with no attested time
+// holds the zero time, so it comes after every bundle that has one.
 func sortCandidates(cs []linkCandidate) {
 	sort.SliceStable(cs, func(i, j int) bool {
 		ti, tj := cs[i].v.AttestedTime, cs[j].v.AttestedTime
@@ -270,7 +275,7 @@ func (p *linkPlan) bundleRow(c linkCandidate) store.StoredAttestation {
 		Digest: c.bundle.digest, Bundle: c.bundle.raw, LayerID: p.cycle.layer.ID, SourceRef: p.cycle.reference,
 		PredicateType: c.v.Statement.PredicateType, Instance: c.v.Instance,
 		SourceRepository: f.SourceRepository.Value, SourceRepositoryOwner: f.SourceRepositoryOwner.Value,
-		SourceRepositoryRef: f.SourceRepositoryRef.Value, SignerIssuer: f.Issuer.Value, SignerIdentity: f.Identity.Value,
+		SourceRepositoryRef: f.SourceRepositoryRef.Value, SignerIssuer: c.v.SignerIssuer(), SignerIdentity: c.v.SignerIdentity(),
 		AttestedAt: c.v.AttestedTime, StoredAt: p.now,
 	}
 	if n := logIndex(c.bundle.raw); n >= 0 {

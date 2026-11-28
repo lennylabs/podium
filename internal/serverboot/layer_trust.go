@@ -94,6 +94,7 @@ type yamlTrustSigner struct {
 	SourceRepositoryRef     string `yaml:"source_repository_ref"`
 	AnyRef                  bool   `yaml:"any_ref"`
 	Instance                string `yaml:"instance"`
+	PublicKey               string `yaml:"public_key"`
 }
 
 // The keys a declared requirement and signer accept, which are the yaml tags
@@ -101,7 +102,7 @@ type yamlTrustSigner struct {
 var (
 	requirementKeys = []string{"signers", "predicate_type", "covers_layer", "optional"}
 	signerKeys      = []string{"issuer", "identity", "source_repository", "source_repository_owner",
-		"source_repository_id", "source_repository_owner_id", "any_source", "source_repository_ref", "any_ref", "instance"}
+		"source_repository_id", "source_repository_owner_id", "any_source", "source_repository_ref", "any_ref", "instance", "public_key"}
 )
 
 // declaredTrustPolicy returns the trust policy of a declared layer, with the

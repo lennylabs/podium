@@ -115,6 +115,12 @@ type bundleConfig struct {
 	flipSig     bool
 	noCert      bool
 	message     bool
+	// signingKey, when set, signs the envelope in place of a fresh leaf
+	// key; keyID is the envelope signature's keyid and hint the public key
+	// hint of a bundle without a certificate (keysigned.go).
+	signingKey *ecdsa.PrivateKey
+	keyID      string
+	hint       string
 	// mediaTypeKey, when set, is the member name the media type is
 	// written under in place of mediaType.
 	mediaTypeKey string
@@ -197,6 +203,7 @@ func defaultBundleConfig() bundleConfig {
 		mediaType:   BundleMediaTypeV03,
 		payloadType: InTotoPayloadType,
 		leaf:        defaultLeafConfig(),
+		hint:        "acme-key",
 	}
 }
 
@@ -219,9 +226,12 @@ func (h *Harness) DSSEBundle(payload []byte, opts ...BundleOpt) []byte {
 
 // buildBundle assembles the bundle JSON for cfg.
 func (h *Harness) buildBundle(payload []byte, cfg bundleConfig) ([]byte, error) {
-	key, err := newECKey()
-	if err != nil {
-		return nil, err
+	key := cfg.signingKey
+	if key == nil {
+		var err error
+		if key, err = newECKey(); err != nil {
+			return nil, err
+		}
 	}
 	leafDER, err := h.issueLeafDER(cfg.leaf, key, cfg.sct)
 	if err != nil {
@@ -234,7 +244,7 @@ func (h *Harness) buildBundle(payload []byte, cfg bundleConfig) ([]byte, error) 
 	if cfg.flipSig {
 		sig[len(sig)-1] ^= 0x01
 	}
-	env := dsseJSON{Payload: payload, PayloadType: cfg.payloadType, Signatures: []dsseSignature{{Sig: sig}}}
+	env := dsseJSON{Payload: payload, PayloadType: cfg.payloadType, Signatures: []dsseSignature{{Sig: sig, KeyID: cfg.keyID}}}
 	if cfg.extraSig {
 		env.Signatures = append(env.Signatures, dsseSignature{Sig: sig})
 	}
@@ -265,7 +275,11 @@ func (h *Harness) buildBundle(payload []byte, cfg bundleConfig) ([]byte, error) 
 	} else {
 		b.DSSEEnvelope = &env
 	}
-	return marshalBundle(b, cfg.noCert, cfg.mediaTypeKey)
+	hint := ""
+	if cfg.noCert {
+		hint = cfg.hint
+	}
+	return marshalBundle(b, hint, cfg.mediaTypeKey)
 }
 
 // addTimestamps adds one RFC 3161 token per spec over sig.
@@ -307,21 +321,21 @@ func (h *Harness) addTimestamps(b *bundleJSON, specs []timestampSpec, sig []byte
 	return nil
 }
 
-// marshalBundle encodes b. A bundle without a certificate carries a
-// public key hint, which the bundle types above do not declare, and a
-// non-empty mediaTypeKey renames the mediaType member.
-func marshalBundle(b bundleJSON, publicKey bool, mediaTypeKey string) ([]byte, error) {
+// marshalBundle encodes b. A non-empty hint writes a public key hint in
+// place of a certificate, which the bundle types above do not declare, and
+// a non-empty mediaTypeKey renames the mediaType member.
+func marshalBundle(b bundleJSON, hint, mediaTypeKey string) ([]byte, error) {
 	out, err := json.MarshalIndent(b, "", "  ")
-	if err != nil || (!publicKey && mediaTypeKey == "") {
+	if err != nil || (hint == "" && mediaTypeKey == "") {
 		return out, err
 	}
 	var doc map[string]any
 	if err := json.Unmarshal(out, &doc); err != nil {
 		return nil, err
 	}
-	if publicKey {
+	if hint != "" {
 		vm := doc["verificationMaterial"].(map[string]any)
-		vm["publicKey"] = map[string]any{"hint": "acme-key"}
+		vm["publicKey"] = map[string]any{"hint": hint}
 	}
 	if mediaTypeKey != "" {
 		doc[mediaTypeKey] = doc["mediaType"]

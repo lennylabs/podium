@@ -21,6 +21,7 @@ const (
 	sigstoreRootRefreshEnv   = "PODIUM_SIGSTORE_ROOT_REFRESH"
 	sigstoreRootTimeoutEnv   = "PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT"
 	sigstoreRootMaxAgeEnv    = "PODIUM_SIGSTORE_ROOT_MAX_AGE"
+	signedTimeAllowanceEnv   = "PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE"
 	sigstoreInstancesKey     = "sigstore.instances"
 	publicGoodRootDirSegment = "sigstore"
 )
@@ -78,6 +79,9 @@ type fileInstance struct {
 // `podium config show --server` both see an unreadable file.
 type attestationConfig struct {
 	refresh, timeout, maxAge durationSetting
+	// allowance is PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE, the bound of a
+	// key-signed layer subject's signed time past the registry's clock.
+	allowance durationSetting
 	// rootFile is PODIUM_ATTESTATION_TRUSTED_ROOT_FILE as set, trimmed.
 	rootFile string
 	// files holds the file-backed instances in configuration order, with
@@ -105,12 +109,13 @@ type attestationConfig struct {
 // Spec: §4.7.11, §13.12
 func resolveAttestation(getenv func(string) string, y yamlSigstore, configDir string, now time.Time) attestationConfig {
 	a := attestationConfig{
-		refresh:  resolveDuration(getenv(sigstoreRootRefreshEnv), sigstoreRootRefreshEnv, sign.DefaultRootRefresh, false),
-		timeout:  resolveDuration(getenv(sigstoreRootTimeoutEnv), sigstoreRootTimeoutEnv, sign.DefaultRootRefreshTimeout, false),
-		maxAge:   resolveDuration(getenv(sigstoreRootMaxAgeEnv), sigstoreRootMaxAgeEnv, sign.DefaultRootMaxAge, true),
-		rootFile: strings.TrimSpace(getenv(attestationRootFileEnv)),
+		refresh:   resolveDuration(getenv(sigstoreRootRefreshEnv), sigstoreRootRefreshEnv, sign.DefaultRootRefresh, false),
+		timeout:   resolveDuration(getenv(sigstoreRootTimeoutEnv), sigstoreRootTimeoutEnv, sign.DefaultRootRefreshTimeout, false),
+		maxAge:    resolveDuration(getenv(sigstoreRootMaxAgeEnv), sigstoreRootMaxAgeEnv, sign.DefaultRootMaxAge, true),
+		allowance: resolveSignedTimeAllowance(getenv(signedTimeAllowanceEnv)),
+		rootFile:  strings.TrimSpace(getenv(attestationRootFileEnv)),
 	}
-	for _, d := range []durationSetting{a.refresh, a.timeout, a.maxAge} {
+	for _, d := range []durationSetting{a.refresh, a.timeout, a.maxAge, a.allowance} {
 		if d.err != nil {
 			a.errs = append(a.errs, d.err)
 		}
@@ -166,6 +171,26 @@ func resolveDuration(raw, name string, def time.Duration, allowZero bool) durati
 		return durationSetting{value: def, raw: raw, source: name,
 			err: fmt.Errorf("config.invalid: %s must be a duration above zero, such as 24h, got %q", name, raw)}
 	}
+}
+
+// The §13.12 range and default of PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE.
+const (
+	defaultSignedTimeAllowance = 5 * time.Minute
+	maxSignedTimeAllowance     = 24 * time.Hour
+)
+
+// resolveSignedTimeAllowance parses PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE:
+// a duration from zero to 24 hours, and the 5-minute default when unset or
+// blank. Another value is a config.invalid refusal of the start.
+//
+// Spec: §13.12, §4.7.11 (Layer step)
+func resolveSignedTimeAllowance(raw string) durationSetting {
+	d := resolveDuration(raw, signedTimeAllowanceEnv, defaultSignedTimeAllowance, true)
+	if d.err != nil || d.value > maxSignedTimeAllowance {
+		d.value = defaultSignedTimeAllowance
+		d.err = fmt.Errorf("config.invalid: %s must be a duration from 0s to %s, got %q", signedTimeAllowanceEnv, maxSignedTimeAllowance, d.raw)
+	}
+	return d
 }
 
 // refreshFloor refuses a refresh interval below sign.MinRootRefresh or
@@ -421,6 +446,7 @@ func (c *Config) attestationSettings(envOrSrc func(env, src string) string) []Se
 		Setting{"sigstore.root_refresh", a.refresh.display(), a.refresh.source},
 		Setting{"sigstore.root_refresh_timeout", a.timeout.display(), a.timeout.source},
 		Setting{"sigstore.root_max_age", a.maxAge.display(), a.maxAge.source},
+		Setting{"attestation.signed_time_allowance", a.allowance.display(), a.allowance.source},
 		Setting{"attestation.max_bytes", fmt.Sprint(a.limits.MaxBytes), envOrSrc(attest.MaxBytesSetting, "")},
 		Setting{"attestation.max_bundles", fmt.Sprint(a.limits.MaxBundles), envOrSrc(attest.MaxBundlesSetting, "")},
 	)

@@ -38,14 +38,24 @@ type AttestationInstance struct {
 // from the signed payload, the times from the timestamps and the signed
 // entry timestamp, and the certificate fields from the raw extensions of
 // the leaf in the bundle's verification content.
+//
+// A key-signed bundle (VerifyKeySignedAttestation) holds the identifier of
+// the key it verified under in Key, the signed time in AttestedTime, and no
+// instance, verified times, or certificate fields.
 type VerifiedAttestation struct {
-	// Instance is the instance the bundle verified under.
+	// Instance is the instance the bundle verified under, empty for a
+	// key-signed bundle.
 	Instance string
+	// Key is the identifier, sha256:<hex>, of the public key a key-signed
+	// bundle verified under, and empty for a certificate-signed bundle.
+	Key string
 	// Statement is the signed in-toto statement.
 	Statement AttestationStatement
 	// VerifiedTimes lists every verified time in ascending order.
 	VerifiedTimes []time.Time
-	// AttestedTime is the earliest verified time.
+	// AttestedTime is the earliest verified time, or the signed time of a
+	// key-signed bundle. It is the zero time for a key-signed bundle that
+	// lists no signed-time subject, which has no attested time.
 	AttestedTime time.Time
 	// Certificate holds the §4.7.11 fields of the leaf.
 	Certificate CertificateFields
@@ -57,11 +67,49 @@ type VerifiedAttestation struct {
 
 // AcceptsSigner applies the §4.7.11 identity comparison and the source
 // and ref bindings of s. It returns nil when the bundle is accepted for s,
-// and an *AttestationRefusal otherwise.
+// and an *AttestationRefusal otherwise. A key-based signer accepts only a
+// key-signed bundle that verified under its key, and a certificate signer
+// accepts no key-signed bundle.
 //
 // Spec: §4.7.11.
 func (v *VerifiedAttestation) AcceptsSigner(s AttestationSigner) error {
+	if s.PublicKey != "" {
+		k, err := ParseAttestationPublicKey(s.PublicKey)
+		if err != nil {
+			return refuse(ReasonSignature, "the signer's public key does not parse", err)
+		}
+		if v.Key != k.ID() {
+			return refuse(ReasonSignature, "the bundle did not verify under the signer's public key", nil)
+		}
+		return nil
+	}
+	if v.Key != "" {
+		return refuse(ReasonIssuer, "the bundle is key-signed, and the signer names an issuer and an identity", nil)
+	}
 	return matchSigner(v.Certificate, s)
+}
+
+// SignerIssuer is the issuer of the signer a link of the bundle records:
+// the certificate's issuer, and empty for a key-signed bundle.
+//
+// Spec: §4.7.11 (Key-based signers, Attestation storage)
+func (v *VerifiedAttestation) SignerIssuer() string {
+	if v.Key != "" {
+		return ""
+	}
+	return v.Certificate.Issuer.Value
+}
+
+// SignerIdentity is the identity of the signer a link of the bundle
+// records: the certificate's identity, and the key's identifier for a
+// key-signed bundle.
+//
+// Spec: §4.7.11 (Key-based signers, Attestation storage)
+func (v *VerifiedAttestation) SignerIdentity() string {
+	if v.Key != "" {
+		return v.Key
+	}
+	return v.Certificate.Identity.Value
 }
 
 // VerifyAttestationBundle applies to raw the §4.7.11 acceptance conditions

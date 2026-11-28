@@ -334,3 +334,36 @@ func TestRemoveTimestampCertificates_TwoTimestamps(t *testing.T) {
 		t.Fatalf("verify: %v", err)
 	}
 }
+
+// Spec: §7.3.5 (Importing bundles), §4.7.11 (Key-based signers) — a
+// key-signed bundle groups under the key its signature verified under: the
+// imported bundles of that key supersede it, a key-signed bundle that
+// verified under no key stays while it matches, and a certificate signer
+// never groups with a key.
+func TestPrune_KeySigned(t *testing.T) {
+	cur := attest.NewCurrentSubjects(attest.Subject{Name: ".podium/layer", Digest: "sha256:" + hexA},
+		[]attest.Subject{{Name: "a@1.0.0", Digest: "sha256:" + hexA}})
+	keyed := func(key string) sign.BundleSummary {
+		s := summary(slsa, "", "", subj(".podium/layer", hexA), subj("a@1.0.0", hexA))
+		s.KeySigned, s.Key = true, key
+		return s
+	}
+	cert := summary(slsa, "", "sha256:k1", subj(".podium/layer", hexA), subj("a@1.0.0", hexA))
+	for _, c := range []struct {
+		name     string
+		existing sign.BundleSummary
+		imported []sign.BundleSummary
+		want     attest.PruneReason
+	}{
+		{"same key", keyed("sha256:k1"), []sign.BundleSummary{keyed("sha256:k1")}, attest.PruneSuperseded},
+		{"another key", keyed("sha256:k2"), []sign.BundleSummary{keyed("sha256:k1")}, attest.PruneKeep},
+		{"not verified under the run's key", keyed(""), []sign.BundleSummary{keyed("sha256:k1")}, attest.PruneKeep},
+		{"a certificate with the key's identity", cert, []sign.BundleSummary{keyed("sha256:k1")}, attest.PruneKeep},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := attest.Prune(c.existing, c.imported, cur); got != c.want {
+				t.Fatalf("Prune = %q, want %q", got, c.want)
+			}
+		})
+	}
+}

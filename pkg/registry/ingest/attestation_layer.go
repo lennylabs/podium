@@ -76,7 +76,9 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 	if f != nil {
 		return nil, f, nil
 	}
-	layerBundle, f, err := a.passingCandidate(ctx, candidates)
+	// Spec: §4.7.11 (Layer step) — the registry reads its clock once in a
+	// cycle for the signed-time bound.
+	layerBundle, f, err := a.passingCandidate(ctx, candidates, a.clock.Now().UTC())
 	if f != nil || err != nil {
 		return nil, f, err
 	}
@@ -121,12 +123,13 @@ func (a *AttestationCycle) checkRoots(ctx context.Context) (*AttestationError, e
 	return nil, nil
 }
 
-// namesPublicGood reports whether a signer of the policy names the
-// public-good instance, which an empty instance names.
+// namesPublicGood reports whether a certificate signer of the policy names
+// the public-good instance, which an empty instance names. A key-based
+// signer names no instance.
 func (a *AttestationCycle) namesPublicGood() bool {
 	for _, req := range a.layer.TrustRequirements {
 		for _, s := range req.Signers {
-			if s.Instance == "" || s.Instance == sign.PublicGoodInstance {
+			if layer.SignerInstance(s) == sign.PublicGoodInstance {
 				return true
 			}
 		}
@@ -209,17 +212,21 @@ func namesSubject(v *sign.VerifiedAttestation, name string) bool {
 }
 
 // passingCandidate applies layer steps 4 and 5: a candidate passes when its
-// attested time is not earlier than the mark and, where the source answers
-// lineage queries and its certificate records a source commit, that commit
-// is in the lineage of the snapshot. It returns the passing candidate with
-// the latest attested time, or the failure of the candidate with the latest
-// attested time when none passes.
-func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*snapshotBundle) (*snapshotBundle, *AttestationError, error) {
+// attested time is not earlier than the mark, a key-signed candidate's
+// signed time is not later than now plus the signed-time allowance, and,
+// where the source answers lineage queries and its certificate records a
+// source commit, that commit is in the lineage of the snapshot. It returns
+// the passing candidate with the latest attested time, or the failure of
+// the candidate with the latest attested time when none passes.
+//
+// Spec: §4.7.11 (Layer step, Key-based signers)
+func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*snapshotBundle, now time.Time) (*snapshotBundle, *AttestationError, error) {
 	sortByAttestedTime(candidates)
 	mark := a.layer.Mark
+	bound := now.Add(a.signedTimeAllowance())
 	var pastMark []*snapshotBundle
 	for _, c := range candidates {
-		if mark == nil || !c.covering.AttestedTime.Before(*mark) {
+		if (mark == nil || !c.covering.AttestedTime.Before(*mark)) && !signedTimeAhead(c, bound) {
 			pastMark = append(pastMark, c)
 		}
 	}
@@ -233,6 +240,13 @@ func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*s
 		}
 	}
 	latest := candidates[0]
+	if signedTimeAhead(latest, bound) {
+		return nil, attestFailure(CodeAttestationStale, "signed_time_ahead",
+			"the signed time of the key-signed layer subject is later than the registry's clock plus PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE",
+			"signed_at", latest.covering.AttestedTime.UTC().Format(time.RFC3339Nano),
+			"registry_time", now.Format(time.RFC3339Nano), "allowance", a.signedTimeAllowance().String(),
+			"digest", latest.digest), nil
+	}
 	if mark != nil && latest.covering.AttestedTime.Before(*mark) {
 		return nil, attestFailure(CodeAttestationStale, "mark",
 			"the newest layer subject is older than the layer's attestation mark",
@@ -244,6 +258,22 @@ func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*s
 		"the attested commit of the layer subject is not in the lineage of the snapshot",
 		"attested_commit", attest.ReportString(commit), "recorded_commit", attest.ReportString(a.layer.Commit),
 		"digest", latest.digest), nil
+}
+
+// signedTimeAhead reports whether c is a key-signed candidate whose signed
+// time is later than bound. A certificate-signed candidate's time comes from
+// its instance and is never bounded this way.
+func signedTimeAhead(c *snapshotBundle, bound time.Time) bool {
+	return c.covering.Key != "" && c.covering.AttestedTime.After(bound)
+}
+
+// signedTimeAllowance is PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE. A
+// configuration that sets none allows no time ahead, which fails closed.
+func (a *AttestationCycle) signedTimeAllowance() time.Duration {
+	if a.cfg.SignedTimeAllowance < 0 {
+		return 0
+	}
+	return a.cfg.SignedTimeAllowance
 }
 
 // sortByAttestedTime orders bundles by the attested time under the covering
