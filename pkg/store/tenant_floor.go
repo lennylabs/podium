@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 )
 
@@ -203,4 +205,49 @@ func scanTenant(row rowScanner) (Tenant, error) {
 	}
 	t.TrustFloor = floor
 	return t, nil
+}
+
+// ErrTenantChanged is returned by UpdateTenantIf, which then writes
+// nothing, when the stored tenant no longer holds the mutable record the
+// caller read.
+//
+// Spec: §7.3.3
+var ErrTenantChanged = errors.New("store: the tenant's record changed")
+
+// Validate applies the §4.7.11 floor rules the store can decide without the
+// registry's configuration: a mode of none, warn, require, or empty, and a
+// mode of warn or require on a floor that lists a required type, which a
+// lower mode would leave inert. The type and instance rules need the
+// registry and are applied by layer.CheckTrustFloor. The store refuses to
+// write a floor that breaks them, and a reader refuses one it reads.
+//
+// Spec: §4.7.11 (Tenant trust floor)
+func (f TrustFloor) Validate() error {
+	switch f.Mode {
+	case "", "none", "warn", "require":
+	default:
+		return fmt.Errorf("mode %q is not none, warn, or require", f.Mode)
+	}
+	if len(f.RequireTypes) > 0 && f.Mode != "warn" && f.Mode != "require" {
+		return fmt.Errorf("require_types lists %d type(s) and the mode is %q; a floor that requires types sets the mode warn or require, under which the types are enforced", len(f.RequireTypes), f.Mode)
+	}
+	return nil
+}
+
+// checkTenantFloor refuses a tenant write whose floor breaks Validate.
+func checkTenantFloor(t Tenant) error {
+	if err := t.TrustFloor.Validate(); err != nil {
+		return fmt.Errorf("store: tenant %s: trust floor: %w", t.ID, err)
+	}
+	return nil
+}
+
+// sameMutableTenant reports whether a and b hold the same mutable record:
+// quota, the scope-preview gate, the active state, and the trust floor in
+// its stored form.
+func sameMutableTenant(a, b Tenant) bool {
+	am, at, as := floorColumns(a.TrustFloor)
+	bm, bt, bs := floorColumns(b.TrustFloor)
+	return a.Quota == b.Quota && reflect.DeepEqual(a.ExposeScopePreview, b.ExposeScopePreview) && a.Active == b.Active &&
+		am == bm && at == bt && as == bs
 }

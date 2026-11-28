@@ -71,6 +71,9 @@ func mkey(tenantID, artifactID, version string) string {
 // matching the SQLite INSERT OR IGNORE and Postgres ON CONFLICT (id) DO
 // NOTHING backends.
 func (s *Memory) CreateTenant(_ context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[t.ID]; exists {
@@ -114,8 +117,36 @@ func (s *Memory) ListTenants(_ context.Context) ([]Tenant, error) {
 // ExposeScopePreview, Active, TrustFloor) and preserves the ID and name. An unknown ID
 // returns ErrTenantNotFound.
 func (s *Memory) UpdateTenant(_ context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.updateTenantLocked(t)
+}
+
+// UpdateTenantIf writes t only while the stored mutable record equals
+// expect's.
+//
+// Spec: §7.3.3
+func (s *Memory) UpdateTenantIf(_ context.Context, t Tenant, expect Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.tenants[t.ID]
+	if !ok {
+		return ErrTenantNotFound
+	}
+	if !sameMutableTenant(cur, expect) {
+		return ErrTenantChanged
+	}
+	return s.updateTenantLocked(t)
+}
+
+// updateTenantLocked writes t's mutable record; s.mu is held.
+func (s *Memory) updateTenantLocked(t Tenant) error {
 	cur, ok := s.tenants[t.ID]
 	if !ok {
 		return ErrTenantNotFound

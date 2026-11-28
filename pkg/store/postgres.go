@@ -544,6 +544,9 @@ func (p *Postgres) ResetForTest(ctx context.Context) error {
 // (§4.7.1) and writes the registry row under the per-request podium.org_id so
 // the row passes the row-level-security WITH CHECK.
 func (p *Postgres) CreateTenant(ctx context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	if _, err := p.ensureOrg(ctx, t.ID); err != nil {
 		return err
 	}
@@ -643,6 +646,25 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 // per-request podium.org_id so the row-level-security WITH CHECK passes. An
 // unknown ID returns ErrTenantNotFound.
 func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
+	return p.updateTenant(ctx, t, nil)
+}
+
+// UpdateTenantIf writes t only while the stored mutable record equals
+// expect's, in one conditional statement.
+//
+// Spec: §7.3.3
+func (p *Postgres) UpdateTenantIf(ctx context.Context, t Tenant, expect Tenant) error {
+	return p.updateTenant(ctx, t, &expect)
+}
+
+// updateTenant writes t's mutable record under the per-request
+// podium.org_id, conditional on expect's when it is not nil. A conditional
+// write that changes no row is ErrTenantNotFound for an absent tenant and
+// ErrTenantChanged otherwise.
+func (p *Postgres) updateTenant(ctx context.Context, t Tenant, expect *Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -652,16 +674,26 @@ func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
 		return err
 	}
 	fm, ft, fs := floorColumns(t.TrustFloor)
-	res, err := tx.ExecContext(ctx, `
+	query := `
 		UPDATE public.tenants SET
 			storage_quota = $2, search_qps_quota = $3, materialize_rate_quota = $4,
 			audit_volume_quota = $5, max_user_layers = $6, expose_scope_preview = $7, active = $8,
 			trust_floor_mode = $9, trust_floor_require_types = $10, trust_floor_signers = $11
-		WHERE id = $1`,
-		t.ID,
+		WHERE id = $1`
+	args := []any{t.ID,
 		t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
 		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active,
-		fm, ft, fs)
+		fm, ft, fs}
+	if expect != nil {
+		em, et, es := floorColumns(expect.TrustFloor)
+		query += ` AND storage_quota = $12 AND search_qps_quota = $13 AND materialize_rate_quota = $14
+			AND audit_volume_quota = $15 AND max_user_layers = $16 AND expose_scope_preview IS NOT DISTINCT FROM $17
+			AND active = $18 AND trust_floor_mode = $19 AND trust_floor_require_types = $20 AND trust_floor_signers = $21`
+		args = append(args, expect.Quota.StorageBytes, expect.Quota.SearchQPS, expect.Quota.MaterializeRate,
+			expect.Quota.AuditVolumePerDay, expect.Quota.MaxUserLayers, nullBoolFromPtr(expect.ExposeScopePreview), expect.Active,
+			em, et, es)
+	}
+	res, err := tx.ExecContext(ctx, query, args...)
 	if err != nil {
 		return err
 	}
@@ -669,10 +701,20 @@ func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
 	if err != nil {
 		return err
 	}
-	if n == 0 {
+	if n > 0 {
+		return tx.Commit()
+	}
+	if expect == nil {
 		return ErrTenantNotFound
 	}
-	return tx.Commit()
+	var one int
+	switch err := tx.QueryRowContext(ctx, `SELECT 1 FROM public.tenants WHERE id = $1`, t.ID).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrTenantNotFound
+	case err != nil:
+		return err
+	}
+	return ErrTenantChanged
 }
 
 // DeactivateTenant sets a tenant's active flag false without deleting its data.

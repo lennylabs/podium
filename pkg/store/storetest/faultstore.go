@@ -175,6 +175,16 @@ func (f *FaultStore) UpdateTenant(ctx context.Context, t store.Tenant) error {
 	return f.Store.UpdateTenant(ctx, t)
 }
 
+// UpdateTenantIf returns the injected error while severed or while
+// UpdateTenant is named, so a test that fails the tenant write fails the
+// conditional form the PATCH handler uses, else forwards.
+func (f *FaultStore) UpdateTenantIf(ctx context.Context, t, expect store.Tenant) error {
+	if f.shouldFail("UpdateTenant") {
+		return f.faultErr()
+	}
+	return f.Store.UpdateTenantIf(ctx, t, expect)
+}
+
 // DeactivateTenant returns the injected error while severed or named, else
 // forwards.
 func (f *FaultStore) DeactivateTenant(ctx context.Context, id string) error {
