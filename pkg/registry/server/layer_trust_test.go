@@ -652,7 +652,7 @@ func TestLayerTrust_SeveralRequirementsAndRequireTypes(t *testing.T) {
 // Spec: §7.3.1 (Patch semantics on the update body, Layer trust policy) —
 // an update that carries expected_trust_requirements applies only while the
 // layer stores them: a match, and null for a layer with none, are admitted,
-// a mismatch is refused with 409 and trust_requirements_changed and writes
+// a mismatch is refused with 400 and trust_requirements_changed and writes
 // nothing, and a member that does not decode is refused with 400. A layer
 // that lists trust_require_types while its mode resolves to none is
 // answered with a warning.
@@ -671,7 +671,7 @@ func TestLayerTrust_ExpectedRequirementsAndTypeWarning(t *testing.T) {
 	resp, body = mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_mode": "require", "expected_trust_requirements": nil})
 	env := server.ErrorResponse{}
 	_ = json.Unmarshal(body, &env)
-	if resp.StatusCode != http.StatusConflict || env.Code != "registry.invalid_argument" || env.Details["constraint"] != "trust_requirements_changed" {
+	if resp.StatusCode != http.StatusBadRequest || env.Code != "registry.invalid_argument" || env.Details["constraint"] != "trust_requirements_changed" {
 		t.Fatalf("stale expectation: %d %s", resp.StatusCode, body)
 	}
 	if got := h.stored(t, "finance"); got.TrustMode != "warn" {
@@ -685,5 +685,75 @@ func TestLayerTrust_ExpectedRequirementsAndTypeWarning(t *testing.T) {
 	}
 	if resp, body := mustPut(t, h.base, "/v1/layers/update?id=plain", map[string]any{"ref": "x", "expected_trust_requirements": nil}); resp.StatusCode != http.StatusOK {
 		t.Errorf("null expectation for a layer with none: %d %s", resp.StatusCode, body)
+	}
+}
+
+// racingTrustStore stores a second requirement just before the update's
+// write, after the handler compared expected_trust_requirements with the
+// row it read.
+type racingTrustStore struct {
+	*store.Memory
+	fire bool
+}
+
+func (s *racingTrustStore) race(ctx context.Context, cfg store.LayerConfig) {
+	if !s.fire {
+		return
+	}
+	s.fire = false
+	cur, _ := s.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
+	cur.TrustRequirements[0].CoversLayer = true
+	cur.TrustRequirements = append(cur.TrustRequirements, store.TrustRequirement{
+		Signers: []store.TrustSigner{{Issuer: trustIssuer, Identity: "scanner@acme.com", AnySource: true, AnyRef: true}}})
+	_ = s.PutLayerConfig(ctx, cur)
+}
+
+func (s *racingTrustStore) PutLayerConfigKeepingVisibility(ctx context.Context, cfg store.LayerConfig) error {
+	s.race(ctx, cfg)
+	return s.Memory.PutLayerConfigKeepingVisibility(ctx, cfg)
+}
+
+func (s *racingTrustStore) PutLayerConfigIfTrust(ctx context.Context, cfg store.LayerConfig, expect []store.TrustRequirement, vis *store.VisibilityState) error {
+	s.race(ctx, cfg)
+	return s.Memory.PutLayerConfigIfTrust(ctx, cfg, expect, vis)
+}
+
+func (s *racingTrustStore) PutLayerConfigIf(ctx context.Context, cfg store.LayerConfig, expect store.VisibilityState) error {
+	s.race(ctx, cfg)
+	return s.Memory.PutLayerConfigIf(ctx, cfg, expect)
+}
+
+// Spec: §7.3.1 (Patch semantics on the update body) — the write of an
+// update that carries expected_trust_requirements is conditional on the
+// requirements the handler read: a requirement another writer stores
+// between the check and the write refuses the update with 400 and
+// trust_requirements_changed, with and without a visibility member, and
+// the stored requirement is kept.
+func TestLayerTrust_ExpectedRequirementsConditionTheWrite(t *testing.T) {
+	t.Parallel()
+	for _, extra := range []map[string]any{{}, {"public": true}} {
+		st := &racingTrustStore{Memory: store.NewMemory()}
+		ctx := context.Background()
+		if err := st.CreateTenant(ctx, store.Tenant{ID: "default"}); err != nil {
+			t.Fatal(err)
+		}
+		ts := httptest.NewServer(server.NewLayerEndpoint(st, "default", server.NewModeTracker()).Handler())
+		t.Cleanup(ts.Close)
+		alice := map[string]any{"issuer": trustIssuer, "identity": "alice@acme.com", "any_source": true, "any_ref": true}
+		if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "default", ID: "finance", SourceType: "git", Repo: trustRepo, Ref: "main", TrustMode: "warn",
+			TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: trustIssuer, Identity: "alice@acme.com", AnySource: true, AnyRef: true}}}}}); err != nil {
+			t.Fatal(err)
+		}
+		st.fire = true
+		body := map[string]any{"trust_requirements": requirement(map[string]any{"issuer": trustIssuer, "identity": "bob@acme.com", "any_source": true, "any_ref": true}),
+			"expected_trust_requirements": requirement(alice)}
+		for k, v := range extra {
+			body[k] = v
+		}
+		resp, out := mustPut(t, ts.URL, "/v1/layers/update?id=finance", body)
+		cfg, _ := st.GetLayerConfig(ctx, "default", "finance")
+		if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(out), "trust_requirements_changed") || len(cfg.TrustRequirements) != 2 || cfg.Public {
+			t.Errorf("%v: %d %s, %d requirements, public %v", extra, resp.StatusCode, out, len(cfg.TrustRequirements), cfg.Public)
+		}
 	}
 }

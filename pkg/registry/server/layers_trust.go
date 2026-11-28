@@ -264,32 +264,43 @@ func (e *LayerEndpoint) requireTypesWarning(ctx context.Context, cfg store.Layer
 // requirements the client expects the layer to store.
 const expectedRequirementsMember = "expected_trust_requirements"
 
-// expectedRequirementsError returns the refusal of an update whose
-// expected_trust_requirements differ from the requirements cfg stores, as
-// the layer lifecycle event compares them, with 409 and the constraint
-// trust_requirements_changed, or 400 for a member that does not decode. It
-// returns an empty message for a body that carries no such member or whose
-// expectation holds. null and [] expect no requirement.
+// expectedRequirementsError reports whether an update body carries
+// expected_trust_requirements, which makes the update's write conditional
+// on the requirements cfg stores, and returns the refusal of a body whose
+// expectation differs from them, as the layer lifecycle event compares
+// them, or whose member does not decode. null and [] expect no
+// requirement. §6.10 holds no conflict code, so the refusal is
+// registry.invalid_argument with 400, as the endpoint's other refusals.
 //
 // Spec: §7.3.1 (Patch semantics on the update body)
-func expectedRequirementsError(body []byte, cfg store.LayerConfig) (int, string, map[string]any) {
+func expectedRequirementsError(body []byte, cfg store.LayerConfig) (carried bool, msg string, details map[string]any) {
 	var raw map[string]json.RawMessage
 	if json.Unmarshal(body, &raw) != nil {
-		return 0, "", nil
+		return false, "", nil
 	}
 	v, ok := raw[expectedRequirementsMember]
 	if !ok {
-		return 0, "", nil
+		return false, "", nil
 	}
 	var expected []store.TrustRequirement
 	if err := json.Unmarshal(v, &expected); err != nil {
-		return http.StatusBadRequest, fmt.Sprintf("layer request: %s: %v", expectedRequirementsMember, err), nil
+		return true, fmt.Sprintf("layer request: %s: %v", expectedRequirementsMember, err), nil
 	}
 	if layer.TrustPolicyEqual(store.LayerConfig{TrustRequirements: expected}, store.LayerConfig{TrustRequirements: cfg.TrustRequirements}) {
-		return 0, "", nil
+		return true, "", nil
 	}
-	return http.StatusConflict, fmt.Sprintf("the trust requirements of layer %s changed since the client read them; read the layer again and repeat the update", cfg.ID),
-		map[string]any{"constraint": "trust_requirements_changed"}
+	return true, trustRequirementsChangedMessage(cfg.ID), trustRequirementsChangedDetails()
+}
+
+// trustRequirementsChangedMessage is the refusal of an update whose
+// expected trust requirements the layer no longer stores.
+func trustRequirementsChangedMessage(id string) string {
+	return fmt.Sprintf("the trust requirements of layer %s changed since the client read them; read the layer again and repeat the update", id)
+}
+
+// trustRequirementsChangedDetails is the details object of that refusal.
+func trustRequirementsChangedDetails() map[string]any {
+	return map[string]any{"constraint": "trust_requirements_changed"}
 }
 
 // carried reports whether the body carried a trust policy member.

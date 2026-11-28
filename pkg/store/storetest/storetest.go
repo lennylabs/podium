@@ -65,6 +65,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
 	t.Run("LayerRepoCredential", func(t *testing.T) { layerRepoCredential(t, factory(t)) })
 	t.Run("LayerTrustPolicy", func(t *testing.T) { layerTrustPolicy(t, factory(t)) })
+	t.Run("LayerWriteIfTrust", func(t *testing.T) { layerWriteIfTrust(t, factory(t)) })
 	t.Run("LayerAttestationRecord", func(t *testing.T) { layerAttestationRecord(t, factory(t)) })
 	t.Run("LayerAttestationMigration", func(t *testing.T) { layerAttestationMigration(t, factory(t)) })
 	t.Run("LayerBootstrapVisibility", func(t *testing.T) { layerBootstrapVisibility(t, factory(t)) })
@@ -1739,5 +1740,53 @@ func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// Spec: §7.3.1 (Patch semantics on the update body) — a layer write
+// conditional on the stored trust requirements applies while they equal the
+// expected ones, keeping the held visibility without a visibility condition
+// and writing it with one; it refuses a changed requirement list and a
+// changed visibility, writing nothing, and a row the store does not hold.
+func layerWriteIfTrust(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	alice := []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: "i", Identity: "alice@acme.com", AnySource: true, AnyRef: true}}}}
+	bob := []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: "i", Identity: "bob@acme.com", AnySource: true, AnyRef: true}}}}
+	base := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x", Groups: []string{"g"}, TrustMode: "warn", TrustRequirements: alice}
+	must(t, s.PutLayerConfig(ctx, base))
+	held, err := s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	next := base
+	next.Ref, next.Groups, next.TrustRequirements = "r1", nil, bob
+	var got []string
+	note := func(label string, err error) {
+		cfg, gerr := s.GetLayerConfig(ctx, "t", "L")
+		must(t, gerr)
+		got = append(got, fmt.Sprintf("%s: %v ref=%q groups=%v reqs=%s", label, err, cfg.Ref, cfg.Groups, cfg.TrustRequirements[0].Signers[0].Identity))
+	}
+	note("changed", s.PutLayerConfigIfTrust(ctx, next, bob, nil))
+	state := held.VisibilityState()
+	state.Visibility.Organization = true
+	note("visibility changed", s.PutLayerConfigIfTrust(ctx, next, alice, &state))
+	note("keep", s.PutLayerConfigIfTrust(ctx, next, alice, nil))
+	next.Ref, next.TrustRequirements = "r2", alice
+	held, err = s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	state = held.VisibilityState()
+	note("with visibility", s.PutLayerConfigIfTrust(ctx, next, bob, &state))
+	absent := next
+	absent.ID = "absent"
+	got = append(got, fmt.Sprint(errors.Is(s.PutLayerConfigIfTrust(ctx, absent, nil, nil), store.ErrNotFound)))
+	want := []string{
+		"changed: " + store.ErrTrustRequirementsChanged.Error() + ` ref="" groups=[g] reqs=alice@acme.com`,
+		"visibility changed: " + store.ErrVisibilityChanged.Error() + ` ref="" groups=[g] reqs=alice@acme.com`,
+		`keep: <nil> ref="r1" groups=[g] reqs=bob@acme.com`,
+		`with visibility: <nil> ref="r2" groups=[] reqs=alice@acme.com`,
+		"true",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("got:\n%s\nwant:\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 }
