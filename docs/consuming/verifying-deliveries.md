@@ -379,7 +379,8 @@ trust policy* states the format.
 - **Every record.** The ID of each sync-manifest entry and each resource path
   of a record meet the well-formed rule, and a server-source record answers the
   ID the sync requested. A failure is `materialize.request_mismatch` under every
-  mode.
+  mode. A record that the run's scope does not select is not written, and the
+  sync reports no refusal for it.
 - **Selected records under `warn` or `require`.** The attestation check runs on
   each record that the run's scope selects. Against a server registry it
   fetches the referenced bundles from `GET /v1/attestations/{digest}`.

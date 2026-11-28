@@ -196,11 +196,13 @@ type Result struct {
 	Skipped []string
 	// Dropped lists the artifacts a filesystem-source composition dropped
 	// under the §4.6 collision rule, the §4.1 unparseable-manifest rule, the
-	// §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3). Callers render each entry with its
-	// Code and Reason; a server source never reports one. An entry whose
-	// PreviousOutputKept is set is a §4.1 unparseable-manifest drop whose
-	// previous files and lock entries the run kept (a DryRun run reports what
-	// a real run would keep).
+	// §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3),
+	// and the selected records of either source that the §4.7.11
+	// well-formed rule, request binding, or attestation check refused
+	// (§7.5), each with its code and details.constraint. Callers render each
+	// entry with its Code and Reason. An entry whose PreviousOutputKept is
+	// set is a drop whose previous files and lock entries the run kept (a
+	// DryRun run reports what a real run would keep).
 	Dropped []layer.Drop
 	// Offline is set when a §7.4 offline-first sync could not reach the
 	// server-source registry and left the existing materialized output in
