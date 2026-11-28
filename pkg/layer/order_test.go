@@ -122,7 +122,7 @@ func checkPair(t *testing.T, a, b Visibility, callers []Identity, resolve GroupR
 	for _, c := range callers {
 		inA, inB := admits(a, c, resolve), admits(b, c, resolve)
 		got := admits(m, c, resolve)
-		if got && !(inA && inB) || exact && got != (inA && inB) {
+		if got && (!inA || !inB) || exact && got != (inA && inB) {
 			t.Fatalf("Meet(%+v, %+v) = %+v admits %+v: %v; the first admits it: %v, the second: %v", a, b, m, c, got, inA, inB)
 		}
 		if within && inA && !inB {
