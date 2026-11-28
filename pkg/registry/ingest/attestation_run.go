@@ -32,6 +32,9 @@ import (
 //
 // Spec: §4.7.11 (Ingest verification, Attestation record)
 func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS, all, kept []filesystem.ArtifactRecord, onWrite func()) (*attestationVerdict, bool, error) {
+	if err := a.readVisibility(files); err != nil {
+		return nil, false, err
+	}
 	res, failure, err := a.layerStep(ctx, files, all)
 	if err != nil {
 		if _, rerr := a.RecordSourceFailure(ctx, st, err, onWrite); rerr != nil {
@@ -48,6 +51,7 @@ func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS,
 	superseded, err := a.write(ctx, st, store.AttestationWrite{
 		Status: store.AttestationStatusOK, Dropped: len(v.drops),
 		Advance: true, Mark: res.time, Commit: res.commit, ReadMark: rec.Mark, ReadCommit: rec.Commit,
+		Visibility: a.recordVisibility(true),
 	}, onWrite)
 	if superseded || err != nil {
 		return nil, superseded, err
@@ -63,7 +67,8 @@ func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS,
 // Spec: §4.7.11 (Layer step, Attestation outcome)
 func (a *AttestationCycle) failedLayerStep(ctx context.Context, st store.Store, f *AttestationError, kept []filesystem.ArtifactRecord, onWrite func()) (*attestationVerdict, bool, error) {
 	f.Refusal = a.mode == layer.TrustModeRequire
-	if superseded, err := a.writeFailure(ctx, st, f, onWrite); superseded || err != nil {
+	w := store.AttestationWrite{Status: f.Code, Details: f.Details, Visibility: a.recordVisibility(false)}
+	if superseded, err := a.write(ctx, st, w, onWrite); superseded || err != nil {
 		return nil, superseded, err
 	}
 	a.emitFailed(f, a.reference)

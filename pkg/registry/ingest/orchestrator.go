@@ -209,7 +209,7 @@ func runClaimedCycle(ctx context.Context, st store.Store, provider source.Provid
 	// is invalid is refused after its claim and before its snapshot.
 	att := opts.Attestation.Cycle(cfg, claim)
 	if att != nil {
-		att.bind(opts.Clock, opts.AuditEmit)
+		att.bind(opts.Clock, opts.AuditEmit, opts.PublishEvent)
 		if superseded, err := att.CheckPolicy(ctx, st, onFirstWrite); superseded || err != nil {
 			return supersededResult(superseded, err)
 		}
