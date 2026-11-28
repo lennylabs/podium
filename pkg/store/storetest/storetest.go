@@ -60,6 +60,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("TenantUpdateWritesMutableFields", func(t *testing.T) { tenantUpdateWritesMutableFields(t, factory(t)) })
 	t.Run("TenantDeactivateIsSoft", func(t *testing.T) { tenantDeactivateIsSoft(t, factory(t)) })
 	t.Run("TenantTrustFloorRoundTrip", func(t *testing.T) { tenantTrustFloorRoundTrip(t, factory(t)) })
+	t.Run("TenantUpdateIfIsConditional", func(t *testing.T) { tenantUpdateIfIsConditional(t, factory(t)) })
 	t.Run("OperatorGrantsRoundTrip", func(t *testing.T) { operatorGrantsRoundTrip(t, factory(t)) })
 	t.Run("GetManifestNotFound", func(t *testing.T) { getManifestNotFound(t, factory(t)) })
 	t.Run("LayerConfigCRUD", func(t *testing.T) { layerConfigCRUD(t, factory(t)) })
@@ -1574,6 +1575,39 @@ func tenantTrustFloorRoundTrip(t *testing.T, s store.Store) {
 	must(t, err)
 	if !reflect.DeepEqual(got.TrustFloor, raised) || !reflect.DeepEqual(listed, raised) || !cleared.TrustFloor.IsZero() {
 		t.Errorf("trust floor round trip: get %+v, list %+v, cleared %+v; want %+v and then the zero floor", got.TrustFloor, listed, cleared.TrustFloor, raised)
+	}
+}
+
+// Spec: §7.3.3, §4.7.11 (Tenant trust floor) — UpdateTenantIf writes only
+// while the stored mutable record equals the one the caller read: a write
+// from a stale read is refused with ErrTenantChanged and stores nothing, so
+// it cannot write back a floor another write changed, and an unknown ID is
+// ErrTenantNotFound. A floor that breaks the floor rules the store decides
+// is refused by every tenant write.
+func tenantUpdateIfIsConditional(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	must(t, s.CreateTenant(ctx, store.Tenant{ID: "cas-org", Name: "CAS"}))
+	read, err := s.GetTenant(ctx, "cas-org")
+	must(t, err)
+	raised := read
+	raised.TrustFloor = store.TrustFloor{Mode: "require", RequireTypes: []string{"hook"}}
+	must(t, s.UpdateTenantIf(ctx, raised, read))
+	stale := read
+	stale.Quota.StorageBytes = 5
+	staleErr := s.UpdateTenantIf(ctx, stale, read)
+	missingErr := s.UpdateTenantIf(ctx, store.Tenant{ID: "cas-missing"}, store.Tenant{ID: "cas-missing"})
+	bad := raised
+	bad.TrustFloor = store.TrustFloor{Mode: "REQUIRE"}
+	badErrs := []error{s.UpdateTenant(ctx, bad), s.UpdateTenantIf(ctx, bad, raised),
+		s.CreateTenant(ctx, store.Tenant{ID: "cas-bad", TrustFloor: store.TrustFloor{RequireTypes: []string{"hook"}}})}
+	got, err := s.GetTenant(ctx, "cas-org")
+	must(t, err)
+	_, absentErr := s.GetTenant(ctx, "cas-bad")
+	if !errors.Is(staleErr, store.ErrTenantChanged) || !errors.Is(missingErr, store.ErrTenantNotFound) ||
+		badErrs[0] == nil || badErrs[1] == nil || badErrs[2] == nil || !errors.Is(absentErr, store.ErrTenantNotFound) ||
+		got.Quota.StorageBytes != 0 || got.TrustFloor.Mode != "require" {
+		t.Errorf("conditional tenant write: stale %v, missing %v, refusals %v, absent %v, stored %+v", staleErr, missingErr, badErrs, absentErr, got)
 	}
 }
 

@@ -138,3 +138,79 @@ func TestCheckTrustFloor_Rules(t *testing.T) {
 		t.Errorf("nil TrustFloors.Floor = %+v, %v, want the zero floor", f, err)
 	}
 }
+
+// Spec: §4.7.11 (Tenant trust floor) — an owner entry matches a
+// source_repository only on the path boundary: another owner with the same
+// prefix, a deeper path, the owner itself, an empty or dot segment, and a
+// case or escape variant do not match.
+func TestFloorSignerMatches_OwnerBoundary(t *testing.T) {
+	t.Parallel()
+	e := store.TrustFloorSigner{Issuer: ghIssuer, SourceRepositoryOwner: "https://github.com/acme"}
+	for _, r := range []string{
+		"https://github.com/acme-tools/x", "https://github.com/acme/x/y", "https://github.com/acme/",
+		"https://github.com/acme//x", "https://github.com/ACME/x", "https://github.com/acme", "https://github.com/acme/..",
+		"https://github.com/acme/.", "https://github.com/acme/x/", "https://github.com/acme%2Fx",
+	} {
+		s := store.TrustSigner{Issuer: ghIssuer, Identity: "x", SourceRepository: r, SourceRepositoryRef: "refs/heads/main"}
+		if layer.FloorSignerMatches(s, e) {
+			t.Errorf("owner entry matched %q", r)
+		}
+	}
+}
+
+// Spec: §4.7.11 (Tenant trust floor) — an entry that names the identity
+// and the ref of a shared signing workflow and no owner does not admit an
+// any_source signer of that identity, which would admit every repository
+// that calls the workflow.
+func TestCheckFloor_IdentityEntryRefusesAnySource(t *testing.T) {
+	t.Parallel()
+	id := "https://github.com/acme/shared/.github/workflows/sign.yml@refs/heads/main"
+	f := store.TrustFloor{Mode: layer.TrustModeRequire, Signers: []store.TrustFloorSigner{{Issuer: ghIssuer, Identity: id, SourceRepositoryRef: "refs/heads/main"}}}
+	cfg := store.LayerConfig{SourceType: "git", Repo: "https://github.com/evil/x", TrustMode: layer.TrustModeRequire,
+		TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: ghIssuer, Identity: id, AnySource: true, SourceRepositoryRef: "refs/heads/main"}}}}}
+	if err := layer.CheckTrustPolicy(cfg, nil, ""); err != nil {
+		t.Fatalf("policy refused: %v", err)
+	}
+	if r := layer.CheckFloor(cfg, f, ""); r == nil || r.Constraint != layer.ConstraintSignerOutsideFloor {
+		t.Errorf("an any_source signer under an identity entry: %v, want signer_outside_floor", r)
+	}
+	cfg.TrustRequirements[0].Signers[0].AnySource = false
+	cfg.TrustRequirements[0].Signers[0].SourceRepository = "https://github.com/acme/finance"
+	if r := layer.CheckFloor(cfg, f, ""); r != nil {
+		t.Errorf("a bound signer of that identity: %v, want nil", r)
+	}
+}
+
+// Spec: §4.7.11 (Tenant trust floor) — a floor mode the registry cannot
+// read fails closed: the floor source returns it as an error, and a check
+// that holds it refuses every layer, an explicit none included, rather than
+// read it as no minimum.
+func TestTrustFloor_UnreadableModeFailsClosed(t *testing.T) {
+	t.Parallel()
+	for _, m := range []string{"REQUIRE", " require", "Require"} {
+		f := store.TrustFloor{Mode: m}
+		if r := layer.CheckFloor(store.LayerConfig{TrustMode: layer.TrustModeNone}, f, ""); r == nil || r.Constraint != layer.ConstraintBelowFloor {
+			t.Errorf("floor mode %q admits an explicit none: %v", m, r)
+		}
+		src := layer.TrustFloors(func(context.Context, string) (store.TrustFloor, error) { return f, nil })
+		if _, err := src.Floor(context.Background(), "acme"); !errors.Is(err, layer.ErrTrustFloor) {
+			t.Errorf("floor source with mode %q = %v, want ErrTrustFloor", m, err)
+		}
+	}
+}
+
+// Spec: §4.7.11 (Tenant trust floor) — a floor that lists required types
+// under the mode none or no mode enforces nothing, because a layer under
+// none lists the type and verifies nothing, so it is refused; under warn
+// it is admitted.
+func TestCheckTrustFloor_RequireTypesNeedAMode(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"", layer.TrustModeNone} {
+		if err := layer.CheckTrustFloor(store.TrustFloor{Mode: mode, RequireTypes: []string{"hook"}}, nil); !errors.Is(err, layer.ErrTrustFloor) {
+			t.Errorf("require_types under mode %q = %v, want a refusal", mode, err)
+		}
+	}
+	if err := layer.CheckTrustFloor(store.TrustFloor{Mode: layer.TrustModeWarn, RequireTypes: []string{"hook"}}, nil); err != nil {
+		t.Errorf("require_types under warn = %v", err)
+	}
+}

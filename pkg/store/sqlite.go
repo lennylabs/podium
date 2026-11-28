@@ -262,6 +262,9 @@ func (s *SQLite) applySchema() error {
 // CreateTenant inserts a new tenant. Inserting an existing tenant ID
 // is a no-op (matches Memory).
 func (s *SQLite) CreateTenant(ctx context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	fm, ft, fs := floorColumns(t.TrustFloor)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO tenants
@@ -311,8 +314,67 @@ func (s *SQLite) ListTenants(ctx context.Context) ([]Tenant, error) {
 // ExposeScopePreview, active, the trust floor), preserving the ID and name.
 // An unknown ID returns ErrTenantNotFound.
 func (s *SQLite) UpdateTenant(ctx context.Context, t Tenant) error {
+	return s.updateTenant(ctx, t, nil)
+}
+
+// UpdateTenantIf writes t only while the stored mutable record equals
+// expect's, in one conditional statement.
+//
+// Spec: §7.3.3
+func (s *SQLite) UpdateTenantIf(ctx context.Context, t Tenant, expect Tenant) error {
+	return s.updateTenant(ctx, t, &expect)
+}
+
+// updateTenant writes t's mutable record, conditional on expect's when it
+// is not nil. The condition compares decoded values, so a floor column that
+// decodes to the record the caller read matches whatever its stored text
+// (such as "[]" or spaced JSON from a hand edit): a no-op update takes the
+// write lock on the row, the row is read and decoded under it, and the
+// write follows in the same transaction. An absent tenant is
+// ErrTenantNotFound and a changed record ErrTenantChanged.
+func (s *SQLite) updateTenant(ctx context.Context, t Tenant, expect *Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
+	if expect == nil {
+		return sqliteWriteTenant(ctx, s.db, t)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE tenants SET id = id WHERE id = ?`, t.ID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	held, err := scanTenant(tx.QueryRowContext(ctx, `SELECT `+tenantColumns+` FROM tenants WHERE id = ?`, t.ID))
+	if err != nil {
+		return err
+	}
+	if !sameMutableTenant(held, *expect) {
+		return ErrTenantChanged
+	}
+	if err := sqliteWriteTenant(ctx, tx, t); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// sqliteWriteTenant writes t's mutable record through x, and answers
+// ErrTenantNotFound when no row holds t's ID.
+func sqliteWriteTenant(ctx context.Context, x interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}, t Tenant) error {
 	fm, ft, fs := floorColumns(t.TrustFloor)
-	res, err := s.db.ExecContext(ctx, `
+	res, err := x.ExecContext(ctx, `
 		UPDATE tenants SET
 			storage_quota = ?, search_qps_quota = ?, materialize_rate_quota = ?,
 			audit_volume_quota = ?, max_user_layers = ?, expose_scope_preview = ?, active = ?,

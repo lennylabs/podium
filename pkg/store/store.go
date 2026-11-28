@@ -459,6 +459,15 @@ type Store interface {
 	// PATCH handler overlays the supplied fields onto the current row
 	// before calling it.
 	UpdateTenant(ctx context.Context, t Tenant) error
+	// UpdateTenantIf writes t's mutable record as UpdateTenant does, in one
+	// store write, only while the stored mutable record (quota, the
+	// scope-preview gate, the active state, and the trust floor) equals
+	// expect's. It returns ErrTenantChanged, writing nothing, when they
+	// differ, and ErrTenantNotFound for an unknown ID. The §7.3.3 PATCH
+	// writes through it, so a PATCH cannot write back a floor that another
+	// PATCH changed after the first one read the tenant. A floor that breaks
+	// TrustFloor.Validate is refused by every tenant write.
+	UpdateTenantIf(ctx context.Context, t Tenant, expect Tenant) error
 	// DeactivateTenant sets a tenant's Active flag false without deleting
 	// its data (§4.7.1 soft deactivation) and returns ErrTenantNotFound for
 	// an unknown ID.

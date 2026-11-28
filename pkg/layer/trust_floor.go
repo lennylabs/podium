@@ -20,12 +20,25 @@ var ErrTrustFloor = errors.New("tenant trust floor")
 // every caller fails closed on it.
 type TrustFloors func(ctx context.Context, tenantID string) (store.TrustFloor, error)
 
-// Floor returns the floor of tenantID, the zero floor for a nil source.
+// Floor returns the floor of tenantID, the zero floor for a nil source. A
+// floor that breaks a rule the store decides (store.TrustFloor.Validate),
+// such as a mode the registry cannot read, is returned as an error, so
+// every caller fails closed on it as on a floor it could not read rather
+// than read it as no minimum.
+//
+// Spec: §4.7.11 (Tenant trust floor)
 func (f TrustFloors) Floor(ctx context.Context, tenantID string) (store.TrustFloor, error) {
 	if f == nil {
 		return store.TrustFloor{}, nil
 	}
-	return f(ctx, tenantID)
+	floor, err := f(ctx, tenantID)
+	if err != nil {
+		return store.TrustFloor{}, err
+	}
+	if err := floor.Validate(); err != nil {
+		return store.TrustFloor{}, fmt.Errorf("%w of tenant %s cannot be read: %v", ErrTrustFloor, tenantID, err)
+	}
+	return floor, nil
 }
 
 // The §4.7.11 constraints of a policy that the tenant floor makes invalid,
@@ -85,8 +98,8 @@ func stricterMode(a, b string) string {
 //
 // Spec: §4.7.11 (Tenant trust floor)
 func CheckTrustFloor(f store.TrustFloor, instances TrustInstances) error {
-	if !ValidTrustMode(f.Mode) {
-		return floorRefusal("mode %q is not none, warn, or require", f.Mode)
+	if err := f.Validate(); err != nil {
+		return floorRefusal("%v", err)
 	}
 	seen := map[string]bool{}
 	for i, t := range f.RequireTypes {
@@ -122,6 +135,13 @@ func CheckTrustFloor(f store.TrustFloor, instances TrustInstances) error {
 //
 // Spec: §4.7.11 (Tenant trust floor, Policy that became invalid)
 func CheckFloor(cfg store.LayerConfig, f store.TrustFloor, def string) *FloorRefusal {
+	if !ValidTrustMode(f.Mode) {
+		// A floor mode the registry cannot read ranks below none and would
+		// admit every layer; TrustFloors.Floor refuses it, and this check
+		// fails closed for a caller that holds such a floor anyway.
+		return &FloorRefusal{Constraint: ConstraintBelowFloor, Message: fmt.Sprintf(
+			"the tenant trust floor's mode %q is not none, warn, or require", f.Mode)}
+	}
 	mode := ResolveTrustMode(cfg.TrustMode, f.Mode, def)
 	if modeRank(mode) > 0 && len(cfg.TrustRequirements) == 0 {
 		return &FloorRefusal{Constraint: ConstraintNoRequirements, Message: noRequirementText(cfg.TrustMode, mode, f.Mode, def)}
@@ -198,9 +218,12 @@ func ownerIDHint(entries []store.TrustFloorSigner, s store.TrustSigner) string {
 // public-good, and for each member the entry names, the signer's matching
 // member. An owner entry matches the signer's source_repository_owner, or a
 // source_repository that is the owner followed by / and one path segment.
-// A signer that sets any_source matches no entry that names an owner or an
-// owner identifier, and one that sets any_ref matches no entry that names a
-// ref. Every comparison is byte for byte.
+// A signer that sets any_source matches no entry that names an owner, an
+// owner identifier, or an identity, and one that sets any_ref matches no
+// entry that names a ref. The identity case holds because a shared signing
+// workflow is issued one identity in every repository that calls it, so an
+// any_source signer of it would admit content of any caller. Every
+// comparison is byte for byte.
 //
 // Spec: §4.7.11 (Tenant trust floor)
 func FloorSignerMatches(s store.TrustSigner, e store.TrustFloorSigner) bool {
@@ -217,7 +240,7 @@ func FloorSignerMatches(s store.TrustSigner, e store.TrustFloorSigner) bool {
 	if e.SourceRepositoryRef != "" && (s.AnyRef || s.SourceRepositoryRef != e.SourceRepositoryRef) {
 		return false
 	}
-	return e.Identity == "" || s.Identity == e.Identity
+	return e.Identity == "" || (!s.AnySource && s.Identity == e.Identity)
 }
 
 // ownerMatches reports whether s names owner: as its source_repository_owner,

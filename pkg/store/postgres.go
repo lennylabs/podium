@@ -544,6 +544,9 @@ func (p *Postgres) ResetForTest(ctx context.Context) error {
 // (§4.7.1) and writes the registry row under the per-request podium.org_id so
 // the row passes the row-level-security WITH CHECK.
 func (p *Postgres) CreateTenant(ctx context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	if _, err := p.ensureOrg(ctx, t.ID); err != nil {
 		return err
 	}
@@ -643,6 +646,27 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 // per-request podium.org_id so the row-level-security WITH CHECK passes. An
 // unknown ID returns ErrTenantNotFound.
 func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
+	return p.updateTenant(ctx, t, nil)
+}
+
+// UpdateTenantIf writes t only while the stored mutable record equals
+// expect's, in one conditional statement.
+//
+// Spec: §7.3.3
+func (p *Postgres) UpdateTenantIf(ctx context.Context, t Tenant, expect Tenant) error {
+	return p.updateTenant(ctx, t, &expect)
+}
+
+// updateTenant writes t's mutable record under the per-request
+// podium.org_id, conditional on expect's when it is not nil. The condition
+// compares decoded values: the row is read with SELECT ... FOR UPDATE and
+// decoded in the write's transaction, so a floor column that decodes to the
+// record the caller read matches whatever its stored text. An absent tenant
+// is ErrTenantNotFound and a changed record ErrTenantChanged.
+func (p *Postgres) updateTenant(ctx context.Context, t Tenant, expect *Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -650,6 +674,17 @@ func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, t.ID); err != nil {
 		return err
+	}
+	if expect != nil {
+		held, err := scanTenant(tx.QueryRowContext(ctx, `SELECT `+tenantColumns+` FROM public.tenants WHERE id = $1 FOR UPDATE`, t.ID))
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrTenantNotFound
+		case err != nil:
+			return err
+		case !sameMutableTenant(held, *expect):
+			return ErrTenantChanged
+		}
 	}
 	fm, ft, fs := floorColumns(t.TrustFloor)
 	res, err := tx.ExecContext(ctx, `

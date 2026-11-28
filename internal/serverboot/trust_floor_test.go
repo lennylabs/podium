@@ -9,9 +9,12 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/lennylabs/podium/internal/clock"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/store"
 	"github.com/lennylabs/podium/pkg/store/storetest"
@@ -66,13 +69,15 @@ func TestValidate_TrustFloorRefusals(t *testing.T) {
 		{"key unknown key", "{mod: warn}", "", `holds the key "mod"`},
 		{"key unknown signer key", "{signers: [{issuer: i, owner: o}]}", "", `trust_floor.signers[0] holds the key "owner"`},
 		{"key bad mode", "{mode: enforce}", "", `mode "enforce" is not none, warn, or require`},
+		{"key types without a mode", "{require_types: [hook]}", "", "a floor that requires types sets the mode warn or require"},
+		{"file types under none", "", `{"mode":"none","require_types":["hook"]}`, "a floor that requires types sets the mode warn or require"},
 		{"key unknown instance", "{signers: [{issuer: i, instance: acme-sigstore}]}", "", `names the Sigstore instance "acme-sigstore"`},
 		{"key not decodable", "{signers: {issuer: i}}", "", "registry.yaml trust_floor"},
 		{"file absent", "", missing, "read:"},
 		{"file null", "", "null", "does not hold a JSON object"},
 		{"file not JSON", "", "{mode", "invalid character"},
 		{"file member case", "", `{"Mode":"warn"}`, `member "Mode" is not one of`},
-		{"file unknown type", "", `{"require_types":["hooks"]}`, `require_types[0] "hooks" is not an artifact type`},
+		{"file unknown type", "", `{"mode":"warn","require_types":["hooks"]}`, `require_types[0] "hooks" is not an artifact type`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := "registry:\n  trust_floor: " + tc.key + "\n"
@@ -196,8 +201,13 @@ func TestTenantFloorChangeHook(t *testing.T) {
 		read++
 		return store.TrustFloor{}, errors.New("floor refused")
 	}}
-	tenantFloorChangeHook(mem, att, nil, nil)(ctx, "acme", "olivia@acme.com")
-	tenantFloorChangeHook(listFailStore{mem}, att, nil, nil)(ctx, "acme", "olivia@acme.com")
+	clk := clock.NewFrozen(time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC))
+	sink, err := audit.OpenFile(filepath.Join(t.TempDir(), "audit.log"), audit.OpenOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tenantFloorChangeHook(mem, att, sink, nil, clk)(ctx, "acme", "olivia@acme.com")
+	tenantFloorChangeHook(listFailStore{mem}, att, nil, nil, clk)(ctx, "acme", "olivia@acme.com")
 	if read != 1 {
 		t.Errorf("the hook read the floor %d times, want once for the one layer", read)
 	}

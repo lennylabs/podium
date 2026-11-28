@@ -318,17 +318,17 @@ Changing the policy of an admin-defined layer requires the tenant `admin` role, 
 
 ### Tenant trust floor
 
-A tenant trust floor is a minimum that the trust policy of every layer of a tenant meets, a user-defined layer included. It keeps a tenant member from registering a layer that serves unsigned hooks, or hooks that a signer of the member's own choosing signed. A floor has three parts:
+A tenant trust floor is a minimum that the trust policy of every layer of a tenant meets, a user-defined layer included. A floor with the mode `warn` or `require` and the required type `hook` keeps a tenant member from registering a layer that serves unsigned hooks, and a signer list keeps the member from choosing the signer of those hooks. A floor has three parts:
 
 | Part | Meaning |
 |:--|:--|
 | mode | `none`, `warn`, `require`, or empty. A layer's resolved mode is not below it, and an empty `trust_mode` resolves to at least it. |
-| required types | Artifact types every layer lists in its `trust_require_types`. |
+| required types | Artifact types every layer lists in its `trust_require_types`. A floor that lists a type sets the mode `warn` or `require`, because a layer under `none` verifies nothing and its list enforces nothing. |
 | signers | Admissible signer entries. When the list is not empty, every signer of every requirement of a layer matches an entry. |
 
-An entry has an `issuer` and optionally an `instance`, a `source_repository_owner` or a `source_repository_owner_id`, a `source_repository_ref`, and an `identity`. A layer's signer matches an entry when the issuers are equal, the instances are equal (an entry with no `instance` admits only signers of `public-good`), and the signer names each member the entry names: the owner, or a `source_repository` directly under the owner, so `https://github.com/acme-tools/x` does not match the owner `https://github.com/acme`; the same owner identifier; the same ref; and the same identity. A signer with `any_source` matches no entry that names an owner, and one with `any_ref` matches no entry that names a ref. A [derived source binding](#derived-source-binding) names the repository and no owner identifier, so it matches an entry that names the owner and not one that names the owner identifier; such a signer names `--trust-source-owner-id`.
+An entry has an `issuer` and optionally an `instance`, a `source_repository_owner` or a `source_repository_owner_id`, a `source_repository_ref`, and an `identity`. A layer's signer matches an entry when the issuers are equal, the instances are equal (an entry with no `instance` admits only signers of `public-good`), and the signer names each member the entry names: the owner, or a `source_repository` directly under the owner, so `https://github.com/acme-tools/x` does not match the owner `https://github.com/acme`; the same owner identifier; the same ref; and the same identity. A signer with `any_source` matches no entry that names an owner, an owner identifier, or an identity, and one with `any_ref` matches no entry that names a ref. A [derived source binding](#derived-source-binding) names the repository and no owner identifier, so it matches an entry that names the owner and not one that names the owner identifier; such a signer names `--trust-source-owner-id`.
 
-An entry with an owner and no ref admits any branch of any repository of that owner. Name the ref in each entry, and the identity of a shared signing workflow where the tenant has one.
+An entry with an owner and no ref admits any branch of any repository of that owner. An entry with no owner and no owner identifier admits the repositories of every owner: an entry that names only the identity of a public reusable signing workflow admits a signer bound to any repository that calls that workflow. Name the owner or the owner identifier and the ref in each entry, and the identity of a shared signing workflow where the tenant has one.
 
 On a multi-tenant registry the floor is part of the tenant object, in the members `trust_floor_mode`, `trust_floor_require_types`, and `trust_floor_signers`, which only the instance operator sets through [`PATCH /v1/admin/tenants/{id}`](../../reference/http-api#tenant-management). The per-tenant `admin` role cannot change it. The response lists in `invalid_layers` each layer of the tenant that the new floor makes invalid, with the rule it breaks:
 
@@ -359,7 +359,7 @@ registry:
         source_repository_ref: refs/heads/main
 ```
 
-A floor that does not parse, holds a member of another name, names a mode other than `none`, `warn`, or `require`, an unknown or repeated type, an entry with no issuer or with both owner members, or an instance that `sigstore.instances` does not configure, refuses the start with `config.invalid_layer_trust`, and through the tenant endpoint it is refused with `registry.invalid_argument`. A multi-tenant registry refuses to start when either setting is set.
+A floor that does not parse, holds a member of another name, names a mode other than `none`, `warn`, or `require`, an unknown or repeated type, required types under a mode below `warn`, an entry with no issuer or with both owner members, or an instance that `sigstore.instances` does not configure, refuses the start with `config.invalid_layer_trust`, and through the tenant endpoint it is refused with `registry.invalid_argument`. A multi-tenant registry refuses to start when either setting is set. A stored floor that breaks one of these rules, such as a tenant row edited by hand, counts as a floor the registry cannot read: the cycles of the tenant's layers fail, and loads of their verified versions answer `registry.unavailable`, until the floor is repaired.
 
 The floor applies at each point a policy is checked:
 
