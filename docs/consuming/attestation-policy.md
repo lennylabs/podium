@@ -120,12 +120,21 @@ names it, here `~/.podium/`. In a workspace `sync.yaml`, the server ignores
 `trusted_root_file`, `root_max_age`, and `overlay` and names them on standard
 error.
 
+The user's file and the machine file accept only the keys of the `sync.yaml`
+schema: `defaults`, `listing_budgets`, `profiles`, and `targets` at the top
+level, and the documented keys under `defaults`. An unknown top-level key, or
+an unknown key under `defaults`, refuses the start and names the key, so a
+block written as a top-level `attestation:` or as `defaults.attestations:` is
+not dropped without an error.
+
 ### The account home
 
 `podium-mcp` reads `~/.podium/sync.yaml`, including `defaults.registry`, from
 the home directory that the account database records for the user of the
 process. It does not read `HOME`, `USERPROFILE`, or an `XDG_*` variable, which
-a project `.mcp.json` can set. When the account database has no entry for the
+a project `.mcp.json` can set. The Linux release binaries read `/etc/passwd`
+for the lookup, so a user that only a directory service lists has no account
+home for `podium-mcp`. When the account database has no entry for the
 user, as in a container that runs under an unlisted user ID, the server reads
 no user file, names the failure on standard error, and adds
 `config.attestation_policy_unavailable (constraint user_home)` to the
@@ -146,7 +155,9 @@ can change it:
   does not read ACLs.
 - On Windows, `SYSTEM` or `Administrators` owns the `podium` folder and the
   file, their DACLs grant write rights only to `SYSTEM`, `Administrators`, and
-  `TrustedInstaller`, and the folder's DACL is protected from inheritance.
+  `TrustedInstaller`, and the folder's DACL is protected from inheritance. An
+  inherit-only entry that grants a write right to another SID also fails the
+  check, although it grants nothing on the file itself; remove such entries.
 
 A machine file that exists and fails the check is ignored, named on standard
 error, and reported as `config.attestation_policy_unavailable (constraint
@@ -174,15 +185,25 @@ that `root_max_age` sets (90 days by default). `PODIUM_ATTESTATION_TRUSTED_ROOT_
 `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT` apply only to the rules of
 repository-source files, so a repository cannot name a certificate authority
 it holds for a rule the user wrote. With no account home, the server keeps
-the refreshed root in memory and writes nothing.
+the refreshed root in memory and writes nothing. The copy on disk is used
+only when the TUF metadata cached beside it verifies it.
+
+Each bundle fetch has a deadline of 30 seconds, which
+`PODIUM_ATTESTATION_FETCH_TIMEOUT` changes.
 
 ## Start refusals
 
 `podium-mcp` refuses to start with `config.attestation_policy_unavailable`
-when a policy file that a source names cannot be read or is invalid, when a
-`sync.yaml` it reads does not parse or holds a `defaults.attestation` block
-with an unknown key or a value of the wrong type, when the machine file passes
+when a policy file that a source names cannot be read or is invalid, when
+`~/.podium/sync.yaml` does not parse or holds an unknown key, when a
+workspace `sync.yaml` in its working directory that the user owns does not
+parse, when a `sync.yaml` holds a `defaults.attestation` block with an unknown
+key or a value of the wrong type, when the machine file passes
 its check and does not parse, and, under a policy above `none`, when
 `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` cannot be loaded or a root setting is
-not a valid duration. [Error codes](../reference/error-codes#materialize) lists
+not a valid duration. A workspace file of an ancestor directory, or one that
+another user owns, that does not parse is ignored and reported as
+`config.attestation_policy_unavailable (constraint workspace_file)` in each
+load result, because another local user can place such a file, as in
+`/tmp/.podium/`. [Error codes](../reference/error-codes#materialize) lists
 the refusals of a load.
