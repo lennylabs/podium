@@ -82,8 +82,13 @@ func TestReadMachineConfig_ProductionTrustsRootAlone(t *testing.T) {
 	}
 	dir, _ := machineDir(t)
 	writeMachine(t, dir, 0o644)
+	// The production walk refuses at the first untrusted directory, which
+	// on Linux is the world-writable /tmp above the test's directory and on
+	// macOS the user's own temporary directory; either reason fails closed.
 	_, err := ReadMachineConfig(MachineFileOptions{Dir: dir})
-	wantUnsafe(t, err, "not by root")
+	if !errors.Is(err, ErrMachineFileUnsafe) || !strings.Contains(err.Error(), "not by root") && !strings.Contains(err.Error(), "can write the directory") {
+		t.Fatalf("err = %v, want ErrMachineFileUnsafe for an owner or a writable directory", err)
+	}
 	if d, err := MachineConfigDir(); err != nil || d != "/etc/podium" {
 		t.Errorf("MachineConfigDir = %q, %v", d, err)
 	}
