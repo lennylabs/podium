@@ -459,6 +459,7 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		Deprecated:         d.Deprecated,
 		ReplacedBy:         d.ReplacedBy,
 		DeprecationWarning: d.DeprecationWarning,
+		ETag:               d.ETag,
 	}
 	// A skill's verbatim SKILL.md is bucket-level, because the authored
 	// package the content hash names carries it.
@@ -525,6 +526,7 @@ func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 		Deprecated:         optional("deprecated") == "true",
 		ReplacedBy:         optional("replaced_by"),
 		DeprecationWarning: optional("deprecation_warning"),
+		ETag:               optional("etag"),
 	}, nil
 }
 

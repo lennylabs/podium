@@ -433,7 +433,7 @@ func TestDeliver_Base64InlineResourceDecoded(t *testing.T) {
 	s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyNever})
 	raw := []byte{0x00, 0x01, 0x02, 0xff} // binary payload
 	body := base64Body(t, raw, base64.StdEncoding.EncodeToString(raw), nil)
-	out := s.deliverFreshLoad([]byte(body), map[string]any{"id": "team/x", "destination": dest}, time.Now())
+	out := s.deliverFreshLoad([]byte(body), "", map[string]any{"id": "team/x", "destination": dest}, time.Now())
 	m := out.(map[string]any)
 	if _, isErr := m["error"]; isErr {
 		t.Fatalf("base64 delivery failed: %v", m)
