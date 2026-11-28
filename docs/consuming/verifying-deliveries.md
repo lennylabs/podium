@@ -323,11 +323,12 @@ defaults:
     pin_signers: true
 ```
 
-- `trusted_root_file`, `root_max_age`, and `overlay` take effect from
-  `~/.podium/sync.yaml` alone. A workspace file that sets one of them is named
-  on standard error, and the key is ignored.
-- `pin_signers` takes effect when any file sets it to `true`. `layer_roots`
-  merges by layer ID, and the higher-precedence file wins for one ID.
+- `trusted_root_file`, `root_max_age`, `overlay`, and `layer_roots` take
+  effect from `~/.podium/sync.yaml` alone. A workspace file that sets one of
+  them is named on standard error, and the key is ignored. A repository that
+  could map a layer to another root would make the signed content of that root
+  meet a user's `require`.
+- `pin_signers` takes effect when any file sets it to `true`.
 - A block that is not a mapping, a key of another name, and a value of another
   type refuse the run with `config.attestation_policy_unavailable` and exit
   status 2. So does a policy file that does not load, and
@@ -379,7 +380,8 @@ trust policy* states the format.
 - **Every record.** The ID of each sync-manifest entry and each resource path
   of a record meet the well-formed rule, and a server-source record answers the
   ID the sync requested. A failure is `materialize.request_mismatch` under every
-  mode. A record that the run's scope does not select is not written, and the
+  mode. A sync manifest that lists one ID more than once has every record of
+  that ID refused with the constraint `duplicate_id`. A record that the run's scope does not select is not written, and the
   sync reports no refusal for it.
 - **Selected records under `warn` or `require`.** The attestation check runs on
   each record that the run's scope selects. Against a server registry it
@@ -437,15 +439,21 @@ A run names each artifact whose signers differ from those of its prior lock
 entries on standard error, `--dry-run` included. With `pin_signers: true`, such
 a change refuses the record with `materialize.attestation_untrusted` and the
 constraint `pinned_signer`. To accept a new signer, remove the artifact's
-entries from the lock, or run one sync without `pin_signers`.
+entries from the lock, or run one sync without `pin_signers`. The lock lies in
+the target, which a workspace can commit, so every party who can push to the
+repository can edit it. Pinning therefore constrains a change among the
+signers that the policy already accepts; a signer that the policy does not
+accept is refused by the attestation check whatever the lock records.
 
 ### `podium verify`
 
 `podium verify <artifact>` reports the request binding and the attestation
 check on standard output, apart from the delivery signature result on
-standard error. It loads the policy that `podium sync` loads, and it exits with
-status 1 when the binding or the delivery signature fails or the check refuses
-the record under `require`.
+standard error. It loads the policy that `podium sync` loads before anything
+else, so a policy that does not load exits with status 2. It exits with status
+1 when the response does not decode, the binding or the delivery signature
+fails, or the check refuses the record under `require`. Under `none` it reports
+that the attestation check did not run, after a binding that passed.
 
 ```text
 request binding: ok
