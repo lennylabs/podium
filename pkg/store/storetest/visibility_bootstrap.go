@@ -185,3 +185,43 @@ func layerVisibilityKeptAndConditional(t *testing.T, s store.Store) {
 		t.Errorf("visibility writes:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
 	}
 }
+
+// layerWriteConditionalOnVisibility covers PutLayerConfigIf: a write whose
+// expected visibility members the row no longer holds writes nothing, not
+// even the members outside the visibility, and one that matches writes the
+// whole row.
+//
+// Spec: §7.3.1, §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility)
+func layerWriteConditionalOnVisibility(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	row := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x", Groups: []string{"g"}, VisibilitySource: store.VisibilitySourceDeclared}
+	must(t, s.PutLayerConfig(ctx, row))
+	held, err := s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	stale := held.VisibilityState()
+	stale.Visibility = store.LayerVisibility{Organization: true}
+	next := row
+	next.LocalPath, next.Groups, next.Users = "/y", []string{"g"}, []string{"bob"}
+	var got []string
+	put := func(note string, cfg store.LayerConfig, expect store.VisibilityState) {
+		err := s.PutLayerConfigIf(ctx, cfg, expect)
+		cur, rerr := s.GetLayerConfig(ctx, "t", "L")
+		must(t, rerr)
+		got = append(got, fmt.Sprintf("%s changed=%v notfound=%v %s %s", note, errors.Is(err, store.ErrVisibilityChanged), errors.Is(err, store.ErrNotFound), cur.LocalPath, visibilityView(cur)))
+	}
+	put("stale", next, stale)
+	put("held", next, held.VisibilityState())
+	absent := next
+	absent.ID = "absent"
+	put("absent", absent, held.VisibilityState())
+	want := strings.Join([]string{
+		`stale changed=true notfound=false /x false/false/["g"]/[] declared -`,
+		`held changed=false notfound=false /y false/false/["g"]/["bob"] declared -`,
+		`absent changed=false notfound=true /y false/false/["g"]/["bob"] declared -`,
+	}, "\n")
+	if strings.Join(got, "\n") != want {
+		t.Errorf("conditional writes:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+}
