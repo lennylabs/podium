@@ -19,39 +19,21 @@ import (
 //
 // Spec: §4.6 (Fallback list)
 type layerFallback struct {
-	// mu guards next and lists. next numbers the reads in the order they
-	// began, and each entry keeps the number of the read that wrote it, so a
-	// read that began earlier and finished later does not replace the list
-	// of a newer read.
+	// mu guards lists. A read replaces its tenant's list under mu once the
+	// store has answered, so the list holds the rows of the read whose answer
+	// was recorded last, whatever order the reads began in: a read that
+	// began earlier and read the rows after a narrowing replaces the list of
+	// a read that began later and read them before it.
 	mu    sync.Mutex
-	next  uint64
-	lists map[string]fallbackEntry
+	lists map[string][]layer.Layer
 }
 
-// fallbackEntry is the list of one tenant and the number of the read that
-// wrote it.
-type fallbackEntry struct {
-	seq    uint64
-	layers []layer.Layer
-}
-
-// begin numbers a read of the layer rows that is about to start.
-func (f *layerFallback) begin() uint64 {
+// replace makes list, the rows a read of tenant's layers returned, the
+// fallback of tenant. The caller calls it after the store answered.
+func (f *layerFallback) replace(tenant string, list []layer.Layer) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.next++
-	return f.next
-}
-
-// replace makes list the fallback of tenant, unless a read that began after
-// seq has already replaced it.
-func (f *layerFallback) replace(tenant string, seq uint64, list []layer.Layer) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if e, ok := f.lists[tenant]; ok && e.seq > seq {
-		return
-	}
-	f.lists[tenant] = fallbackEntry{seq: seq, layers: cloneLayers(list)}
+	f.lists[tenant] = cloneLayers(list)
 }
 
 // load returns the fallback of tenant: a copy of its list, or an empty list
@@ -60,7 +42,7 @@ func (f *layerFallback) replace(tenant string, seq uint64, list []layer.Layer) {
 func (f *layerFallback) load(tenant string) []layer.Layer {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return cloneLayers(f.lists[tenant].layers)
+	return cloneLayers(f.lists[tenant])
 }
 
 // cloneLayers copies a layer list and the visibility lists of its layers. The
@@ -90,8 +72,8 @@ func (r *Registry) WithLayerRows(ctx context.Context, tenant string) (*Registry,
 	if err != nil {
 		return nil, fmt.Errorf("core: read the layers of tenant %s: %w", tenant, err)
 	}
-	r.fallback = &layerFallback{lists: map[string]fallbackEntry{}}
-	r.fallback.replace(tenant, r.fallback.begin(), list)
+	r.fallback = &layerFallback{lists: map[string][]layer.Layer{}}
+	r.fallback.replace(tenant, list)
 	return r, nil
 }
 

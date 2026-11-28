@@ -192,3 +192,54 @@ func TestBootstrapLayerPath_StartVisibilityUnderWarn(t *testing.T) {
 		t.Fatalf("events:\n%s\nwant:\n%s", strings.Join(events, "\n"), strings.Join(want, "\n"))
 	}
 }
+
+// racingVisibility lets another writer change the row's visibility before
+// the start's conditional write, races times over, as a cycle of another
+// replica can.
+type racingVisibility struct {
+	store.Store
+	races  int
+	narrow func()
+}
+
+func (s *racingVisibility) SetLayerVisibilityIf(ctx context.Context, tenantID, layerID string, expect, next store.VisibilityState) error {
+	if s.races > 0 {
+		s.races--
+		s.narrow()
+	}
+	return s.Store.SetLayerVisibilityIf(ctx, tenantID, layerID, expect, next)
+}
+
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Start write) — the
+// start write changes the visibility members only while they hold the values
+// it read: a narrowing another writer lands between its read and its write
+// is read again and kept, and a row that keeps changing fails the start
+// rather than be written blind.
+func TestStartVisibility_ConditionalOnTheMembersItRead(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := newMemoryStoreWithTenant(t)
+	if err := mem.PutLayerConfig(ctx, store.LayerConfig{TenantID: "default", ID: "team", SourceType: "local", Public: true, VisibilitySource: "declared"}); err != nil {
+		t.Fatal(err)
+	}
+	narrowed := 0
+	st := &racingVisibility{Store: mem, races: 1}
+	st.narrow = func() {
+		narrowed++
+		cur, _ := mem.GetLayerConfig(ctx, "default", "team")
+		next := cur.VisibilityState()
+		next.Visibility = store.LayerVisibility{Users: []string{fmt.Sprintf("alice-%d", narrowed)}}
+		if err := mem.SetLayerVisibilityIf(ctx, "default", "team", cur.VisibilityState(), next); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg := store.LayerConfig{TenantID: "default", ID: "team", SourceType: "local", LocalPath: "/x", Order: 3}
+	got, _, err := startVisibility(ctx, st, cfg, layer.TrustModeRequire, directoryVisibility{layer.Visibility{Public: true}, true}, layer.Visibility{}, nil)
+	if err != nil || rowView(got) != "false/false/[]/[alice-1] declared true/false/[]/[]" || got.Order != 3 {
+		t.Fatalf("after one race: %s order %d, %v", rowView(got), got.Order, err)
+	}
+	st.races = startVisibilityRetries
+	if _, _, err := startVisibility(ctx, st, cfg, layer.TrustModeRequire, directoryVisibility{layer.Visibility{Users: []string{"bob"}}, true}, layer.Visibility{}, nil); err == nil || !strings.Contains(err.Error(), "changed during each") {
+		t.Fatalf("a row that keeps changing: %v", err)
+	}
+}

@@ -8,20 +8,24 @@ import (
 	"github.com/lennylabs/podium/pkg/store"
 )
 
-// TestLayerFallback_OlderReadDoesNotReplaceANewerOne covers two reads that
-// finish out of order: the read that began first does not replace the list
-// a newer read wrote, and a loaded list is a copy.
+// TestLayerFallback_TheLastRecordedAnswerWins covers two reads that began
+// in one order and were answered in the other: the read whose answer was
+// recorded last holds the list, so a read that began earlier and read the
+// rows after a cycle narrowed them is not replaced by the older rows of a
+// read that began later. A loaded list is a copy, and a tenant with no read
+// has an empty list.
 //
 // Spec: §4.6 (Fallback list)
-func TestLayerFallback_OlderReadDoesNotReplaceANewerOne(t *testing.T) {
+func TestLayerFallback_TheLastRecordedAnswerWins(t *testing.T) {
 	t.Parallel()
-	f := &layerFallback{lists: map[string]fallbackEntry{}}
-	older, newer := f.begin(), f.begin()
-	f.replace("acme", newer, []layer.Layer{{ID: "narrow", Visibility: layer.Visibility{Groups: []string{"g"}}}})
-	f.replace("acme", older, []layer.Layer{{ID: "wide", Visibility: layer.Visibility{Public: true}}})
+	f := &layerFallback{lists: map[string][]layer.Layer{}}
+	// The read that began later answered first, with the rows before the
+	// narrowing; the read that began earlier answered after it.
+	f.replace("acme", []layer.Layer{{ID: "l", Visibility: layer.Visibility{Public: true}}})
+	f.replace("acme", []layer.Layer{{ID: "l", Visibility: layer.Visibility{Groups: []string{"g"}}}})
 	got := f.load("acme")
-	if len(got) != 1 || got[0].ID != "narrow" {
-		t.Fatalf("list = %+v, want the newer read's", got)
+	if len(got) != 1 || got[0].Visibility.Public || got[0].Visibility.Groups[0] != "g" {
+		t.Fatalf("list = %+v, want the narrowed rows of the last answer", got)
 	}
 	got[0].Visibility.Groups[0] = "edited"
 	if again := f.load("acme"); again[0].Visibility.Groups[0] != "g" {

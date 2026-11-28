@@ -1758,7 +1758,12 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)})
 		return
 	}
-	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
+	// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that
+	// keep the visibility) — an update that carries no visibility member
+	// keeps the stored visibility members, so a cycle's narrowing that
+	// landed after the read above stays in force.
+	stored, err := e.writeUpdatedLayer(r.Context(), cfg, vis.carried())
+	if err != nil {
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
@@ -1766,7 +1771,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// auditable layer.config_changed / layer.user_registered event.
 	e.emitLayerEvent(r, before, cfg, "update", trustEventFields(before, cfg))
 	e.afterTrustWrite(r, before, true, cfg)
-	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
+	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(before, cfg)...)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -2339,7 +2344,10 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	for i, id := range req.Order {
 		l := byID[id]
 		l.Order = (i + 1) * 10
-		if err := e.store.PutLayerConfig(r.Context(), l); err != nil {
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes
+		// that keep the visibility) — the row was read above, so the write
+		// keeps the stored visibility members a cycle may have changed since.
+		if err := e.store.PutLayerConfigKeepingVisibility(r.Context(), l); err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}

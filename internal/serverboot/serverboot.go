@@ -527,9 +527,6 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if err != nil {
 			return nil, err
 		}
-		if err := st.PutLayerConfig(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
-		}
 		// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
 		// layer as every cycle does, so it and a cycle of the same layer on
 		// another replica supersede each other by claim order.

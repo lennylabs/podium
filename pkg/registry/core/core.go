@@ -445,12 +445,11 @@ func (r *Registry) resolveLayers(ctx context.Context) []layer.Layer {
 		}
 		return out
 	}
-	seq := r.fallback.begin()
 	out, err := r.layerConfigs(ctx, tenant)
 	if err != nil {
 		return r.fallback.load(tenant)
 	}
-	r.fallback.replace(tenant, seq, out)
+	r.fallback.replace(tenant, out)
 	return out
 }
 
