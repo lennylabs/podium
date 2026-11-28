@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -717,6 +718,8 @@ func layerConfigEqual(a, b store.LayerConfig) bool {
 		a.Organization == b.Organization &&
 		slices.Equal(a.Groups, b.Groups) &&
 		slices.Equal(a.Users, b.Users) &&
+		a.VisibilitySource == b.VisibilitySource &&
+		reflect.DeepEqual(a.VisibilityPending, b.VisibilityPending) &&
 		a.WebhookSecret == b.WebhookSecret &&
 		a.GitProvider == b.GitProvider &&
 		a.LastIngestedRef == b.LastIngestedRef &&
@@ -1745,6 +1748,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.Owner = patch.Owner
 	}
 	cfg = vis.applyTo(cfg)
+	cfg = declareUpdatedVisibility(before, cfg)
 	cfg = trustP.applyTo(cfg)
 	// spec: §7.3.1 — a patch that stores nothing writes no record and records
 	// no §8.1 event, so a body restating what the layer holds is answered 200
@@ -1754,15 +1758,25 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)})
 		return
 	}
-	if err := e.store.PutLayerConfig(r.Context(), cfg); err != nil {
+	// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that
+	// keep the visibility) — an update that carries no visibility member
+	// keeps the stored visibility members, so a cycle's narrowing that
+	// landed after the read above stays in force.
+	stored, prior, err := e.writeUpdatedLayer(r.Context(), before, cfg, vis)
+	switch {
+	case errors.Is(err, errVisibilityContended):
+		writeError(w, http.StatusServiceUnavailable, "registry.unavailable", err.Error())
+		return
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
 	// spec §8.1: a config mutation (including a secret rotation) is an
-	// auditable layer.config_changed / layer.user_registered event.
-	e.emitLayerEvent(r, before, cfg, "update", trustEventFields(before, cfg))
+	// auditable layer.config_changed / layer.user_registered event. It
+	// records the visibility written against the visibility it replaced.
+	e.emitLayerEvent(r, prior, stored, "update", trustEventFields(before, cfg))
 	e.afterTrustWrite(r, before, true, cfg)
-	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
+	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -2335,7 +2349,10 @@ func (e *LayerEndpoint) reorder(w http.ResponseWriter, r *http.Request) {
 	for i, id := range req.Order {
 		l := byID[id]
 		l.Order = (i + 1) * 10
-		if err := e.store.PutLayerConfig(r.Context(), l); err != nil {
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes
+		// that keep the visibility) — the row was read above, so the write
+		// keeps the stored visibility members a cycle may have changed since.
+		if err := e.store.PutLayerConfigKeepingVisibility(r.Context(), l); err != nil {
 			writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 			return
 		}

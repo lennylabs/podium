@@ -464,9 +464,11 @@ func seedOperatorAdmins(ctx context.Context, st store.Store, operators []string)
 //
 // vis is the deployment default visibility (§4.6 / §13.10): public for
 // a no-identity-provider standalone, otherwise the configured default.
-// It applies to a layer that declares no visibility of its own. A layer
-// that declares a non-empty visibility in its .layer-config (§4.6)
-// overrides vis with the declared value.
+// It is the directory visibility of a layer that declares no visibility of
+// its own. The start write applies the directory visibility under the
+// §4.7.11 rules of a path-bootstrapped layer (startVisibility), and each
+// returned layer carries the visibility its row holds after its startup
+// ingest.
 func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Visibility, startOrder int, allowPerDomain bool, resourcePut ingest.ResourcePutFunc, rejectAtOrAbove manifest.Sensitivity, signer ingest.SignerFunc, useVectorOutbox bool, collocatedVec collocatedVectorIngest, enforceSandbox bool, hostSandboxes []string, trust bootstrapTrust) ([]layer.Layer, error) {
 	if layerPath == "" {
 		return []layer.Layer{}, nil
@@ -479,20 +481,20 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 	layers := make([]layer.Layer, 0, len(fsReg.Layers))
 	for i, l := range fsReg.Layers {
 		order := startOrder + i + 1
-		// §4.6: honor per-layer visibility declared in the layer's
-		// .layer-config. filesystem.Open parses it into l.Visibility (the
-		// two Visibility types carry identical fields, so the conversion is
-		// a direct copy). A non-empty declaration overrides the bootstrap
-		// default; a layer that declares nothing (no .layer-config, or a
-		// present file whose visibility block is empty) falls back to vis.
-		// This mirrors how layerConfigFromEntry resolves an empty
-		// declarative `visibility:` block, so both bootstrap paths agree.
-		effVis := layer.Visibility(l.Visibility)
-		if err := checkVisibilityEntries(effVis); err != nil {
+		// §4.6: the directory visibility is the visibility declared in the
+		// layer's .layer-config, which filesystem.Open parses into
+		// l.Visibility (the two Visibility types carry identical fields, so
+		// the conversion is a direct copy). A layer that declares nothing
+		// (no .layer-config, or a present file whose visibility block is
+		// empty) takes vis. This mirrors how layerConfigFromEntry resolves
+		// an empty declarative `visibility:` block, so both bootstrap paths
+		// agree.
+		dir := directoryVisibility{vis: layer.Visibility(l.Visibility), declared: true}
+		if err := checkVisibilityEntries(dir.vis); err != nil {
 			return nil, fmt.Errorf("config.invalid: layer %s: .layer-config visibility.%w", l.ID, err)
 		}
-		if visibilityIsEmpty(effVis) {
-			effVis = vis
+		if visibilityIsEmpty(dir.vis) {
+			dir = directoryVisibility{vis: vis}
 		}
 		// Persist a LayerConfig so /v1/layers, /v1/layers/reingest, and
 		// the standalone web UI (§13.10) see the bootstrap layers. The
@@ -502,16 +504,12 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// layer (§7.3.1).
 		now := time.Now().UTC()
 		cfg := store.LayerConfig{
-			TenantID:     tenantID,
-			ID:           l.ID,
-			SourceType:   "local",
-			LocalPath:    l.Path,
-			Order:        order,
-			Public:       effVis.Public,
-			Organization: effVis.Organization,
-			Groups:       effVis.Groups,
-			Users:        effVis.Users,
-			CreatedAt:    now,
+			TenantID:   tenantID,
+			ID:         l.ID,
+			SourceType: "local",
+			LocalPath:  l.Path,
+			Order:      order,
+			CreatedAt:  now,
 		}
 		// Spec: §7.3.1 (Layer trust policy), §4.7.11 (Local layers and the
 		// standalone bootstrap) — a re-seeded --layer-path layer keeps the
@@ -521,8 +519,13 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if err != nil {
 			return nil, err
 		}
-		if err := st.PutLayerConfig(ctx, cfg); err != nil {
-			return nil, fmt.Errorf("persist layer config %s: %w", l.ID, err)
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Start
+		// write) — under warn and require a file that admits fewer callers
+		// applies here, before the startup ingest stores anything, and one
+		// that admits more waits for a cycle that passes the layer step.
+		cfg, rowCreated, err := startVisibility(ctx, st, cfg, layer.ResolveTrustMode(cfg.TrustMode, trust.defaultMode), dir, vis, trust.audit)
+		if err != nil {
+			return nil, err
 		}
 		// Spec: §7.3.1 (Removed artifacts) — the startup ingest claims the
 		// layer as every cycle does, so it and a cycle of the same layer on
@@ -538,7 +541,7 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 			IngestClaim: claim,
 			// Spec: §4.7.11 (Startup ingest) — the startup ingest is a cycle
 			// like any other and runs against the kept attestation record.
-			Attestation: trust.att.Cycle(claimed, claim),
+			Attestation: trust.att.Cycle(claimed, claim).AtStart(rowCreated, trust.audit),
 			// Spec: §7.3.1 (Removed artifacts) — a failure after the first
 			// write keeps the claim, so a displaced cycle cannot undo it.
 			OnFirstWrite: func() { wrote = true },
@@ -582,10 +585,16 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		if err != nil && !startupRefusal(l.ID, err) {
 			return nil, fmt.Errorf("ingest layer %s from %s: %w", l.ID, l.Path, err)
 		}
+		// The layer carries the visibility its row holds after the startup
+		// ingest, which a cycle can have narrowed or, once signed, widened.
+		stored, rerr := st.GetLayerConfig(ctx, tenantID, l.ID)
+		if rerr != nil {
+			return nil, fmt.Errorf("read layer config %s: %w", l.ID, rerr)
+		}
 		layers = append(layers, layer.Layer{
 			ID:         l.ID,
 			Precedence: order,
-			Visibility: effVis,
+			Visibility: core.VisibilityOf(stored),
 		})
 		if err != nil {
 			continue
@@ -1345,7 +1354,7 @@ func run(ctx context.Context, stop func()) error {
 	// deployment default (§4.6 / §13.10) otherwise. They append after the
 	// declared layers.
 	pathLayers, err := bootstrapLayerPath(st, tenantID, cfg.layerPath, defaultBootstrapVisibility(cfg), len(declared), cfg.allowPerDomain(), resourcePut, publicSensitivityFloor(cfg), ingestSigner, useVectorOutbox, collocatedVec, cfg.enforceSandboxProfile, cfg.hostSandboxes,
-		bootstrapTrust{file: cfg.bootstrapReqs, defaultMode: cfg.layerTrust.mode, att: cfg.ingestAttest})
+		bootstrapTrust{file: cfg.bootstrapReqs, defaultMode: cfg.layerTrust.mode, att: cfg.ingestAttest, audit: startupAuditEmitter(ctx, auditSink, scrubber, tenantID)})
 	if err != nil {
 		return err
 	}
@@ -1374,6 +1383,13 @@ func run(ctx context.Context, stop func()) error {
 	// PODIUM_MIGRATION_OBJECT_READ_TIMEOUT deadline. It is set here, before
 	// the listener serves any request.
 	registry := core.New(st, boundTenant, bootLayers).WithAdmission(signProvider, objStore, cfg.migrationObjectReadTimeout)
+	// Spec: §4.6 (Fallback list) — the store keeps layer rows, so a read
+	// that cannot read them falls back per tenant, and the tenant that owns
+	// the bootstrap layers starts from its rows as the startup ingests left
+	// them.
+	if registry, err = registry.WithLayerRows(ctx, tenantID); err != nil {
+		return err
+	}
 	// Spec: §4.7.11 (Served outcome) — serving decides the policy validity
 	// of a verified version with the rules ingest applies.
 	registry = registry.WithAttestationPolicyCheck(cfg.ingestAttest.PolicyConstraint)

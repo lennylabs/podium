@@ -290,7 +290,7 @@ func (r *Registry) usageNow() time.Time {
 // caller can see.
 func (r *Registry) usageLayers(ctx context.Context, id layer.Identity, served []store.ManifestRecord) []string {
 	resolved := r.resolveLayers(ctx)
-	if len(resolved) == 0 {
+	if r.unfiltered(resolved) {
 		seen := map[string]bool{}
 		var out []string
 		for _, m := range served {

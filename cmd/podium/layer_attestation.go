@@ -20,7 +20,7 @@ var attestationNextSteps = map[[2]string]string{
 	{"ingest.attestation_missing", "no_accepted_bundle"}: "The listed bundles were refused. Compare each certificate's identity, source repository, and source ref with the layer's signers.",
 	{"ingest.attestation_missing", "incomplete"}:         "The attestation directory on the tracked ref lacks a statement of the covering signer, and the listed artifacts have no subject from that signer. Compare the tip of the tracked ref with the signed ref of the repository, and run the signing workflow again. A recipe written by hand signs every file that `podium attest` writes.",
 	{"ingest.attestation_missing", "no_layer_subject"}:   "The accepted bundles carry no layer subject for this layer's root. Check the --root the workflow passes to `podium attest`. For a local layer, check the layer's trust_layer_root.",
-	{"ingest.attestation_mismatch", "layer_digest"}:      "The tracked ref holds content that no bundle covers. Check the last run of the signing workflow, and compare the listed subjects when the podium version in CI differs from the registry's. When no subject is listed, a DOMAIN.md or the .layer-config file differs from the signed state. When a listed subject carries fields, compare them with the output of `podium attest check` run with the registry's release of podium.",
+	{"ingest.attestation_mismatch", "layer_digest"}:      "The tracked ref holds content that no bundle covers. Check the last run of the signing workflow, and compare the listed subjects when the podium version in CI differs from the registry's. When no subject is listed, a DOMAIN.md or the .layer-config file differs from the signed state. For a layer that --layer-path loads, a changed .layer-config that admits fewer callers has taken effect, and one that admits more waits for a cycle that passes the layer step; visibility_pending shows it. When a listed subject carries fields, compare them with the output of `podium attest check` run with the registry's release of podium.",
 	{"ingest.attestation_stale", "mark"}:                 "The newest bundle on the tracked ref is older than the last accepted one. Run the signing workflow on the current tip of the main branch. After a change of the layer's source, reset the mark with `podium layer reingest <id> --reset-attestation-mark`.",
 	{"ingest.attestation_stale", "not_descendant"}:       "The signed commit does not descend from the last accepted one. After a re-run of an old workflow run, run the workflow on the current tip of the main branch. After a rewrite of the main branch, or a change of the layer's source, reset the mark with `podium layer reingest <id> --reset-attestation-mark --to-commit <sha>`, naming the new tip.",
 	{"ingest.attestation_stale", "not_in_history"}:       "The signed commit is not in the history of the tracked ref. A recipe that publishes to a separate ref gives each published commit the source commit as a parent.",
@@ -39,6 +39,13 @@ type layerRecordView struct {
 	AttestationStatus  string         `json:"attestation_status"`
 	AttestationDetails map[string]any `json:"attestation_details"`
 	AttestationDropped int            `json:"attestation_dropped"`
+	// The visibility in force and the pending one of a layer that
+	// --layer-path bootstraps.
+	Public            bool             `json:"public"`
+	Organization      bool             `json:"organization"`
+	Groups            []string         `json:"groups"`
+	Users             []string         `json:"users"`
+	VisibilityPending *json.RawMessage `json:"visibility_pending"`
 }
 
 // writeAttestationNotes writes to w what `podium layer show` states about a
@@ -70,6 +77,32 @@ func writeAttestationNotes(w io.Writer, raw json.RawMessage) {
 	if l.AttestationDropped > 0 {
 		_, _ = fmt.Fprintf(w, "the last cycle dropped %d artifacts; `podium layer reingest %s` lists each with its code.\n", l.AttestationDropped, l.ID)
 	}
+	writeVisibilityNote(w, l)
+}
+
+// writeVisibilityNote writes the pending visibility of a layer that
+// --layer-path bootstraps beside the visibility in force, and how a wider
+// visibility takes effect.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Pending change), §7.3.1
+func writeVisibilityNote(w io.Writer, l layerRecordView) {
+	if l.VisibilityPending == nil || string(*l.VisibilityPending) == "null" {
+		return
+	}
+	inForce, err := json.Marshal(map[string]any{"public": l.Public, "organization": l.Organization, "groups": l.Groups, "users": l.Users})
+	if err != nil {
+		// Booleans and strings always encode; the guard keeps an impossible
+		// failure visible.
+		inForce = []byte(err.Error())
+	}
+	var pending bytes.Buffer
+	if err := json.Compact(&pending, *l.VisibilityPending); err != nil {
+		// The member decoded with the layer object, so it is valid JSON;
+		// the guard keeps an impossible failure visible.
+		pending.WriteString(err.Error())
+	}
+	_, _ = fmt.Fprintf(w, "visibility in force: %s\nvisibility pending: %s\n", escapeControls(inForce), escapeControls(pending.Bytes()))
+	_, _ = fmt.Fprintln(w, "note: the pending visibility is the .layer-config the last start or cycle read. A wider visibility takes effect when a cycle passes the layer step, or through `podium layer update` once .layer-config holds it.")
 }
 
 // constraintSuffix renders a constraint after the status.

@@ -94,6 +94,9 @@ type bootstrapTrust struct {
 	file        bootstrapRequirements
 	defaultMode string
 	att         *ingest.AttestationConfig
+	// audit receives the layer.config_changed event of a visibility that
+	// the start write or the startup ingest changes. Nil records none.
+	audit ingest.AuditEmitterFunc
 }
 
 // apply sets the trust policy of a bootstrap layer. With a requirements
@@ -170,6 +173,10 @@ func (c *Config) ingestAttestation(ctx context.Context) (*ingest.AttestationConf
 		MaxBundleBytes: c.attestation.limits.MaxBytes,
 		MaxBundles:     c.attestation.limits.MaxBundles,
 		OnPublicGood:   refresh.trigger,
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer) — the
+		// deployment default a .layer-config that declares none resolves to
+		// in a cycle, as at the start.
+		DefaultVisibility: defaultBootstrapVisibility(c),
 	}
 	return att, refresh.stop
 }

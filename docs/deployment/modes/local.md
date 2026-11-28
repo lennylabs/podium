@@ -110,7 +110,7 @@ visibility:
   groups: [acme-finance]
 ```
 
-`podium sync` ignores the file, because filesystem-source visibility is bypassed. A server that serves the same directory through `podium serve --standalone --layer-path` stores the declaration, and a layer with a non-empty `visibility:` block boots with that visibility. The server applies it only once an identity provider is configured, and until then every caller sees the layer. A layer with no `.layer-config`, or an empty block, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`). See [Access control](../content/access-control).
+`podium sync` ignores the file, because filesystem-source visibility is bypassed. A server that serves the same directory through `podium serve --standalone --layer-path` stores the declaration. Under the trust mode `none`, a layer with a non-empty `visibility:` block boots with that visibility. Under `warn` and `require`, a file that admits fewer callers applies at once and one that admits more waits for a signed state, as [Visibility of a `--layer-path` layer](../content/layers#visibility-of-a---layer-path-layer) describes. The server applies it only once an identity provider is configured, and until then every caller sees the layer. A layer with no `.layer-config`, or an empty block, takes the deployment default (`PODIUM_DEFAULT_LAYER_VISIBILITY`). See [Access control](../content/access-control).
 
 ### Overlay and collisions
 

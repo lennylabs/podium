@@ -45,7 +45,19 @@ type AttestationRecord struct {
 // are absent, so a write keeps them as stored.
 //
 // Spec: §7.3.1 (Removed artifacts), §4.7.11 (Attestation record)
-const layerWriteAssignments = `source_type = excluded.source_type,
+const layerWriteAssignments = layerKeepVisibilityAssignments + `,
+			public = excluded.public,
+			organization = excluded.organization,
+			groups = excluded.groups,
+			users = excluded.users,
+			visibility_source = excluded.visibility_source,
+			visibility_pending = excluded.visibility_pending`
+
+// layerKeepVisibilityAssignments is the update arm of a layer write that
+// keeps the stored visibility members as well (PutLayerConfigKeepingVisibility).
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility)
+const layerKeepVisibilityAssignments = `source_type = excluded.source_type,
 			repo = excluded.repo,
 			ref = excluded.ref,
 			root = excluded.root,
@@ -53,10 +65,6 @@ const layerWriteAssignments = `source_type = excluded.source_type,
 			ord = excluded.ord,
 			user_defined = excluded.user_defined,
 			owner = excluded.owner,
-			public = excluded.public,
-			organization = excluded.organization,
-			groups = excluded.groups,
-			users = excluded.users,
 			webhook_secret = excluded.webhook_secret,
 			last_ingested_ref = excluded.last_ingested_ref,
 			force_push_policy = excluded.force_push_policy,
@@ -88,6 +96,10 @@ type AttestationWrite struct {
 	Commit     string
 	ReadMark   *time.Time
 	ReadCommit string
+	// Visibility, when not nil, is written in the same store write: the
+	// visibility of a layer that --layer-path bootstraps, which the record
+	// write of its cycle carries (§4.7.11).
+	Visibility *VisibilityWrite
 }
 
 // AttestationCopy is what MigrateLayerConfig did with the attestation record
@@ -199,6 +211,11 @@ func (s *Memory) WriteLayerAttestation(_ context.Context, tenantID, layerID, cla
 	if err != nil {
 		return err
 	}
+	if w.Visibility != nil {
+		if err := w.Visibility.check(layerID); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.holdsClaimLocked(tenantID, layerID, claim) {
@@ -220,6 +237,9 @@ func (s *Memory) WriteLayerAttestation(_ context.Context, tenantID, layerID, cla
 	checked := normalizeMark(w.CheckedAt)
 	rec.Status, rec.Details, rec.Dropped, rec.CheckedAt = w.Status, details, w.Dropped, &checked
 	cfg.AttestationRecord = rec
+	if w.Visibility != nil {
+		cfg = w.Visibility.apply(cfg)
+	}
 	s.layers[key] = cfg
 	return nil
 }

@@ -177,7 +177,13 @@ func (a *EventAudience) resolve(ctx context.Context) (map[string]layer.Layer, er
 // by matching the store error, because backends wrap errors.
 func (a *EventAudience) evaluate(ctx context.Context) (map[string]layer.Layer, error) {
 	list, err := a.r.layerConfigs(ctx, a.scope.TenantID)
-	if err == nil && len(list) == 0 {
+	switch {
+	case err == nil && a.r.fallback != nil:
+		// Spec: §4.6 (Fallback list) — a successful read is authoritative
+		// on a store that keeps layer rows and replaces the tenant's list,
+		// as on the read path. A failed one withholds the event.
+		a.r.fallback.replace(a.scope.TenantID, list)
+	case err == nil && len(list) == 0:
 		// Same fallback as the read path on an empty list, so both surfaces
 		// resolve the same layers whenever the read succeeds.
 		list = a.r.layers

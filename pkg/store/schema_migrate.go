@@ -107,6 +107,8 @@ var additiveColumns = []additiveColumn{
 	{"layer_configs", "attestation_details TEXT NOT NULL DEFAULT ''", "attestation_details TEXT NOT NULL DEFAULT ''"},
 	{"layer_configs", "attestation_dropped INTEGER NOT NULL DEFAULT 0", "attestation_dropped BIGINT NOT NULL DEFAULT 0"},
 	{"layer_configs", "attestation_checked_at TEXT", "attestation_checked_at TIMESTAMPTZ"},
+	{"layer_configs", "visibility_source TEXT NOT NULL DEFAULT ''", "visibility_source TEXT NOT NULL DEFAULT ''"},
+	{"layer_configs", "visibility_pending TEXT NOT NULL DEFAULT ''", "visibility_pending TEXT NOT NULL DEFAULT ''"},
 
 	// vector_pending
 	{"vector_pending", "attempts INTEGER NOT NULL DEFAULT 0", "attempts BIGINT NOT NULL DEFAULT 0"},

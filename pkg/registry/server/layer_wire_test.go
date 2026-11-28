@@ -399,6 +399,9 @@ func TestLayerEndpoint_RequestAndResponseAgreeOnNames(t *testing.T) {
 		// Spec: §4.7.11 (Attestation record) — read-only members ingest writes.
 		"attestation_mark": true, "attested_commit": true, "attestation_status": true,
 		"attestation_details": true, "attestation_dropped": true, "attestation_checked_at": true,
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer) — read-only
+		// members a start and a cycle write.
+		"visibility_source": true, "visibility_pending": true,
 	}
 
 	req := jsonTagNames(reflect.TypeOf(server.LayerRegisterRequest{}))

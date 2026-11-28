@@ -30,6 +30,15 @@ func (s *SQLite) WriteLayerAttestation(ctx context.Context, tenantID, layerID, c
 		cond = ` AND attestation_mark IS ? AND attested_commit = ?`
 		condArgs = []any{nullTimeText(normalizedMarkPtr(w.ReadMark)), w.ReadCommit}
 	}
+	if v := w.Visibility; v != nil {
+		groups, users, pending, err := visibilityColumns(layerID, *v)
+		if err != nil {
+			return err
+		}
+		q += `, public = ?, organization = ?, groups = ?, users = ?, visibility_pending = ?,
+			visibility_source = CASE WHEN ? = '' THEN visibility_source ELSE ? END`
+		args = append(args, boolToInt(v.Visibility.Public), boolToInt(v.Visibility.Organization), groups, users, pending, v.Source, v.Source)
+	}
 	q += ` WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL AND ingest_claim = ?` + cond
 	args = append(append(args, tenantID, layerID, claim), condArgs...)
 	written, err := rowsChanged(s.db.ExecContext(ctx, q, args...))
@@ -147,6 +156,14 @@ func (p *Postgres) WriteLayerAttestation(ctx context.Context, tenantID, layerID,
 	if err != nil {
 		return err
 	}
+	vis := VisibilityWrite{}
+	if w.Visibility != nil {
+		vis = *w.Visibility
+	}
+	groups, users, pending, err := visibilityColumns(layerID, vis)
+	if err != nil {
+		return err
+	}
 	conn, release, err := p.org(ctx, tenantID)
 	if err != nil {
 		return err
@@ -156,13 +173,20 @@ func (p *Postgres) WriteLayerAttestation(ctx context.Context, tenantID, layerID,
 		UPDATE layer_configs SET attestation_status = $1, attestation_details = $2,
 			attestation_dropped = $3, attestation_checked_at = $4,
 			attestation_mark = CASE WHEN $5 THEN $6 ELSE attestation_mark END,
-			attested_commit = CASE WHEN $5 AND $7 <> '' THEN $7 ELSE attested_commit END
+			attested_commit = CASE WHEN $5 AND $7 <> '' THEN $7 ELSE attested_commit END,
+			public = CASE WHEN $13 THEN $14 ELSE public END,
+			organization = CASE WHEN $13 THEN $15 ELSE organization END,
+			groups = CASE WHEN $13 THEN $16 ELSE groups END,
+			users = CASE WHEN $13 THEN $17 ELSE users END,
+			visibility_pending = CASE WHEN $13 THEN $18 ELSE visibility_pending END,
+			visibility_source = CASE WHEN $13 AND $19 <> '' THEN $19 ELSE visibility_source END
 		WHERE tenant_id = $8 AND id = $9 AND deleted_at IS NULL AND ingest_claim = $10
 			AND (NOT $5 OR (attestation_mark IS NOT DISTINCT FROM $11 AND attested_commit = $12))`,
 		w.Status, details, w.Dropped, normalizeMark(w.CheckedAt),
 		w.Advance, normalizeMark(w.Mark), w.Commit,
 		tenantID, layerID, claim,
-		nullTimePG(normalizedMarkPtr(w.ReadMark)), w.ReadCommit))
+		nullTimePG(normalizedMarkPtr(w.ReadMark)), w.ReadCommit,
+		w.Visibility != nil, vis.Visibility.Public, vis.Visibility.Organization, groups, users, pending, vis.Source))
 	if err != nil {
 		return err
 	}

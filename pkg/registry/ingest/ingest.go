@@ -540,7 +540,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 	// is invalid is refused after its claim and before it reads its snapshot.
 	att := req.Attestation
 	if att != nil {
-		att.bind(req.Clock, req.AuditEmit)
+		att.bind(req.Clock, req.AuditEmit, req.PublishEvent)
 		if superseded, err := att.CheckPolicy(ctx, st, req.OnFirstWrite); superseded || err != nil {
 			return supersededResult(superseded, err)
 		}
@@ -914,6 +914,17 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		case err != nil:
 			return nil, fmt.Errorf("ingest: soft-delete removed artifacts: %w", err)
 		}
+	}
+	// Spec: §4.7.11 (Visibility of a path-bootstrapped layer) — a cycle that
+	// passed the layer step applies the visibility of its signed snapshot
+	// after its removals, so a signed state that removes an artifact and
+	// widens the file widens the layer only after the removal.
+	if !res.Superseded {
+		superseded, err := att.applySignedVisibility(ctx, st, verdict)
+		if err != nil {
+			return nil, err
+		}
+		res.Superseded = superseded
 	}
 
 	if len(res.LintFailures) > 0 && res.Accepted == 0 && res.Idempotent == 0 && len(res.Conflicts) == 0 {

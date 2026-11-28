@@ -148,6 +148,12 @@ type AttestationConfig struct {
 	// PODIUM_ATTESTATION_MAX_BUNDLES. Zero takes the default.
 	MaxBundleBytes int64
 	MaxBundles     int
+	// DefaultVisibility is the deployment default visibility of a layer that
+	// --layer-path bootstraps (PODIUM_DEFAULT_LAYER_VISIBILITY): the directory
+	// visibility of a .layer-config that declares none, and the baseline of a
+	// row whose visibility_source is default. The zero value admits no
+	// caller, so a cycle without one fails closed.
+	DefaultVisibility layer.Visibility
 	// OnPublicGood is called before a cycle verifies under a policy that
 	// names a signer of the public-good instance. The registry starts the
 	// refresh of that instance's trusted root there, so a registry that never
@@ -187,6 +193,14 @@ type AttestationCycle struct {
 	// evaluated holds the bundles layer step 2 evaluated, which the cycle
 	// links after a failed layer step under warn as after a passed one.
 	evaluated []*snapshotBundle
+	// vis is the visibility rule of a cycle of a path-bootstrapped layer,
+	// nil for every other layer (§4.7.11 Visibility of a path-bootstrapped
+	// layer). rowCreated and visAudit are set by AtStart, and publish
+	// receives the §7.6 event of a visibility change.
+	vis        *visibilityStep
+	rowCreated bool
+	visAudit   AuditEmitterFunc
+	publish    EventEmitter
 }
 
 // Cycle returns the attestation steps of a cycle that claimed lc with claim.
@@ -232,14 +246,16 @@ func (a *AttestationCycle) WithLineage(reference string, fn LineageFunc) {
 // Mode returns the cycle's resolved trust mode.
 func (a *AttestationCycle) Mode() string { return a.mode }
 
-// bind takes the clock and the audit emitter of the ingest request.
-func (a *AttestationCycle) bind(c clock.Clock, emit AuditEmitterFunc) {
+// bind takes the clock, the audit emitter, and the event publisher of the
+// ingest request.
+func (a *AttestationCycle) bind(c clock.Clock, emit AuditEmitterFunc, publish EventEmitter) {
 	if c != nil {
 		a.clock = c
 	}
 	if emit != nil {
 		a.audit = emit
 	}
+	a.publish = publish
 }
 
 // CheckPolicy runs the re-evaluation of the layer's links and then refuses
@@ -358,6 +374,7 @@ func (a *AttestationCycle) write(ctx context.Context, st store.Store, w store.At
 	case err != nil:
 		return false, fmt.Errorf("ingest: write the attestation record of layer %s: %w", a.layer.ID, err)
 	}
+	a.noteVisibility(ctx, w.Visibility)
 	return false, nil
 }
 

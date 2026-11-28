@@ -153,7 +153,7 @@ func (r *Registry) mergedDomains(ctx context.Context, id layer.Identity) (map[st
 // manifest records share one visibility view. Callers pass the per-request
 // resolved layer list from resolveLayers (§4.6).
 func (r *Registry) allowedLayers(resolved []layer.Layer, id layer.Identity) map[string]bool {
-	if id.IsPublic || len(resolved) == 0 {
+	if id.IsPublic || r.unfiltered(resolved) {
 		return nil
 	}
 	allowed := map[string]bool{}
