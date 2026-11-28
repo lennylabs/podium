@@ -312,3 +312,45 @@ func TestLayerCmd_RequirementsFileErrors(t *testing.T) {
 		t.Errorf("a refused command stored %d layers", len(layers))
 	}
 }
+
+// Spec: §7.3.1 (Layer CLI, Patch semantics on the update body) — an update
+// with --trust-signer sends the requirements it read as
+// expected_trust_requirements, so a second requirement that another writer
+// stores between the read and the update makes the registry refuse the
+// update, and the command exits 1 with the scanner requirement kept.
+func TestLayerCmd_SignerUpdateRaceIsRefused(t *testing.T) {
+	st := store.NewMemory()
+	if err := st.CreateTenant(context.Background(), store.Tenant{ID: "default"}); err != nil {
+		t.Fatal(err)
+	}
+	h := server.NewLayerEndpoint(st, "default", server.NewModeTracker()).Handler()
+	raced := false
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeHTTP(w, r)
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/layers" || raced {
+			return
+		}
+		raced = true
+		cfg, err := st.GetLayerConfig(context.Background(), "default", "finance")
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		cfg.TrustRequirements[0].CoversLayer = true
+		cfg.TrustRequirements = append(cfg.TrustRequirements, store.TrustRequirement{PredicateType: "https://acme.com/scan/v1",
+			Signers: []store.TrustSigner{{Issuer: "https://accounts.google.com", Identity: "scanner@acme.com", AnySource: true, AnyRef: true}}})
+		if err := st.PutLayerConfig(context.Background(), cfg); err != nil {
+			t.Error(err)
+		}
+	}))
+	t.Cleanup(ts.Close)
+	if rc := layerRegister([]string{"--registry", ts.URL, "--id", "finance", "--repo", cliTrustRepo, "--ref", "podium/signed",
+		"--trust", "require", "--trust-signer", cliTrustIssuer + "=" + cliTrustIdentity}); rc != 0 {
+		t.Fatalf("register rc = %d", rc)
+	}
+	rc := layerUpdate([]string{"--registry", ts.URL, "--id", "finance", "--trust-signer", cliTrustIssuer + "=" + cliTrustIdentity})
+	cfg, _ := st.GetLayerConfig(context.Background(), "default", "finance")
+	if !raced || rc != 1 || len(cfg.TrustRequirements) != 2 {
+		t.Fatalf("raced %v, rc %d, %d requirements", raced, rc, len(cfg.TrustRequirements))
+	}
+}

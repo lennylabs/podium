@@ -218,7 +218,10 @@ A party who serves the tracked ref can remove a second signer's bundle from a si
 
 ### Required types
 
-`trust_require_types` lets a layer run `warn` while its riskiest types are enforced. An artifact of a listed type that fails a requirement is dropped under `warn` as under `require`. When the layer step fails under `warn`, every artifact of a listed type is withheld: the cycle stores no version of it, reports it with the layer step's code, counts it in `attestation_dropped`, and removes no stored version of a listed type, so an unsigned or replayed state can neither change nor remove a hook. Each entry is a type the registry knows, a policy that lists one needs a requirement, and its `trust_mode` is not `none`.
+`trust_require_types` lets a layer run `warn` while its riskiest types are enforced. An artifact of a listed type that fails a requirement is dropped under `warn` as under `require`. When the layer step fails under `warn`, every artifact of a listed type is withheld: the cycle stores no version of it, reports it with the layer step's code, counts it in `attestation_dropped`, and removes no stored version of a listed type, so an unsigned or replayed state can neither change nor remove a hook. Each entry is a type the registry knows, a policy that lists one needs a requirement, and its `trust_mode` is not `none`. An artifact counts as a listed type when its manifest declares one or when the version the registry serves for its ID is of one, so a snapshot that declares a stored hook an `agent` is held to the hook's rule.
+
+> [!WARNING]
+> `trust_require_types` enforces nothing while the layer's mode resolves to `none`, which runs no attestation step. A layer with an empty `trust_mode` takes `PODIUM_LAYER_TRUST_DEFAULT`, so its list applies only while the default is `warn` or `require`. A registration or an update that leaves a layer in that state answers with a warning.
 
 ### Checking bundles against the policy
 

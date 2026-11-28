@@ -648,3 +648,42 @@ func TestLayerTrust_SeveralRequirementsAndRequireTypes(t *testing.T) {
 		t.Errorf("a refused update changed the policy: %+v", got.TrustRequirements)
 	}
 }
+
+// Spec: §7.3.1 (Patch semantics on the update body, Layer trust policy) —
+// an update that carries expected_trust_requirements applies only while the
+// layer stores them: a match, and null for a layer with none, are admitted,
+// a mismatch is refused with 409 and trust_requirements_changed and writes
+// nothing, and a member that does not decode is refused with 400. A layer
+// that lists trust_require_types while its mode resolves to none is
+// answered with a warning.
+func TestLayerTrust_ExpectedRequirementsAndTypeWarning(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, nil)
+	resp, body := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"trust_requirements": requirement(ownSigner()), "trust_require_types": []string{"hook"}}))
+	if resp.StatusCode != http.StatusCreated || !strings.Contains(string(body), "lists trust_require_types, and its trust mode resolves to none") {
+		t.Fatalf("register: %d %s", resp.StatusCode, body)
+	}
+	stored := h.stored(t, "finance").TrustRequirements
+	resp, body = mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_mode": "warn", "expected_trust_requirements": stored})
+	if resp.StatusCode != http.StatusOK || strings.Contains(string(body), "resolves to none") {
+		t.Fatalf("matching expectation: %d %s", resp.StatusCode, body)
+	}
+	resp, body = mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_mode": "require", "expected_trust_requirements": nil})
+	env := server.ErrorResponse{}
+	_ = json.Unmarshal(body, &env)
+	if resp.StatusCode != http.StatusConflict || env.Code != "registry.invalid_argument" || env.Details["constraint"] != "trust_requirements_changed" {
+		t.Fatalf("stale expectation: %d %s", resp.StatusCode, body)
+	}
+	if got := h.stored(t, "finance"); got.TrustMode != "warn" {
+		t.Errorf("a refused update stored mode %q", got.TrustMode)
+	}
+	if resp, body := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"expected_trust_requirements": "x"}); resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("an expectation that does not decode: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := mustPost(t, h.base, "/v1/layers", map[string]any{"id": "plain", "source_type": "local", "local_path": t.TempDir()}); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register plain: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := mustPut(t, h.base, "/v1/layers/update?id=plain", map[string]any{"ref": "x", "expected_trust_requirements": nil}); resp.StatusCode != http.StatusOK {
+		t.Errorf("null expectation for a layer with none: %d %s", resp.StatusCode, body)
+	}
+}

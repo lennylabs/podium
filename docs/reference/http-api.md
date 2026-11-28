@@ -1420,6 +1420,7 @@ PUT  /v1/layers/update?id={id}
 | `trust_mode`, `trust_requirements`, `trust_require_types`, `trust_layer_root` | By presence, matched without regard to letter case. A member the body carries replaces the stored value, so `"trust_mode": ""` returns the layer to `PODIUM_LAYER_TRUST_DEFAULT`, `"trust_requirements": []` or `null` removes the requirements, and `"trust_require_types": []` or `null` removes the listed types; `null` for `trust_mode` or `trust_layer_root` is refused. An update that carries one of them checks the resulting policy; one that carries none leaves the stored policy unchecked. A trust member that changes the policy of a layer declared in `registry.yaml` is refused. |
 | `repo_token`, `repo_username`, `clear_repo_credential` | See [Repository credential on update](#repository-credential-on-update). |
 | `rotate_webhook_secret` | Requests a webhook-secret rotation. The response then carries the new secret in `webhook_secret`. |
+| `expected_trust_requirements` | A precondition: the requirements, or `null` for none, that the client expects the layer to store. When the stored requirements differ, the update is refused with `409 registry.invalid_argument` and `details.constraint: "trust_requirements_changed"`, and nothing is written. |
 
 **Response.** The layer. An update that requests no secret rotation returns the layer alone, without `webhook_url` and `webhook_secret`. On a registry that verifies no caller, the response carries the [unapplied-visibility warning](#unapplied-visibility-warning) when the layer sets no `public` grant.
 
