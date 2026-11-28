@@ -141,6 +141,10 @@ func CheckFloor(cfg store.LayerConfig, f store.TrustFloor, def string) *FloorRef
 	}
 	for i, req := range cfg.TrustRequirements {
 		for j, s := range req.Signers {
+			if !floorAdmits(f.Signers, s) && IsKeySigner(s) {
+				return &FloorRefusal{Constraint: ConstraintSignerOutsideFloor, Message: fmt.Sprintf(
+					"trust_requirements[%d].signers[%d] is a key-based signer, which matches no signer entry of the tenant trust floor, because every entry names an issuer", i, j)}
+			}
 			if !floorAdmits(f.Signers, s) {
 				return &FloorRefusal{Constraint: ConstraintSignerOutsideFloor, Message: fmt.Sprintf(
 					"trust_requirements[%d].signers[%d] (issuer %q, identity %q) matches no signer entry of the tenant trust floor%s",
@@ -200,7 +204,8 @@ func ownerIDHint(entries []store.TrustFloorSigner, s store.TrustSigner) string {
 //
 // Spec: §4.7.11 (Tenant trust floor)
 func FloorSignerMatches(s store.TrustSigner, e store.TrustFloorSigner) bool {
-	if s.Issuer != e.Issuer || instanceName(s.Instance) != instanceName(e.Instance) {
+	// A key-based signer names no issuer, and every entry names one.
+	if IsKeySigner(s) || s.Issuer != e.Issuer || instanceName(s.Instance) != instanceName(e.Instance) {
 		return false
 	}
 	if e.SourceRepositoryOwner != "" && (s.AnySource || !ownerMatches(s, e.SourceRepositoryOwner)) {

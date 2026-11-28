@@ -145,16 +145,20 @@ func replaceRoot(ctx context.Context, st store.Store, records map[string]store.R
 	return records[name], nil
 }
 
-// policyInstances names, sorted, each instance a signer of lc names, with an
-// empty name read as public-good.
+// policyInstances names, sorted, each instance a certificate signer of lc
+// names, with an empty name read as public-good. A key-based signer names
+// no instance, so a policy of key-based signers alone names none and its
+// key depends on no root record.
+//
+// Spec: §4.7.11 (Policy key, Key-based signers)
 func policyInstances(lc store.LayerConfig) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, req := range lc.TrustRequirements {
 		for _, s := range req.Signers {
-			name := s.Instance
+			name := layer.SignerInstance(s)
 			if name == "" {
-				name = sign.PublicGoodInstance
+				continue
 			}
 			if !seen[name] {
 				seen[name] = true
@@ -398,7 +402,7 @@ func (r *reevaluation) checkBundles(ctx context.Context, selected []store.Attest
 			case err != nil:
 				return nil, fmt.Errorf("ingest: read attestation %s: %w", l.Digest, err)
 			}
-			b = &snapshotBundle{raw: a.Bundle, verified: map[string]*sign.VerifiedAttestation{}, refusal: map[string]sign.AttestationReason{}}
+			b = storedBundle(a.Bundle)
 			raws[l.Digest] = b
 		}
 		c, err := r.check(ctx, b, l.Instance)
@@ -413,19 +417,23 @@ func (r *reevaluation) checkBundles(ctx context.Context, selected []store.Attest
 // check decides one stored bundle under the instance a link keys it on: a
 // process that holds the recorded roots verifies it under that instance for
 // each signer that names it, and a process behind a root record compares the
-// certificate with those signers alone.
+// certificate with those signers alone. A link of a key-signed bundle has
+// the empty instance, and every process verifies it in full under the
+// key-based signers, because no trusted root enters that verification.
+//
+// Spec: §4.7.11 (Re-evaluation, Key-based signers)
 func (r *reevaluation) check(ctx context.Context, b *snapshotBundle, instance string) (linkCheck, error) {
-	if !r.policy.holds {
+	if !r.policy.holds && instance != "" {
 		reqs := matchingRequirements(b.raw, r.layer.TrustRequirements, instance)
 		return linkCheck{accepted: reqs, decided: len(reqs) == 0}, nil
 	}
 	var accepted []int
 	for i, req := range r.layer.TrustRequirements {
 		for _, s := range req.Signers {
-			if signerInstance(s) != instance {
+			if layer.SignerInstance(s) != instance {
 				continue
 			}
-			v, _, err := r.cycle.verifyUnder(ctx, b, s.Instance)
+			v, _, err := r.cycle.verifyFor(ctx, b, s)
 			if err != nil {
 				return linkCheck{}, err
 			}
@@ -436,14 +444,6 @@ func (r *reevaluation) check(ctx context.Context, b *snapshotBundle, instance st
 		}
 	}
 	return linkCheck{accepted: accepted, decided: true}, nil
-}
-
-// signerInstance is the instance a signer names, public-good for none.
-func signerInstance(s store.TrustSigner) string {
-	if s.Instance == "" {
-		return sign.PublicGoodInstance
-	}
-	return s.Instance
 }
 
 // matchingRequirements returns the requirements that have a signer of
@@ -462,7 +462,7 @@ func matchingRequirements(raw []byte, reqs []store.TrustRequirement, instance st
 			continue
 		}
 		for _, s := range req.Signers {
-			if signerInstance(s) == instance && sum.MatchesSigner(layer.VerifierSigner(s)) == nil {
+			if layer.SignerInstance(s) == instance && sum.MatchesSigner(layer.VerifierSigner(s)) == nil {
 				out = append(out, i)
 				break
 			}
@@ -586,7 +586,18 @@ func (r *reevaluation) remainingRequirements(ctx context.Context, l store.Attest
 	case err != nil:
 		return nil, fmt.Errorf("ingest: read attestation %s: %w", l.Digest, err)
 	}
+	if l.Instance == "" {
+		// A key-signed link carries no certificate to compare, and its
+		// verification reads no trusted root, so it is verified in full.
+		c, err := r.check(ctx, storedBundle(a.Bundle), "")
+		return c.accepted, err
+	}
 	return matchingRequirements(a.Bundle, r.layer.TrustRequirements, l.Instance), nil
+}
+
+// storedBundle wraps the bytes of a stored bundle for a verification.
+func storedBundle(raw []byte) *snapshotBundle {
+	return &snapshotBundle{raw: raw, verified: map[string]*sign.VerifiedAttestation{}, refusal: map[string]sign.AttestationReason{}}
 }
 
 // clearOutcomes sets the outcome not_evaluated on every version of a layer

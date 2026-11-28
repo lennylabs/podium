@@ -15,6 +15,7 @@ import (
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -224,9 +225,9 @@ func (a *AttestationCycle) emitVerified(res *layerStepResult, v *attestationVerd
 			}
 			accepted = append(accepted, map[string]any{
 				"digest": b.digest, "requirement": r, "predicate_type": attest.ReportString(va.Statement.PredicateType),
-				"instance": va.Instance, "issuer": attest.ReportString(va.Certificate.Issuer.Value),
-				"identity": attest.ReportString(va.Certificate.Identity.Value), "log_index": logIndex(b.raw),
-				"attested_at": va.AttestedTime.UTC().Format(time.RFC3339Nano), "rsa_timestamp_without_sha256": va.RSATimestampWithoutSHA256,
+				"instance": va.Instance, "issuer": attest.ReportString(va.SignerIssuer()),
+				"identity": attest.ReportString(va.SignerIdentity()), "log_index": logIndex(b.raw),
+				"attested_at": attestedAtText(va), "rsa_timestamp_without_sha256": va.RSATimestampWithoutSHA256,
 			})
 		}
 	}
@@ -292,4 +293,15 @@ func jsonText(v any) string {
 		return ""
 	}
 	return strings.TrimSuffix(b.String(), "\n")
+}
+
+// attestedAtText is the attested time of an accepted bundle for an event, and
+// the empty string for a key-signed bundle that has none.
+//
+// Spec: §8.1, §4.7.11 (Key-based signers)
+func attestedAtText(v *sign.VerifiedAttestation) string {
+	if v.AttestedTime.IsZero() {
+		return ""
+	}
+	return v.AttestedTime.UTC().Format(time.RFC3339Nano)
 }

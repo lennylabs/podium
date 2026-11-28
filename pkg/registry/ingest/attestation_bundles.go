@@ -22,6 +22,8 @@ type snapshotBundle struct {
 	digest string
 	// verified holds the verification under each instance the policy names
 	// that the bundle met, and refusal the reason of each that it did not.
+	// A key-based signer's verification is held under keyVerification of
+	// its key, which no instance name can equal.
 	verified map[string]*sign.VerifiedAttestation
 	refusal  map[string]sign.AttestationReason
 	// accepted holds, per requirement, the verification under which a signer
@@ -141,7 +143,7 @@ func (a *AttestationCycle) evaluate(ctx context.Context, b *snapshotBundle, cove
 	b.reasons = make([]sign.AttestationReason, len(reqs))
 	for r, req := range reqs {
 		for _, s := range req.Signers {
-			v, reason, err := a.verifyUnder(ctx, b, s.Instance)
+			v, reason, err := a.verifyFor(ctx, b, s)
 			if err != nil {
 				return err
 			}
@@ -161,6 +163,47 @@ func (a *AttestationCycle) evaluate(ctx context.Context, b *snapshotBundle, cove
 	b.covering = b.accepted[covering]
 	return nil
 }
+
+// verifyFor verifies b for the signer s once per verification: under the
+// signer's Sigstore instance for a certificate signer, and under its public
+// key for a key-based signer, which reads no trusted root.
+//
+// Spec: §4.7.11 (Layer step, Key-based signers)
+func (a *AttestationCycle) verifyFor(ctx context.Context, b *snapshotBundle, s store.TrustSigner) (*sign.VerifiedAttestation, sign.AttestationReason, error) {
+	if !layer.IsKeySigner(s) {
+		return a.verifyUnder(ctx, b, s.Instance)
+	}
+	key, err := sign.ParseAttestationPublicKey(s.PublicKey)
+	if err != nil {
+		// Unreachable through a cycle: the policy check refuses a key the
+		// rules refuse before the snapshot is read. A signer that reaches
+		// here with one accepts nothing.
+		return nil, sign.ReasonSignature, nil
+	}
+	name := keyVerification(key.ID())
+	if v, ok := b.verified[name]; ok {
+		return v, "", nil
+	}
+	if r, ok := b.refusal[name]; ok {
+		return nil, r, nil
+	}
+	v, err := sign.VerifyKeySignedAttestation(b.raw, key)
+	if err != nil {
+		reason, ok := sign.AttestationReasonOf(err)
+		if !ok {
+			return nil, "", err
+		}
+		b.refusal[name] = reason
+		return nil, reason, nil
+	}
+	b.verified[name] = v
+	return v, "", nil
+}
+
+// keyVerification is the name under which a snapshot bundle holds its
+// verification under a key: the key's identifier after a prefix with a
+// colon, which no instance name holds (§13.12).
+func keyVerification(id string) string { return "key:" + id }
 
 // verifyUnder verifies b under the instance name once and returns the
 // verification or the refusal reason.

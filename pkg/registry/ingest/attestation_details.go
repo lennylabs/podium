@@ -5,8 +5,10 @@ import (
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/store"
 )
 
 // refusedBundles lists up to 5 bundles that the signers of the covering
@@ -28,15 +30,40 @@ func refusedBundles(bundles []*snapshotBundle, covering int, a *AttestationCycle
 		}
 		entry := map[string]any{"digest": b.digest, "reason": string(b.reasons[covering])}
 		for _, s := range signers {
-			inst, _ := a.instance(s.Instance)
-			if v := b.verified[inst.Name]; v != nil {
-				addCertificate(entry, inst.Name, v.Certificate)
+			if v := verifiedFor(b, s, a); v != nil {
+				addSigner(entry, v)
 				break
 			}
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+// verifiedFor returns the verification of b that the layer step recorded
+// for the signer s, nil when it recorded none: under the signer's instance,
+// or under its key.
+func verifiedFor(b *snapshotBundle, s store.TrustSigner, a *AttestationCycle) *sign.VerifiedAttestation {
+	if layer.IsKeySigner(s) {
+		k, err := sign.ParseAttestationPublicKey(s.PublicKey)
+		if err != nil {
+			return nil
+		}
+		return b.verified[keyVerification(k.ID())]
+	}
+	inst, _ := a.instance(s.Instance)
+	return b.verified[inst.Name]
+}
+
+// addSigner adds the signer of a verified bundle to entry: the identifier
+// of the key of a key-signed bundle, which carries no certificate, and the
+// instance and certificate fields of any other.
+func addSigner(entry map[string]any, v *sign.VerifiedAttestation) {
+	if v.Key != "" {
+		entry["identity"] = v.Key
+		return
+	}
+	addCertificate(entry, v.Instance, v.Certificate)
 }
 
 // addCertificate adds the instance and the bounded certificate fields of a

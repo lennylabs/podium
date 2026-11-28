@@ -213,6 +213,15 @@ func checkSigner(name string, s store.TrustSigner, instances TrustInstances) err
 	if err := VerifierSigner(s).Validate(); err != nil {
 		return trustRefusal("%s: %s", name, signerRuleText(err))
 	}
+	if IsKeySigner(s) {
+		// A key-based signer verifies under its key with no trusted root,
+		// so an instance beside the key would state a binding nothing
+		// applies.
+		if s.Instance != "" {
+			return trustRefusal("%s names public_key and the Sigstore instance %q; a key-based signer names no instance", name, s.Instance)
+		}
+		return nil
+	}
 	// A signer that sets any_source or any_ref beside the member it waives
 	// reads as bound while the verifier applies the member, so the policy
 	// would say something other than what it does; it is refused as
@@ -270,9 +279,28 @@ func signerRuleText(err error) string {
 	return err.Error()
 }
 
+// IsKeySigner reports whether s is a §4.7.11 key-based signer, which names
+// a public_key in place of an issuer and an identity.
+//
+// Spec: §4.7.11 (Key-based signers)
+func IsKeySigner(s store.TrustSigner) bool { return s.PublicKey != "" }
+
+// SignerInstance is the Sigstore instance whose trusted root verifies the
+// bundles of s: the instance it names, public-good for none, and the empty
+// name for a key-based signer, which names no instance.
+//
+// Spec: §4.7.11 (Sigstore instances, Key-based signers)
+func SignerInstance(s store.TrustSigner) string {
+	if IsKeySigner(s) {
+		return ""
+	}
+	return instanceName(s.Instance)
+}
+
 // VerifierSigner converts a stored signer to the verifier's signer.
 func VerifierSigner(s store.TrustSigner) sign.AttestationSigner {
 	return sign.AttestationSigner{
+		PublicKey:               s.PublicKey,
 		Issuer:                  s.Issuer,
 		Identity:                s.Identity,
 		SourceRepository:        s.SourceRepository,

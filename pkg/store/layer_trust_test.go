@@ -82,3 +82,19 @@ func TestTrustRequirementsColumn(t *testing.T) {
 		t.Errorf("a column that does not decode read back")
 	}
 }
+
+// Spec: §4.7.11 (Key-based signers) — a signer's public_key reads and
+// writes through the trust_requirements column as given, its line breaks
+// written as \n.
+func TestTrustRequirementsColumn_PublicKey(t *testing.T) {
+	t.Parallel()
+	pem := "-----BEGIN PUBLIC KEY-----\nAAAA\n-----END PUBLIC KEY-----\n"
+	col, err := trustRequirementsColumn([]TrustRequirement{{Signers: []TrustSigner{{PublicKey: pem}}}})
+	if err != nil || !strings.Contains(col, `"public_key":"-----BEGIN PUBLIC KEY-----\nAAAA`) {
+		t.Fatalf("column %s, %v", col, err)
+	}
+	back, err := parseTrustRequirements(col)
+	if err != nil || back[0].Signers[0].PublicKey != pem {
+		t.Fatalf("read back %+v, %v", back, err)
+	}
+}

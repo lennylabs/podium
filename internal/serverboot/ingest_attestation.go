@@ -185,6 +185,9 @@ func (c *Config) ingestAttestation(ctx context.Context) (*ingest.AttestationConf
 		MaxBundleBytes: c.attestation.limits.MaxBytes,
 		MaxBundles:     c.attestation.limits.MaxBundles,
 		OnPublicGood:   refresh.trigger,
+		// Spec: §4.7.11 (Layer step), §13.12 — the bound of a key-signed
+		// candidate's signed time.
+		SignedTimeAllowance: c.attestation.allowance.value,
 		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer) — the
 		// deployment default a .layer-config that declares none resolves to
 		// in a cycle, as at the start.
@@ -230,7 +233,8 @@ func verifiesOnPublicGood(lc store.LayerConfig, floorMode, def string) bool {
 	}
 	for _, req := range lc.TrustRequirements {
 		for _, s := range req.Signers {
-			if s.Instance == "" || s.Instance == sign.PublicGoodInstance {
+			// A key-based signer names no instance and starts no refresh.
+			if layer.SignerInstance(s) == sign.PublicGoodInstance {
 				return true
 			}
 		}
