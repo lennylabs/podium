@@ -39,7 +39,7 @@ func deriveSkillCompatibility(skillBytes, artifactBytes []byte) []byte {
 	if compat == "" {
 		return skillBytes
 	}
-	return injectFrontmatterLine(skillBytes, frontmatterIndent(skillBytes), "compatibility", yamlQuoteScalar(compat))
+	return injectFrontmatterLine(skillBytes, frontmatterIndent(skillBytes), "compatibility", yamlDoubleQuote(compat))
 }
 
 // frontmatterIndent returns the indentation of the top-level keys of src's
@@ -94,7 +94,7 @@ func buildSkillCompatibility(req *manifest.RuntimeRequirements, sandbox manifest
 // indentation of the frontmatter's top-level keys, so the line joins their
 // mapping. The caller must
 // have verified key is absent and passes scalar already rendered: the derived
-// compatibility string goes through yamlQuoteScalar so a colon stays part of
+// compatibility string goes through yamlDoubleQuote so a colon stays part of
 // the string, and the user-only control passes the bare boolean `true`, which
 // a quoted "true" would turn into a string a harness can reject. src is
 // returned unchanged when it has no recognizable leading frontmatter delimiter.
@@ -113,12 +113,4 @@ func injectFrontmatterLine(src []byte, indent, key, scalar string) []byte {
 	}
 	line := indent + key + ": " + scalar + eol
 	return []byte(delim + line + s[len(delim):])
-}
-
-// yamlQuoteScalar double-quotes value and escapes the characters that would
-// otherwise break a YAML double-quoted scalar.
-func yamlQuoteScalar(value string) string {
-	value = strings.ReplaceAll(value, `\`, `\\`)
-	value = strings.ReplaceAll(value, `"`, `\"`)
-	return `"` + value + `"`
 }

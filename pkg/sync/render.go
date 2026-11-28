@@ -234,6 +234,12 @@ func renderEmitter(ctx context.Context, emitter adapter.MarketplaceEmitter, assi
 	seenPlugin := map[string]bool{}
 	// Components, one render per assigned artifact.
 	for _, a := range assignments {
+		// Spec: §4.1 (MCP server names): a render fails its target on an
+		// mcp-server whose declared name the rule refuses, as sync and
+		// load_artifact refuse to materialize it.
+		if err := adapter.MCPServerNameError(emitter.ID(), a.record.Artifact); err != nil {
+			return nil, fmt.Errorf("publish: emitter %q component for %s: %w", emitter.ID(), a.record.ID, err)
+		}
 		desc := adapter.PluginDescriptor{Name: a.plugin.Name, Description: a.plugin.Description, Prefix: emitter.ID()}
 		out, err := emitter.Component(ctx, adapter.Source{
 			ArtifactID:    a.record.ID,

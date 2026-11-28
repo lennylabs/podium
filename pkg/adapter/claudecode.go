@@ -177,8 +177,10 @@ func claudeRuleBody(src Source) []byte {
 	var fm strings.Builder
 	if art.RuleMode == manifest.RuleModeGlob && art.RuleGlobs != "" {
 		fm.WriteString("paths:\n")
+		// Spec: §6.7 (Encoding): a glob is author text, so it is encoded; a
+		// quote or a line break in it would otherwise add frontmatter keys.
 		for _, g := range splitGlobs(art.RuleGlobs) {
-			fm.WriteString("  - \"" + g + "\"\n")
+			fm.WriteString("  - " + yamlDoubleQuote(g) + "\n")
 		}
 	}
 	var b strings.Builder

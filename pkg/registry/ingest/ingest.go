@@ -1650,9 +1650,9 @@ func collisionRejection(tenantID, layerID, id, existingLayer string) RejectedArt
 }
 
 // refuseInvalidArtifacts partitions the walked records under the §4.1
-// unparseable-manifest rule, the §4.6 no-inheritance rule, and the §4.1
-// removed-type rule, in that order. Each record that
-// filesystem.ArtifactRecord.Refusal refuses becomes an
+// unparseable-manifest rule, the §4.6 no-inheritance rule, the §4.1
+// removed-type rule, and the §4.1 MCP server name rule, in that order. Each
+// record that filesystem.ArtifactRecord.Refusal refuses becomes an
 // ingest.invalid_artifact rejection whose details carry the refusing rule's
 // constraint, and the rest are returned in walk order. filesystem.Walk calls
 // the same classifier, so both deployment modes refuse the same artifacts

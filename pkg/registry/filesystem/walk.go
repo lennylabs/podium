@@ -80,19 +80,27 @@ func UnparseableRecord(id string, l Layer, file string, err error) ArtifactRecor
 // Refusal classifies the record against the per-artifact rules both
 // deployment modes apply before lint, in the order the spec fixes: the §4.1
 // unparseable-manifest rule, then the §4.6 no-inheritance rule, then the §4.1
-// removed-type rule. Neither later rule can be evaluated without the parsed
-// frontmatter, so an unparseable record always reports
-// manifest_unparseable. It returns the refusing rule's constraint and reason,
-// or ok false when no rule refuses the record. AuthoredBytes is nil for a
-// plain skill, so its synthesized document is never tested for the extends
-// key or a removed type.
+// removed-type rule, then the §4.1 MCP server name rule. No later rule can be
+// evaluated without the parsed frontmatter, so an unparseable record always
+// reports manifest_unparseable. It returns the refusing rule's constraint and
+// reason, or ok false when no rule refuses the record. AuthoredBytes is nil
+// for a plain skill, so its synthesized document is never tested for the
+// extends key or a removed type.
 //
 // Spec: §4.1, §4.6, §7.3.1, §13.11.3
 func (r *ArtifactRecord) Refusal() (constraint, reason string, ok bool) {
 	if r.Unparseable != "" {
 		return layer.ManifestUnparseableConstraint, r.Unparseable, true
 	}
-	return layer.RemovedFeature(r.AuthoredBytes, r.Type())
+	if constraint, reason, ok := layer.RemovedFeature(r.AuthoredBytes, r.Type()); ok {
+		return constraint, reason, true
+	}
+	// Spec: §4.1 (MCP server names): after the removed-type rule and before
+	// lint, in both deployment modes.
+	if manifest.MCPServerNameRefused(r.Artifact) {
+		return layer.MCPServerNameConstraint, layer.MCPServerNameReason, true
+	}
+	return "", "", false
 }
 
 // CanonicalID is the path under the layer root, separated by "/".

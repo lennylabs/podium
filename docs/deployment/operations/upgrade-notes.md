@@ -80,6 +80,17 @@ From 0.8.0, `mcp-server` artifacts are left out of the MCP server's results, as 
 - An entry that an earlier `load_artifact` wrote stays in the harness configuration file. A `podium sync` that writes into the same file rewrites Podium's entries there and keeps the entry only when the synced selection includes that artifact. Otherwise, delete the entry by hand.
 - A rollback to 0.7.0 needs no step.
 
+### MCP server names and encoded harness configuration
+
+From 0.8.0, the declared `name` of an `mcp-server` artifact is 1 to 64 ASCII letters, digits, `_`, or `-` (spec §4.1). The name is the key of the server's entry in `.mcp.json`, `.codex/config.toml`, and the other harness configuration files. 0.7.0 accepted any string and wrote it into the `[mcp_servers.<name>]` header of `.codex/config.toml` unescaped.
+
+- Before the upgrade, search each layer for `mcp-server` artifacts whose `name` holds another character, such as a dot or a space, and rename them. An `mcp-server` that declares no `name` takes the last segment of its ID and is unaffected.
+- Ingest refuses such an artifact with `ingest.invalid_artifact` and `details.constraint: "mcp_server_name"`, and `podium layer reingest` names it. A filesystem-source `podium sync` drops it and exits 1, and `podium lint` lists it in `rejected`.
+- A version that 0.7.0 stored keeps being served. `podium sync` and `load_artifact` refuse to materialize it for every harness other than `none` with `materialize.untranslatable`, which fails the sync target, and a marketplace render fails its target. Ingest a renamed version to restore the sync. A workspace-overlay artifact with such a name is refused the same way.
+- The adapters now write a TOML key that is not a bare key as a quoted key, escape every control character in TOML and YAML strings, and write the `paths:` globs of a `claude-code` rule and the `name` and `description` of the `SKILL.md` a marketplace emitter writes for a rule as double-quoted scalars. A first sync or render after the upgrade rewrites those files; their decoded values are unchanged.
+- An inject marker that names an artifact ID with a control character, such as a directory name with a tab, now takes the quoted form `podium:begin-q:"..."`. The next sync replaces the block that 0.7.0 wrote for that ID.
+- A rollback to 0.7.0 needs no step for the quoted TOML keys and the double-quoted scalars, which 0.7.0 reads. 0.7.0 does not read the quoted marker form: a sync under 0.7.0 keeps a quoted block as operator content and adds its own block for the ID. Delete the quoted block by hand after a rollback.
+
 ### Visibility entries that are empty or hold a control character
 
 From 0.8.0, a layer's `users` and `groups` entries are non-empty strings that contain no control character, such as a line feed, a carriage return, or a tab. 0.7.0 accepted any string, and the SQLite and Postgres stores read an entry containing a line feed back as several entries.
