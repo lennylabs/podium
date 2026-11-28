@@ -339,6 +339,15 @@ type LayerConfig struct {
 	Organization bool     `json:"organization"`
 	Groups       []string `json:"groups"`
 	Users        []string `json:"users"`
+	// VisibilitySource and VisibilityPending are the §4.7.11 members of a
+	// layer that --layer-path bootstraps: whether its visibility was last set
+	// from a declaration or from the deployment default, and a directory
+	// visibility a start or a cycle read and did not apply in full. Both are
+	// empty on every other layer, and the layer object reports them as
+	// read-only. Unlike the attestation record they are ordinary members of
+	// the row, which PutLayerConfig writes as given.
+	VisibilitySource  string           `json:"visibility_source,omitempty"`
+	VisibilityPending *LayerVisibility `json:"visibility_pending,omitempty"`
 	// WebhookSecret is the HMAC secret for a git source's inbound webhook
 	// (§7.3.1). spec §7.3.1 frames it as a credential returned once at
 	// registration ("podium layer register returns the webhook URL and HMAC
@@ -577,6 +586,13 @@ type Store interface {
 	// the values the write read at its claim. It returns ErrIngestSuperseded,
 	// changing nothing, when either condition fails.
 	WriteLayerAttestation(ctx context.Context, tenantID, layerID, claim string, w AttestationWrite) error
+	// WriteLayerVisibility applies w to the live layer while it holds claim
+	// and its stored mark and commit equal mark and commit, the values the
+	// cycle's attestation record write stored. It returns
+	// ErrIngestSuperseded, changing nothing, when either condition fails.
+	// It is the second visibility write of a cycle that passed the layer
+	// step (§4.7.11 Visibility of a path-bootstrapped layer).
+	WriteLayerVisibility(ctx context.Context, tenantID, layerID, claim string, mark time.Time, commit string, w VisibilityWrite) error
 	// ClaimLayerIngestWithReset claims the live layer as ClaimLayerIngest
 	// does and, in the same write, applies the §4.7.11 mark reset: it clears
 	// the mark and sets the recorded commit to toCommit, empty for none. It

@@ -67,7 +67,9 @@ const layerWriteAssignments = `source_type = excluded.source_type,
 			repo_userinfo = excluded.repo_userinfo,
 			trust_mode = excluded.trust_mode,
 			trust_requirements = excluded.trust_requirements,
-			trust_layer_root = excluded.trust_layer_root`
+			trust_layer_root = excluded.trust_layer_root,
+			visibility_source = excluded.visibility_source,
+			visibility_pending = excluded.visibility_pending`
 
 // AttestationStatusOK is the status of a cycle that passed the layer step.
 const AttestationStatusOK = "ok"
@@ -88,6 +90,10 @@ type AttestationWrite struct {
 	Commit     string
 	ReadMark   *time.Time
 	ReadCommit string
+	// Visibility, when not nil, is written in the same store write: the
+	// visibility of a layer that --layer-path bootstraps, which the record
+	// write of its cycle carries (§4.7.11).
+	Visibility *VisibilityWrite
 }
 
 // AttestationCopy is what MigrateLayerConfig did with the attestation record
@@ -199,6 +205,11 @@ func (s *Memory) WriteLayerAttestation(_ context.Context, tenantID, layerID, cla
 	if err != nil {
 		return err
 	}
+	if w.Visibility != nil {
+		if err := w.Visibility.check(layerID); err != nil {
+			return err
+		}
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.holdsClaimLocked(tenantID, layerID, claim) {
@@ -220,6 +231,9 @@ func (s *Memory) WriteLayerAttestation(_ context.Context, tenantID, layerID, cla
 	checked := normalizeMark(w.CheckedAt)
 	rec.Status, rec.Details, rec.Dropped, rec.CheckedAt = w.Status, details, w.Dropped, &checked
 	cfg.AttestationRecord = rec
+	if w.Visibility != nil {
+		cfg = w.Visibility.apply(cfg)
+	}
 	s.layers[key] = cfg
 	return nil
 }

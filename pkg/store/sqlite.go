@@ -159,6 +159,8 @@ func (s *SQLite) applySchema() error {
 			attestation_details TEXT NOT NULL DEFAULT '',
 			attestation_dropped INTEGER NOT NULL DEFAULT 0,
 			attestation_checked_at TEXT,
+			visibility_source TEXT NOT NULL DEFAULT '',
+			visibility_pending TEXT NOT NULL DEFAULT '',
 			PRIMARY KEY (tenant_id, id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS vector_pending (
@@ -1099,6 +1101,10 @@ func sqlitePutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) erro
 	if err != nil {
 		return err
 	}
+	pending, err := pendingColumn(cfg.VisibilityPending)
+	if err != nil {
+		return err
+	}
 	createdAt := cfg.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -1112,8 +1118,8 @@ func sqlitePutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) erro
 			(tenant_id, id, source_type, repo, ref, root, local_path, ord,
 			 user_defined, owner, public, organization, groups, users,
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
-			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root, visibility_source, visibility_pending)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, id) DO UPDATE SET `+layerWriteAssignments,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
@@ -1121,7 +1127,7 @@ func sqlitePutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) erro
 		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
-		userinfo, cfg.TrustMode, trustReqs, cfg.TrustLayerRoot)
+		userinfo, cfg.TrustMode, trustReqs, cfg.TrustLayerRoot, cfg.VisibilitySource, pending)
 	return err
 }
 
@@ -1132,7 +1138,8 @@ func (s *SQLite) GetLayerConfig(ctx context.Context, tenantID, id string) (Layer
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
-		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at,
+		       visibility_source, visibility_pending
 		FROM layer_configs
 		WHERE tenant_id = ? AND id = ? AND deleted_at IS NULL`, tenantID, id)
 	cfg, err := scanLayerConfig(row)
@@ -1149,7 +1156,8 @@ func (s *SQLite) ListLayerConfigs(ctx context.Context, tenantID string) ([]Layer
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
-		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at,
+		       visibility_source, visibility_pending
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NULL
 		ORDER BY ord ASC, id ASC`, tenantID)
 	if err != nil {
@@ -1230,7 +1238,8 @@ func (s *SQLite) ListDeletedLayerConfigs(ctx context.Context, tenantID string) (
 		       user_defined, owner, public, organization, groups, users,
 		       webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 		       repo_userinfo, trust_mode, trust_requirements, trust_layer_root,
-		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at
+		       attestation_mark, attested_commit, attestation_status, attestation_details, attestation_dropped, attestation_checked_at,
+		       visibility_source, visibility_pending
 		FROM layer_configs WHERE tenant_id = ? AND deleted_at IS NOT NULL
 		ORDER BY id ASC`, tenantID)
 	if err != nil {
@@ -1297,7 +1306,7 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 	var userDefined, public, org int
 	var repo, groups, users, createdAt, trustReqs string
 	var deletedAt, lastIngestedAt, repoUserinfo, mark, checkedAt sql.NullString
-	var details string
+	var details, pending string
 	err := scanner.Scan(
 		&cfg.TenantID, &cfg.ID, &cfg.SourceType,
 		&repo, &cfg.Ref, &cfg.Root, &cfg.LocalPath,
@@ -1307,8 +1316,11 @@ func scanLayerConfig(scanner rowScanner) (LayerConfig, error) {
 		&createdAt, &deletedAt, &lastIngestedAt, &repoUserinfo,
 		&cfg.TrustMode, &trustReqs, &cfg.TrustLayerRoot,
 		&mark, &cfg.Commit, &cfg.Status, &details,
-		&cfg.Dropped, &checkedAt)
+		&cfg.Dropped, &checkedAt, &cfg.VisibilitySource, &pending)
 	if err != nil {
+		return LayerConfig{}, err
+	}
+	if cfg.VisibilityPending, err = parsePending(pending); err != nil {
 		return LayerConfig{}, err
 	}
 	if cfg.TrustRequirements, err = parseTrustRequirements(trustReqs); err != nil {
