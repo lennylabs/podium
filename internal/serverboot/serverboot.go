@@ -504,12 +504,12 @@ func bootstrapLayerPath(st store.Store, tenantID, layerPath string, vis layer.Vi
 		// layer (§7.3.1).
 		now := time.Now().UTC()
 		cfg := store.LayerConfig{
-			TenantID:     tenantID,
-			ID:           l.ID,
-			SourceType:   "local",
-			LocalPath:    l.Path,
-			Order:        order,
-			CreatedAt:    now,
+			TenantID:   tenantID,
+			ID:         l.ID,
+			SourceType: "local",
+			LocalPath:  l.Path,
+			Order:      order,
+			CreatedAt:  now,
 		}
 		// Spec: §7.3.1 (Layer trust policy), §4.7.11 (Local layers and the
 		// standalone bootstrap) — a re-seeded --layer-path layer keeps the
