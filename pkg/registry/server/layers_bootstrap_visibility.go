@@ -58,12 +58,27 @@ var errVisibilityContended = errors.New("the layer's visibility changed during e
 // body omits is kept. A refused or failed write therefore persists nothing,
 // and the caller records events only after a write that succeeded. An update
 // that carries none writes with the keeping write and reads the row back so
-// the response reports the members the store kept.
+// the response reports the members the store kept. With trustConditional
+// every write applies only while the layer stores the trust requirements
+// before holds, and a changed requirement returns
+// store.ErrTrustRequirementsChanged.
 //
 // Spec: §7.3.1, §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility)
-func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, before, cfg store.LayerConfig, vis visibilityPatch) (store.LayerConfig, store.LayerConfig, error) {
+func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, before, cfg store.LayerConfig, vis visibilityPatch, trustConditional bool) (store.LayerConfig, store.LayerConfig, error) {
+	keep := e.store.PutLayerConfigKeepingVisibility
+	putIf := e.store.PutLayerConfigIf
+	if trustConditional {
+		// Spec: §7.3.1 (Patch semantics on the update body) — the write
+		// applies only while the layer stores the requirements read.
+		keep = func(ctx context.Context, cfg store.LayerConfig) error {
+			return e.store.PutLayerConfigIfTrust(ctx, cfg, before.TrustRequirements, nil)
+		}
+		putIf = func(ctx context.Context, cfg store.LayerConfig, s store.VisibilityState) error {
+			return e.store.PutLayerConfigIfTrust(ctx, cfg, before.TrustRequirements, &s)
+		}
+	}
 	if !vis.carried() {
-		if err := e.store.PutLayerConfigKeepingVisibility(ctx, cfg); err != nil {
+		if err := keep(ctx, cfg); err != nil {
 			return cfg, before, err
 		}
 		stored, err := e.store.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
@@ -75,7 +90,7 @@ func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, before, cfg store
 	read := before
 	for range updateVisibilityRetries {
 		next := withVisibilityOf(cfg, declareUpdatedVisibility(read, vis.applyTo(read)))
-		switch err := e.store.PutLayerConfigIf(ctx, next, read.VisibilityState()); {
+		switch err := putIf(ctx, next, read.VisibilityState()); {
 		case err == nil:
 			return next, withVisibilityOf(before, read), nil
 		case !errors.Is(err, store.ErrVisibilityChanged):

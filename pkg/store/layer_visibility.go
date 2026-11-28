@@ -433,3 +433,128 @@ func (p *Postgres) PutLayerConfigIf(ctx context.Context, cfg LayerConfig, expect
 	}
 	return tx.Commit()
 }
+
+// ErrTrustRequirementsChanged reports a conditional layer write whose row no
+// longer holds the trust requirements the writer read.
+var ErrTrustRequirementsChanged = errors.New("store: the layer's trust requirements changed")
+
+// PutLayerConfigIfTrust writes cfg while the held row's trust requirements,
+// and with vis set its visibility members, equal the expected ones, under
+// the store lock.
+func (s *Memory) PutLayerConfigIfTrust(_ context.Context, cfg LayerConfig, expect []TrustRequirement, vis *VisibilityState) error {
+	cfg, err := storedLayerForm(cfg)
+	if err != nil {
+		return err
+	}
+	want, err := trustRequirementsColumn(expect)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, ok := s.layers[layerKey(cfg.TenantID, cfg.ID)]
+	if !ok {
+		return ErrNotFound
+	}
+	got, err := trustRequirementsColumn(held.TrustRequirements)
+	if err != nil {
+		return err
+	}
+	if got != want {
+		return ErrTrustRequirementsChanged
+	}
+	if vis == nil {
+		cfg.Public, cfg.Organization, cfg.Groups, cfg.Users = held.Public, held.Organization, held.Groups, held.Users
+		cfg.VisibilitySource, cfg.VisibilityPending = held.VisibilitySource, held.VisibilityPending
+	} else {
+		same, err := sameStoredVisibility(held, *vis)
+		if err != nil {
+			return err
+		}
+		if !same {
+			return ErrVisibilityChanged
+		}
+	}
+	s.putLayerLocked(cfg)
+	return nil
+}
+
+// heldTrustMatches compares the trust_requirements column a row holds, read
+// in a transaction that holds the row, with expect in its stored form.
+func heldTrustMatches(row *sql.Row, expect []TrustRequirement) error {
+	var held string
+	switch err := row.Scan(&held); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrNotFound
+	case err != nil:
+		return err
+	}
+	want, err := trustRequirementsColumn(expect)
+	if err != nil {
+		return err
+	}
+	if held != want {
+		return ErrTrustRequirementsChanged
+	}
+	return nil
+}
+
+// PutLayerConfigIfTrust writes cfg in one transaction that takes the write
+// lock before it reads the held trust requirements and visibility columns.
+func (s *SQLite) PutLayerConfigIfTrust(ctx context.Context, cfg LayerConfig, expect []TrustRequirement, vis *VisibilityState) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE layer_configs SET ingest_claim = ingest_claim WHERE tenant_id = ? AND id = ?`, cfg.TenantID, cfg.ID); err != nil {
+		return err
+	}
+	if err := heldTrustMatches(tx.QueryRowContext(ctx, `SELECT trust_requirements FROM layer_configs WHERE tenant_id = ? AND id = ?`, cfg.TenantID, cfg.ID), expect); err != nil {
+		return err
+	}
+	assignments := layerKeepVisibilityAssignments
+	if vis != nil {
+		if err := heldVisibilityMatches(tx.QueryRowContext(ctx, `
+			SELECT public != 0, organization != 0, groups, users, visibility_source, visibility_pending
+			FROM layer_configs WHERE tenant_id = ? AND id = ?`, cfg.TenantID, cfg.ID), cfg.ID, *vis); err != nil {
+			return err
+		}
+		assignments = layerWriteAssignments
+	}
+	if err := sqliteUpsertLayer(ctx, tx, cfg, assignments); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PutLayerConfigIfTrust writes cfg in one transaction with the row locked.
+func (p *Postgres) PutLayerConfigIfTrust(ctx context.Context, cfg LayerConfig, expect []TrustRequirement, vis *VisibilityState) error {
+	conn, release, err := p.org(ctx, cfg.TenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := heldTrustMatches(tx.QueryRowContext(ctx, `
+		SELECT trust_requirements FROM layer_configs WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, cfg.TenantID, cfg.ID), expect); err != nil {
+		return err
+	}
+	assignments := layerKeepVisibilityAssignments
+	if vis != nil {
+		if err := heldVisibilityMatches(tx.QueryRowContext(ctx, `
+			SELECT public, organization, groups, users, visibility_source, visibility_pending
+			FROM layer_configs WHERE tenant_id = $1 AND id = $2`, cfg.TenantID, cfg.ID), cfg.ID, *vis); err != nil {
+			return err
+		}
+		assignments = layerWriteAssignments
+	}
+	if err := pgUpsertLayer(ctx, tx, cfg, assignments); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

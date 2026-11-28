@@ -552,6 +552,16 @@ type Store interface {
 	// a visibility member uses it, so a refused write leaves the whole row
 	// as it was (§7.3.1).
 	PutLayerConfigIf(ctx context.Context, cfg LayerConfig, expect VisibilityState) error
+	// PutLayerConfigIfTrust writes cfg in one store write only while the
+	// held row's trust requirements equal expect in their stored form, and
+	// returns ErrTrustRequirementsChanged, writing nothing, when they
+	// differ, and ErrNotFound for a row the store does not hold. With vis
+	// nil the write keeps the held visibility members, as
+	// PutLayerConfigKeepingVisibility does; with vis set it also applies
+	// only while they equal *vis, as PutLayerConfigIf does. An update that
+	// carries expected_trust_requirements uses it, so a requirement another
+	// writer stored after the update's read is not dropped (§7.3.1).
+	PutLayerConfigIfTrust(ctx context.Context, cfg LayerConfig, expect []TrustRequirement, vis *VisibilityState) error
 	GetLayerConfig(ctx context.Context, tenantID, id string) (LayerConfig, error)
 	ListLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
 	// DeleteLayerConfig soft-deletes a layer per §8.4: the layer config

@@ -1614,8 +1614,9 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// spec: §7.3.1 (Patch semantics on the update body) — an update that
 	// names the requirements it expects to replace applies only while the
 	// layer stores them, so a raced replacement drops no requirement.
-	if status, msg, details := expectedRequirementsError(body, cfg); msg != "" {
-		writeErrorDetails(w, status, "registry.invalid_argument", msg, details)
+	trustConditional, msg, details := expectedRequirementsError(body, cfg)
+	if msg != "" {
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument", msg, details)
 		return
 	}
 	usernameSent, err := carriesRepoUsername(body)
@@ -1771,8 +1772,11 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// keep the visibility) — an update that carries no visibility member
 	// keeps the stored visibility members, so a cycle's narrowing that
 	// landed after the read above stays in force.
-	stored, prior, err := e.writeUpdatedLayer(r.Context(), before, cfg, vis)
+	stored, prior, err := e.writeUpdatedLayer(r.Context(), before, cfg, vis, trustConditional)
 	switch {
+	case errors.Is(err, store.ErrTrustRequirementsChanged):
+		writeErrorDetails(w, http.StatusBadRequest, "registry.invalid_argument", trustRequirementsChangedMessage(cfg.ID), trustRequirementsChangedDetails())
+		return
 	case errors.Is(err, errVisibilityContended):
 		writeError(w, http.StatusServiceUnavailable, "registry.unavailable", err.Error())
 		return
