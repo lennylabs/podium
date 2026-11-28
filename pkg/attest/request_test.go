@@ -31,12 +31,12 @@ func TestCheckRequestedID_WellFormedRule(t *testing.T) {
 		"", "/a", "a/", "a//b", "a/./b", "a/../b", "..", ".", "a\\b", "a\x00b", "a\x1fb", "a\u0085b", "a\u007fb",
 		"a/.hidden", ".podium/x", "\xff",
 		"a/close-books.", "a/close-books ", "CLOSE-~1", "GIT~1", "PODIUM~1", "con", "nul.txt", "COM¹",
-		"conin$", "a:b", "a?b", "\u200c.git", "\ufeffx", "CON .txt", "nul  .md", "ABCDEF~1.TXT",
+		"conin$", "a:b", "a?b", "a/b@c", "finance/close-books@1.2.0", "\u200c.git", "\ufeffx", "CON .txt", "nul  .md", "ABCDEF~1.TXT",
 	}
 	for _, id := range refused {
 		wantFailure(t, attest.CheckRequestedID(id), attest.CodeRequestMismatch, attest.ConstraintIDForm)
 	}
-	for _, id := range []string{"finance/close-books", "a", "release~2", "a/ABCDEF~1.TEXT", "a~1.b.c", "x/file.txt.~1~", "a/b@c"} {
+	for _, id := range []string{"finance/close-books", "a", "release~2", "a/ABCDEF~1.TEXT", "a~1.b.c", "x/file.txt.~1~"} {
 		if err := attest.CheckRequestedID(id); err != nil {
 			t.Errorf("CheckRequestedID(%q) = %v, want nil", id, err)
 		}

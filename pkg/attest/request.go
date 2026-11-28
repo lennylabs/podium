@@ -62,34 +62,47 @@ func CheckRecordPaths(rec version.DeliveryRecord) error {
 
 // pathFormViolation returns why p breaks the well-formed rule, or "" when
 // it meets it. An ID also refuses a segment that begins with a dot, which
-// no discovered package has; a resource path may hold one, such as
+// no discovered package has, and an @, which no canonical ID holds and
+// which would let a requested ID spell the versioned subject name of
+// another artifact; a resource path may hold either, such as
 // .github/workflow.yml.
 func pathFormViolation(p string, isID bool) string {
 	switch {
 	case p == "":
 		return "is empty"
-	case !utf8.ValidString(p):
-		return "is not valid UTF-8"
 	case strings.HasPrefix(p, "/"):
 		return "begins with /"
-	case strings.ContainsRune(p, '\\'):
-		return "holds a backslash"
-	case strings.ContainsFunc(p, isControl):
-		return "holds a control character"
 	case !isID && filepath.VolumeName(p) != "":
 		return "begins with a volume name"
 	}
 	for _, seg := range strings.Split(p, "/") {
-		switch {
-		case seg == "":
-			return "holds an empty segment"
-		case seg == "." || seg == "..":
-			return fmt.Sprintf("holds the segment %q", seg)
-		case isID && strings.HasPrefix(seg, "."):
-			return "holds a segment that begins with ."
-		case !IsPortableName(seg):
-			return fmt.Sprintf("holds the segment %q, which is not a portable name", seg)
+		if why := segmentViolation(seg, isID); why != "" {
+			return why
 		}
+	}
+	return ""
+}
+
+// segmentViolation returns why one segment of a requested ID (isID) or of a
+// resource path breaks the well-formed rule, or "" when it meets it.
+func segmentViolation(seg string, isID bool) string {
+	switch {
+	case seg == "":
+		return "holds an empty segment"
+	case !utf8.ValidString(seg):
+		return "is not valid UTF-8"
+	case strings.ContainsRune(seg, '\\'):
+		return "holds a backslash"
+	case strings.ContainsFunc(seg, isControl):
+		return "holds a control character"
+	case seg == "." || seg == "..":
+		return fmt.Sprintf("holds the segment %q", seg)
+	case isID && strings.HasPrefix(seg, "."):
+		return "holds a segment that begins with ."
+	case isID && strings.Contains(seg, "@"):
+		return "holds @"
+	case !IsPortableName(seg):
+		return fmt.Sprintf("holds the segment %q, which is not a portable name", seg)
 	}
 	return ""
 }

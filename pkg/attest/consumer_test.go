@@ -13,6 +13,7 @@ import (
 
 	sh "github.com/lennylabs/podium/internal/testharness/sigstoreharness"
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/version"
 )
@@ -486,4 +487,110 @@ func TestChecker_Concurrent(t *testing.T) {
 	for err := range errs {
 		t.Fatal(err)
 	}
+}
+
+// Spec: §4.7.11 (Well-formed requests and records), §4.7.6 — a requested
+// ID that holds @ is refused before any request, so it cannot spell the
+// versioned subject name of another artifact and be served as a skill under
+// a registry-assigned version, whose expected subject is the bare ID.
+func TestChecker_AtSignIDCannotTakeAnotherSubject(t *testing.T) {
+	t.Parallel()
+	f := newConsumerFixture(t)
+	digest := signerDigest(t, map[string][]byte{"SKILL.md": []byte(plainSkillMD), "scripts/run.sh": []byte("echo\n"), "empty.txt": nil})
+	b := f.sign(t, "finance/close-books@1.2.0", digest)
+	doc, err := manifest.SynthesizedSkillDocument("0.0.0-auto.3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := servedPlainSkill(t)
+	rec.ID, rec.Version, rec.Frontmatter = "finance/close-books@1.2.0", "0.0.0-auto.3", string(doc)
+	f.served.Record = rec
+	f.setReferences(t, b)
+	c := f.checker(t, keyRule(t, "require", "finance/close-books"), requireRule("require", "**"))
+	_, err = f.verify(c, "finance/close-books@1.2.0", "")
+	wantFailure(t, err, attest.CodeRequestMismatch, attest.ConstraintIDForm)
+	if _, err := attest.SubjectName("finance/close-books@1.2.0", ""); !errors.Is(err, attest.ErrNoSubjectName) {
+		t.Fatalf("SubjectName of an ID with @: %v", err)
+	}
+	_, err = attest.ExpectedSubjectName("finance/close-books@1.2.0", rec)
+	wantFailure(t, err, attest.CodeAttestationMismatch, attest.ConstraintSubject)
+}
+
+// Spec: §4.7.11 (Policy sources) — a repository-source require rule that
+// its own signer meets does not silence a user-source warn rule: the user's
+// rule is still checked and its failure is a warning.
+func TestChecker_RepositoryRequireKeepsUserWarn(t *testing.T) {
+	t.Parallel()
+	f := newConsumerFixture(t)
+	user := fileOf(t, `{"version":1,"rules":[`+keyRule(t, "warn", "**")+`]}`)
+	repo := writePolicy(t, f.h, policyJSON(requireRule("require", "**")), sign.AttestationInstance{})
+	p, err := attest.NewPolicy(
+		attest.Source{Class: attest.UserSource, Name: "home", Files: []*attest.PolicyFile{user}},
+		attest.Source{Class: attest.RepositorySource, Name: "workspace", Files: []*attest.PolicyFile{repo}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := f.verify(&attest.Checker{Policy: p, Bundles: f.src}, "finance/pay", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Resolution.Mode != attest.ModeRequire || len(res.Accepted) != 1 || len(res.Warnings) != 1 ||
+		res.Warnings[0].Code != attest.CodeAttestationInvalid {
+		t.Fatalf("result = %+v", res)
+	}
+}
+
+// Spec: §4.7.11 (Attestation check, step 8) — a reference that is not
+// cached under offline-only, not found, answered with a 5xx status, or not
+// reachable is unusable, and a bundle of another reference still meets the
+// rule; with no bundle at all the outcome is missing, or
+// network.registry_unreachable when a fetch could not reach the registry.
+func TestChecker_UnusableReferencesDoNotAbort(t *testing.T) {
+	t.Parallel()
+	f := newConsumerFixture(t)
+	other := f.sign(t, "finance/other@1.0.0", "sha256:"+strings.Repeat("1", 64))
+	rule := requireRule("require", "finance/**")
+	cache := &attest.MemoryCache{}
+	_ = cache.Put(attest.AttestationDigest(f.bundle), f.bundle)
+	f.setReferences(t, other, f.bundle)
+	off := f.checker(t, rule)
+	off.Bundles = attest.CachedBundles{Cache: cache, OfflineOnly: true}
+	if _, err := f.verify(off, "finance/pay", ""); err != nil {
+		t.Fatalf("offline with one cached bundle: %v", err)
+	}
+	for name, failing := range map[string]error{
+		"not found":   attest.ErrBundleNotFound,
+		"unavailable": attest.ErrBundleUnavailable,
+		"unreachable": errors.New("dial tcp: refused"),
+	} {
+		src := &perDigestSource{fail: map[string]error{attest.AttestationDigest(other): failing}, inner: f.src}
+		c := f.checker(t, rule)
+		c.Bundles = src
+		if _, err := f.verify(c, "finance/pay", ""); err != nil {
+			t.Errorf("%s beside a valid bundle: %v", name, err)
+		}
+	}
+	f.setReferences(t, other)
+	src := &perDigestSource{fail: map[string]error{attest.AttestationDigest(other): attest.ErrBundleUnavailable}, inner: f.src}
+	c := f.checker(t, rule)
+	c.Bundles = src
+	_, err := f.verify(c, "finance/pay", "")
+	wantFailure(t, err, attest.CodeAttestationMissing, "")
+	_, err = f.verify(off, "finance/pay", "")
+	wantFailure(t, err, attest.CodeAttestationMissing, "")
+}
+
+// perDigestSource fails the digests in fail and serves the rest from inner.
+type perDigestSource struct {
+	fail  map[string]error
+	inner attest.BundleSource
+}
+
+// Bundle fails or delegates.
+func (s *perDigestSource) Bundle(ctx context.Context, digest string) ([]byte, error) {
+	if err, ok := s.fail[digest]; ok {
+		return nil, err
+	}
+	return s.inner.Bundle(ctx, digest)
 }

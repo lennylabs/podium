@@ -196,17 +196,63 @@ func firstMatch(rules []PolicyRule, id string) int {
 // Spec: §4.7.11 (Policy sources)
 func (r Resolution) RuleKey() string { return r.key }
 
-// metRules returns the matched rules whose mode equals mode, which are the
-// rules the record meets under require and whose failures a consumer
-// reports under warn.
-func (r Resolution) metRules(mode Mode) []RuleMatch {
+// rulesOfMode returns the matched rules whose mode for the ID is mode and
+// that hold a requirement.
+func (r Resolution) rulesOfMode(mode Mode) []RuleMatch {
 	var out []RuleMatch
 	for _, m := range r.Matches {
-		if m.Mode == mode {
+		if m.Mode == mode && len(m.Rule().Requirements) > 0 {
 			out = append(out, m)
 		}
 	}
 	return out
+}
+
+// CheckPlan is what step 1 of the attestation check decides for an ID whose
+// mode is above none.
+type CheckPlan struct {
+	// Enforced lists the rules the record meets: the matched require
+	// rules under require, none under warn. A failure of one refuses the
+	// record.
+	Enforced []RuleMatch
+	// Reported lists the matched warn rules, whose failures are warnings
+	// under warn and under require alike, so a require rule of one source
+	// does not silence a warn rule of another.
+	Reported []RuleMatch
+	// Warnings holds the step 1 failures that are warnings: a user mode of
+	// warn that no user-source rule meets.
+	Warnings []*Failure
+}
+
+// Plan applies step 1 of the §4.7.11 attestation check to the resolution
+// of an ID whose mode is above none. It returns the rules the record meets
+// and the rules whose failures are reported, and an error when the ID has
+// no trusted signer: user_rule for a user mode of require that no rule of
+// a user-source file meets, no_rule when the ID matched no rule, and
+// no_requirements when no rule of its mode holds a requirement. The error
+// refuses the record under require and is a warning under warn.
+//
+// Spec: §4.7.11 (Policy sources, Attestation check, step 1)
+func (r Resolution) Plan() (CheckPlan, error) {
+	var plan CheckPlan
+	if r.UserMode.AboveNone() && !r.userRuleMet() {
+		f := fail(CodeAttestationUntrusted, ConstraintUserRule, "no rule of a user-source file with a requirement matches the ID", nil)
+		if r.UserMode == ModeRequire {
+			return plan, f
+		}
+		plan.Warnings = append(plan.Warnings, f)
+	}
+	if len(r.Matches) == 0 {
+		return plan, fail(CodeAttestationUntrusted, ConstraintNoRule, "no rule matches the ID, and the default mode is above none", nil)
+	}
+	if r.Mode == ModeRequire {
+		plan.Enforced = r.rulesOfMode(ModeRequire)
+	}
+	plan.Reported = r.rulesOfMode(ModeWarn)
+	if len(r.rulesOfMode(r.Mode)) == 0 {
+		return plan, fail(CodeAttestationUntrusted, ConstraintNoRequirements, "the rules of the ID's mode hold no requirement", nil)
+	}
+	return plan, nil
 }
 
 // userRuleMet reports whether a matched rule of a user-source file has the

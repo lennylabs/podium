@@ -98,7 +98,8 @@ func excludedRune(r rune) bool {
 // passes an empty authoredVersion for an unresolved package and for one that
 // declares no version, so its name is the bare ID. An ID that breaks the
 // character rule returns an error wrapping ErrNoSubjectName, and one under
-// the reserved .podium/ prefix an error wrapping ErrReservedName.
+// the reserved .podium/ prefix an error wrapping ErrReservedName. An ID
+// that holds @ returns an error wrapping ErrNoSubjectName.
 //
 // Spec: §4.7.6
 func SubjectName(id, authoredVersion string) (string, error) {
@@ -107,6 +108,11 @@ func SubjectName(id, authoredVersion string) (string, error) {
 	}
 	if strings.HasPrefix(id, reservedPrefix) {
 		return "", fmt.Errorf("%w: %q", ErrReservedName, id)
+	}
+	// A canonical ID holds no @ (§4.2), and the name splits at its last @,
+	// so an ID with one would spell another artifact's versioned name.
+	if strings.Contains(id, versionSplitter) {
+		return "", fmt.Errorf("%w: %q holds @", ErrNoSubjectName, id)
 	}
 	if manifest.ValidateVersion(authoredVersion) != nil {
 		return id, nil
