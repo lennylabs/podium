@@ -64,6 +64,9 @@ type attestationSigner struct {
 	AnySource               bool   `json:"any_source,omitempty"`
 	SourceRepositoryRef     string `json:"source_repository_ref,omitempty"`
 	AnyRef                  bool   `json:"any_ref,omitempty"`
+	// PublicKey is the public_key of a key-based signer, which no vector
+	// of this file names.
+	PublicKey string `json:"public_key,omitempty"`
 }
 
 // subjectCheck is one subject query and its answer.
