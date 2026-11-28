@@ -109,9 +109,9 @@ func TestTagNamesHash(t *testing.T) {
 		`"` + h + `+` + strings.Repeat("0", 32) + `"`: true,
 		`"` + h + `+` + strings.Repeat("A", 32) + `"`: false,
 		`"` + h + `+` + strings.Repeat("0", 31) + `"`: false,
-		`"` + h + `+0123"`:                            false,
-		"*":                                           false,
-		`W/"` + h + `"`:                               false,
+		`"` + h + `+0123"`: false,
+		"*":                false,
+		`W/"` + h + `"`:    false,
 	} {
 		if got := tagNamesHash(tag, h); got != want {
 			t.Errorf("tagNamesHash(%q) = %v, want %v", tag, got, want)
