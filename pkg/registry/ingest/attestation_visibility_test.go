@@ -447,3 +447,154 @@ func TestBootstrapVisibility_ChangeReachesTheEventStream(t *testing.T) {
 		t.Fatalf("published %q, want %q", published, want)
 	}
 }
+
+// TestBootstrapVisibility_ReplayOfAnOlderWiderSignedStateIsRefused covers a
+// party who restores an older signed state whose .layer-config was wider,
+// with its bundle: the mark refuses it as stale, the row keeps the newer
+// signed visibility, and the wider file is only held pending.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer, Attestation mark)
+func TestBootstrapVisibility_ReplayOfAnOlderWiderSignedStateIsRefused(t *testing.T) {
+	t.Parallel()
+	f := newAttestFixture(t, layer.TrustModeRequire)
+	f.bootstrapRow(layer.TrustModeRequire, store.LayerVisibility{Groups: []string{"g"}}, store.VisibilitySourceDeclared)
+	f.layerConfig("visibility:\n  public: true\n")
+	old := f.sign(f.subjects(), time.Minute)
+	f.place(old)
+	if _, err := f.cycle(); err != nil {
+		t.Fatal(err)
+	}
+	f.layerConfig("visibility:\n  groups: [g]\n")
+	f.signLayer(2 * time.Minute)
+	if _, err := f.cycle(); err != nil {
+		t.Fatal(err)
+	}
+	f.layerConfig("visibility:\n  public: true\n")
+	f.place(old)
+	_, err := f.cycle()
+	if code, _ := refusal(t, err); code != ingest.CodeAttestationStale {
+		t.Fatalf("replay code %s", code)
+	}
+	if got := f.row(); got != "false/false/[g]/[] declared true/false/[]/[]" {
+		t.Fatalf("row after the replay = %s", got)
+	}
+}
+
+// TestBootstrapVisibility_StaleLayerWriteKeepsTheNarrowing covers a layer
+// write built from a row read before a cycle narrowed it, which reorder and
+// an update without a visibility member make: the store keeps the narrowed
+// visibility members.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility)
+func TestBootstrapVisibility_StaleLayerWriteKeepsTheNarrowing(t *testing.T) {
+	t.Parallel()
+	f := newAttestFixture(t, layer.TrustModeWarn)
+	f.bootstrapRow(layer.TrustModeWarn, store.LayerVisibility{Public: true}, store.VisibilitySourceDeclared)
+	ctx := context.Background()
+	stale, err := f.st.GetLayerConfig(ctx, "tenant-1", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.layerConfig("visibility:\n  groups: [g]\n")
+	if _, err := f.cycle(); err != nil {
+		t.Fatal(err)
+	}
+	stale.Order = 10
+	if err := f.st.PutLayerConfigKeepingVisibility(ctx, stale); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.row(); got != "false/false/[g]/[] declared -" {
+		t.Fatalf("row after a stale write = %s", got)
+	}
+}
+
+// TestBootstrapVisibility_UpdateLastsUntilThePassedCycle covers a narrowing
+// made through an update: a cycle that passes over the signed state already
+// applied, as the startup ingest of a restart does, applies the signed file
+// again, while an unsigned narrower file is kept by every later cycle.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Updates)
+func TestBootstrapVisibility_UpdateLastsUntilThePassedCycle(t *testing.T) {
+	t.Parallel()
+	f := newAttestFixture(t, layer.TrustModeRequire)
+	f.bootstrapRow(layer.TrustModeRequire, store.LayerVisibility{Public: true}, store.VisibilitySourceDeclared)
+	f.layerConfig("visibility:\n  public: true\n")
+	f.signLayer(time.Minute)
+	if _, err := f.cycle(); err != nil {
+		t.Fatal(err)
+	}
+	f.bootstrapRow(layer.TrustModeRequire, store.LayerVisibility{Groups: []string{"incident"}}, store.VisibilitySourceDeclared)
+	if _, err := f.cycle(); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.row(); got != "true/false/[]/[] declared -" {
+		t.Fatalf("after a passed cycle over the same signed state = %s", got)
+	}
+	f.layerConfig("visibility:\n  groups: [incident]\n")
+	for range 2 {
+		if _, err := f.cycle(); err == nil {
+			t.Fatal("an unsigned file passed the layer step")
+		}
+	}
+	if got := f.row(); got != "false/false/[incident]/[] declared -" {
+		t.Fatalf("after an unsigned narrower file = %s", got)
+	}
+}
+
+// TestBootstrapVisibility_DefaultSourceFollowsUnsignedFilesWithinTheDefault
+// covers a row whose visibility_source is default: its baseline is the
+// deployment default, which the last signed state applied, so an unsigned
+// narrower file applies and removing it returns the row to the default, and
+// no unsigned file takes the row beyond the default.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Updates)
+func TestBootstrapVisibility_DefaultSourceFollowsUnsignedFilesWithinTheDefault(t *testing.T) {
+	t.Parallel()
+	f := newAttestFixture(t, layer.TrustModeWarn)
+	f.cfg.DefaultVisibility = layer.Visibility{Organization: true}
+	f.bootstrapRow(layer.TrustModeWarn, store.LayerVisibility{Organization: true}, store.VisibilitySourceDefault)
+	want := map[string]string{
+		"visibility:\n  groups: [g]\n":  "false/false/[g]/[] default -",
+		"":                              "false/true/[]/[] default -",
+		"visibility:\n  public: true\n": "false/true/[]/[] default true/false/[]/[]",
+	}
+	for _, body := range []string{"visibility:\n  groups: [g]\n", "", "visibility:\n  public: true\n"} {
+		f.layerConfig(body)
+		if _, err := f.cycle(); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.row(); got != want[body] {
+			t.Fatalf("file %q: row = %s, want %s", body, got, want[body])
+		}
+	}
+}
+
+// TestBootstrapVisibility_SymbolicLinkLayerConfigFailsTheCycle covers a
+// .layer-config that is a symbolic link, inside or outside the layer root:
+// the confined snapshot refuses it, so the cycle fails before its record
+// write and changes nothing.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer), §7.3.1 (Local-source ingest confinement)
+func TestBootstrapVisibility_SymbolicLinkLayerConfigFailsTheCycle(t *testing.T) {
+	t.Parallel()
+	for _, outside := range []bool{false, true} {
+		f := newAttestFixture(t, layer.TrustModeWarn)
+		f.bootstrapRow(layer.TrustModeWarn, store.LayerVisibility{Organization: true}, store.VisibilitySourceDeclared)
+		target := filepath.Join(f.dir, "finance", "vis.yaml")
+		if outside {
+			target = filepath.Join(t.TempDir(), "vis.yaml")
+		}
+		if err := os.WriteFile(target, []byte("visibility:\n  public: true\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(target, filepath.Join(f.dir, ".layer-config")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.cycle(); err == nil {
+			t.Fatalf("outside=%v: the cycle read a linked .layer-config", outside)
+		}
+		if got, rec := f.row(), f.record(); got != "false/true/[]/[] declared -" || rec.CheckedAt != nil {
+			t.Fatalf("outside=%v: row %s record %+v", outside, got, rec)
+		}
+	}
+}
