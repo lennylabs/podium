@@ -75,7 +75,10 @@ func (s *SQLite) applySchema() error {
 			audit_volume_quota INTEGER NOT NULL DEFAULT 0,
 			max_user_layers INTEGER NOT NULL DEFAULT 0,
 			expose_scope_preview INTEGER,
-			active INTEGER NOT NULL DEFAULT 1
+			active INTEGER NOT NULL DEFAULT 1,
+			trust_floor_mode TEXT NOT NULL DEFAULT '',
+			trust_floor_require_types TEXT NOT NULL DEFAULT '',
+			trust_floor_signers TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE TABLE IF NOT EXISTS manifests (
 			tenant_id TEXT NOT NULL,
@@ -259,39 +262,35 @@ func (s *SQLite) applySchema() error {
 // CreateTenant inserts a new tenant. Inserting an existing tenant ID
 // is a no-op (matches Memory).
 func (s *SQLite) CreateTenant(ctx context.Context, t Tenant) error {
+	fm, ft, fs := floorColumns(t.TrustFloor)
 	_, err := s.db.ExecContext(ctx, `
 		INSERT OR IGNORE INTO tenants
-			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview,
+			 trust_floor_mode, trust_floor_require_types, trust_floor_signers)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.Name,
 		t.Quota.StorageBytes, t.Quota.SearchQPS,
 		t.Quota.MaterializeRate, t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers,
-		nullBoolFromPtr(t.ExposeScopePreview))
+		nullBoolFromPtr(t.ExposeScopePreview), fm, ft, fs)
 	return err
 }
 
 // GetTenant returns the tenant or ErrTenantNotFound.
 func (s *SQLite) GetTenant(ctx context.Context, id string) (Tenant, error) {
 	row := s.db.QueryRowContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
+		SELECT `+tenantColumns+`
 		FROM tenants WHERE id = ?`, id)
-	var t Tenant
-	var exposeScopePreview sql.NullBool
-	err := row.Scan(&t.ID, &t.Name,
-		&t.Quota.StorageBytes, &t.Quota.SearchQPS,
-		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
-		&exposeScopePreview, &t.Active)
+	t, err := scanTenant(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}
-	t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
 	return t, err
 }
 
 // ListTenants returns every provisioned tenant, ordered by ID.
 func (s *SQLite) ListTenants(ctx context.Context) ([]Tenant, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
+		SELECT `+tenantColumns+`
 		FROM tenants ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -299,32 +298,29 @@ func (s *SQLite) ListTenants(ctx context.Context) ([]Tenant, error) {
 	defer func() { _ = rows.Close() }()
 	var out []Tenant
 	for rows.Next() {
-		var t Tenant
-		var exposeScopePreview sql.NullBool
-		if err := rows.Scan(&t.ID, &t.Name,
-			&t.Quota.StorageBytes, &t.Quota.SearchQPS,
-			&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
-			&exposeScopePreview, &t.Active); err != nil {
+		t, err := scanTenant(rows)
+		if err != nil {
 			return nil, err
 		}
-		t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
 		out = append(out, t)
 	}
 	return out, rows.Err()
 }
 
 // UpdateTenant writes a tenant's mutable configuration (Quota,
-// ExposeScopePreview, active), preserving the ID and name. An unknown ID
-// returns ErrTenantNotFound.
+// ExposeScopePreview, active, the trust floor), preserving the ID and name.
+// An unknown ID returns ErrTenantNotFound.
 func (s *SQLite) UpdateTenant(ctx context.Context, t Tenant) error {
+	fm, ft, fs := floorColumns(t.TrustFloor)
 	res, err := s.db.ExecContext(ctx, `
 		UPDATE tenants SET
 			storage_quota = ?, search_qps_quota = ?, materialize_rate_quota = ?,
-			audit_volume_quota = ?, max_user_layers = ?, expose_scope_preview = ?, active = ?
+			audit_volume_quota = ?, max_user_layers = ?, expose_scope_preview = ?, active = ?,
+			trust_floor_mode = ?, trust_floor_require_types = ?, trust_floor_signers = ?
 		WHERE id = ?`,
 		t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
 		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active,
-		t.ID)
+		fm, ft, fs, t.ID)
 	if err != nil {
 		return err
 	}

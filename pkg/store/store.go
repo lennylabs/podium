@@ -79,6 +79,11 @@ type Tenant struct {
 	// backends an `active` column defaulting to true backs the value, so a
 	// tenant created without writing the column is active.
 	Active bool
+	// TrustFloor is the §4.7.11 tenant trust floor that the operator-only
+	// §7.3.3 endpoints set on a multi-tenant registry. A single-tenant
+	// registry takes the floor of its org from the deployment setting and
+	// leaves this value empty.
+	TrustFloor TrustFloor
 }
 
 // ScopePreviewEnabled resolves the §3.5 expose_scope_preview gate,
@@ -448,7 +453,7 @@ type Store interface {
 	// "*operator-list*" sentinel rather than a per-org org_id.
 	ListTenants(ctx context.Context) ([]Tenant, error)
 	// UpdateTenant writes a tenant's mutable configuration (Quota,
-	// ExposeScopePreview, and Active) and returns ErrTenantNotFound for an
+	// ExposeScopePreview, Active, and TrustFloor) and returns ErrTenantNotFound for an
 	// unknown ID. It changes neither the ID nor the name; any Name on the
 	// passed Tenant is ignored. It writes the whole mutable record, so the
 	// PATCH handler overlays the supplied fields onto the current row
