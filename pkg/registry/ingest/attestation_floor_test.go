@@ -34,7 +34,7 @@ func TestAttestFloor_CycleConstraints(t *testing.T) {
 	}
 
 	f.setPolicy("warn", emailSigner())
-	f.withFloor(store.TrustFloor{RequireTypes: []string{"hook"}}, nil)
+	f.withFloor(store.TrustFloor{Mode: "warn", RequireTypes: []string{"hook"}}, nil)
 	f.signLayer(time.Minute)
 	code, details = refusal(t, func() error { _, err := f.cycle(); return err }())
 	lc, _ := f.st.GetLayerConfig(ctx, "tenant-1", "team")
@@ -72,5 +72,25 @@ func TestAttestFloor_UnreadableFloorFailsClosed(t *testing.T) {
 	var none *ingest.AttestationConfig
 	if c, err := none.PolicyConstraint(ctx, store.LayerConfig{TrustMode: "none"}); c != "" || err != nil {
 		t.Errorf("a nil configuration decides %q, %v", c, err)
+	}
+}
+
+// Spec: §4.7.11 (Tenant trust floor) — a stored floor whose mode the
+// registry cannot read, as a store edited by hand holds it, fails closed as
+// an unreadable floor: the served decision returns an error for an explicit
+// none and an empty mode, and a cycle fails before it writes anything,
+// rather than read the floor as no minimum.
+func TestAttestFloor_UnreadableStoredModeFailsClosed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newAttestFixture(t, "none")
+	f.withFloor(store.TrustFloor{Mode: "REQUIRE"}, nil)
+	for _, mode := range []string{"none", ""} {
+		if c, err := f.cfg.PolicyConstraint(ctx, store.LayerConfig{TenantID: "tenant-1", ID: "team", TrustMode: mode}); err == nil {
+			t.Errorf("layer mode %q under the floor mode REQUIRE decided %q, want an error", mode, c)
+		}
+	}
+	if _, err := f.cycle(); err == nil || errors.Is(err, ingest.ErrAttestationRefused) || len(f.stored()) != 0 || f.record().Status != "" {
+		t.Errorf("cycle under the floor mode REQUIRE: %v, stored %v, record %q", err, f.stored(), f.record().Status)
 	}
 }
