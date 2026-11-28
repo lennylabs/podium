@@ -882,6 +882,8 @@ When the registry returns a deprecation warning, the command prints it on standa
 
 When the response carries the registry's `package_digest` member, the default output prints it on standard error as `package_digest: <digest>`, so standard output keeps the manifest document alone. Under `--json`, the object carries it as `package_digest`, and standard error does not repeat it. The registry asserts the value, and the command checks nothing about it.
 
+When the response carries the author attestation members, the default output prints the `attestation_outcome` member on standard error as one line that begins `attestation_outcome:`, followed by the outcome, the failure's code, scope, constraint, and requirement where present, and the evaluation time. It then prints one line that begins `attestation:` for each element of `attestations`, with the digest, the verdict, the predicate type, and, for a verified link, the signer's instance, issuer, and identity and the attested time. Each string is quoted, and a control character is written as a `\u` escape. Under `--json`, the object carries the `attestations` and `attestation_outcome` members as the registry served them, and standard error does not repeat them. [Attestation members](http-api#load_artifact) describes them.
+
 To write an artifact's files to disk, use `podium sync --include <id>`.
 
 ### `podium artifact scaffold`

@@ -14,7 +14,9 @@ import (
 func TestAttestationStoreHelpers(t *testing.T) {
 	t.Parallel()
 	one, two := 1, 2
-	f := func(r *int) *AttestationFailure { return &AttestationFailure{Code: "c", Scope: "artifact", Requirement: r} }
+	f := func(r *int) *AttestationFailure {
+		return &AttestationFailure{Code: "c", Scope: "artifact", Requirement: r}
+	}
 	failed := func(x *AttestationFailure) VersionOutcome { return VersionOutcome{Outcome: OutcomeFailed, Failure: x} }
 	var got []bool
 	for _, p := range [][2]VersionOutcome{

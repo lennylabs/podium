@@ -52,6 +52,17 @@ From 0.8.0, every ingest cycle of a layer whose trust mode resolves to `warn` or
 - The SQLite and Postgres stores add the attestation record columns to `layer_configs` at the first start. No step is needed.
 - A rollback to 0.7.0 starts on the migrated store and does not read the columns. On SQLite, 0.7.0 replaces a layer row on each layer write, such as the re-seed of a declared or `--layer-path` layer at each start, which clears the attestation mark and the recorded commit. After a return to 0.8.0, the first cycle of such a layer accepts any signed state, as a first ingest does. To restore the protection against a replayed older state, reset the mark to the current signed commit with `podium layer reingest <id> --reset-attestation-mark --to-commit <sha>`. On Postgres the columns keep their values.
 
+### Attestation links and outcomes
+
+From 0.8.0, the registry stores the attestation bundles it accepts, links them to the versions they cover, keeps an attestation outcome for each version, and serves both in `load_artifact` and in each `ok` bulk-load item (spec §4.7.11, §7.2). [Attestation links and outcomes](../content/layers#attestation-links-and-outcomes) describes them.
+
+- The SQLite and Postgres stores add the `attestations` and `artifact_attestations` tables, the `attestation_roots` table (on Postgres, in the `public` schema), and the `attestation_outcome`, `attestation_failure`, and `attestation_evaluated_at` columns of `manifests` at the first start. No step is needed. Every version stored before the upgrade reads as `not_evaluated`, which `load_artifact` reports by omitting `attestation_outcome`, until a cycle of its layer under `warn` or `require` evaluates it.
+- A version that a 0.7.0 replica stores during a rolling upgrade is `not_evaluated` and has no link until a 0.8.0 cycle finds it unchanged and evaluates it.
+- A layer under `none` whose snapshot holds `.podium/attestations/` now gets `unverified` links to the bundles that verify under a configured instance, and those bundles count toward the tenant's storage quota.
+- `podium layer update` and a re-registration that change a layer's trust policy now re-evaluate the layer's links before they answer. A link whose bundle the new policy no longer accepts becomes `unverified`, and its version's outcome becomes `failed` with the constraint `link_downgraded`. The versions keep serving.
+- A rollback to 0.7.0 leaves the new tables and columns in place and does not read them. A version stored by 0.7.0 after the rollback reads as `not_evaluated` after a return to 0.8.0, until a cycle evaluates it.
+- `podium admin migrate-to-standard` copies the outcome of each migrated version, its links, and the bundles they reference. It copies no root record, because each target process writes the record of the trusted roots it uses.
+
 ### Bounded Git fetch
 
 From 0.8.0, each ingest of a `git` layer clones the tracked ref alone, with no tags, at the depth that `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets, 16 commits by default, and fetches again at four times the depth while the force-push check cannot decide from the history it holds. 0.7.0 cloned the complete history once a layer had a last ingested commit.

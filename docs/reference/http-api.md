@@ -400,7 +400,17 @@ GET /v1/load_artifact?id={id}&version={v}&session_id={uuid}&as_admin={bool}
   "delivery_hash": "sha256:...",
   "delivery_signature": "...",
   "artifact_revision": "2025-01-01T00:00:00.000000Z",
-  "package_digest": "sha256:..."
+  "package_digest": "sha256:...",
+  "attestations": [
+    {
+      "digest": "sha256:5d1f...",
+      "predicate_type": "https://slsa.dev/provenance/v1",
+      "verdict": "verified",
+      "signer": {"instance": "public-good", "issuer": "https://token.actions.githubusercontent.com", "identity": "https://github.com/acme/skills/.github/workflows/podium-attest.yml@refs/heads/main"},
+      "attested_at": "2026-11-20T09:14:02Z"
+    }
+  ],
+  "attestation_outcome": {"outcome": "verified", "evaluated_at": "2026-11-20T09:14:05Z"}
 }
 ```
 
@@ -422,6 +432,13 @@ The response carries these integrity and reference fields:
 - `delivery_signature` is the registry's signature over `delivery_hash`, minted per response with the registry-managed key. It is absent when the registry runs without a signing key. It is a registry-managed envelope whatever key model signed the artifact at ingest, so a consumer verifies it with the registry-managed verifier under its verification key set.
 - `artifact_revision` is the time the registry stored the served version, an RFC 3339 UTC timestamp with six fractional digits, such as `2025-01-01T00:00:00.000000Z`. `delivery_hash` covers it. It is present on every response and on every `ok` batch item, and it does not enter the entity tag.
 - `package_digest` is the package digest that the registry stored for the served version, written `sha256:` followed by 64 lowercase hexadecimal digits. It covers the path and SHA-256 digest of every file of the package and the `type`, `sensitivity`, `deprecated`, and `replaced_by` values that the package's documents declare. Ingest stores it, and a registry start fills it once for each version stored before the registry computed it. It is absent for a version the registry holds no digest for, such as one a 0.7.0 process stored after that fill, until an ingest finds that version unchanged and stores its digest. `delivery_hash` does not cover it, and no consumer check reads it. A batch item does not carry it.
+
+**Attestation members.** The response carries the author attestation provenance of the served version in two members that `delivery_hash` does not cover. The registry asserts both, and no consumer check reads them.
+
+- `attestations` lists one object for each attestation the registry linked to the served version, verified links first, and is absent when the version has none. Each object carries `digest`, the attestation digest, `predicate_type`, and `verdict`, which is `verified` when a requirement of the layer's trust policy accepts the bundle and `unverified` otherwise. A `verified` object also carries `signer`, with the Sigstore `instance` under which the bundle verified and the certificate's `issuer` and `identity`, and `attested_at`, the attested time. Fetch a bundle with [`GET /v1/attestations/{digest}`](#get-an-attestation).
+- `attestation_outcome` states whether the served version met the layer's trust policy as a whole when the registry last evaluated it: `outcome` is `verified` or `failed`, `failure` carries `code`, `scope` (`layer` or `artifact`), `constraint` where the code has one, and `requirement` for the scope `artifact`, and `evaluated_at` is the time of that evaluation. The member is absent for a version the registry has not evaluated, which is every version of a layer whose trust mode is `none` and every version stored before the registry kept outcomes. While the layer's trust policy is invalid, for example because it names an instance the registry no longer configures, a `verified` version is served as `failed` with `ingest.attestation_policy_invalid` and the scope `layer`. The [layer documentation](../deployment/content/layers#attestation-links-and-outcomes) states when the registry writes and changes both members.
+
+A `304` answer to a revalidation carries neither member, because the entity tag covers the content hash alone.
 
 **Deprecation members.** The response carries the artifact's lifecycle signal in three members that `delivery_hash` does not cover:
 
@@ -569,7 +586,7 @@ POST /v1/artifacts:batchLoad
 
 Each entry of an item's `resources` array carries `path` and `content_hash`. It also carries either `presigned_url` or, for a resource the registry holds inline, `inline`, with `inline_base64: true` when the bytes are not valid UTF-8. On a deployment with an object store, a resource at or below the inline cutoff arrives in `inline`. Only a resource the registry read from object storage carries a `presigned_url`.
 
-Each `ok` item carries `delivery_hash`, `delivery_signature`, and `artifact_revision`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. Each `ok` item also carries `sensitivity`, absent when the artifact declares none, so a client rebuilds the item's delivery record from the item alone.
+Each `ok` item carries `delivery_hash`, `delivery_signature`, and `artifact_revision`, composed and signed by the same code as the `load_artifact` response, so both endpoints serve one delivery hash per artifact. Each `ok` item also carries `sensitivity`, absent when the artifact declares none, so a client rebuilds the item's delivery record from the item alone. Each `ok` item carries the `attestations` and `attestation_outcome` members of the `load_artifact` response, and no `package_digest`.
 
 **Errors.** The batch status stays `200` when individual items fail. Item-level codes:
 
@@ -589,6 +606,28 @@ A request rejected as a whole, such as one with more than 50 IDs or with an empt
 - **MCP.** The MCP server does not call this endpoint and performs no startup cache warm-up. The endpoint is not exposed as an MCP meta-tool, because bulk loading is a programmatic-runtime concern.
 
 ---
+
+### Get an attestation
+
+Returns an author attestation bundle that the registry stores.
+
+```
+GET /v1/attestations/{digest}
+```
+
+`{digest}` is the attestation digest that the `attestations` member of a `load_artifact` response names, in the form `sha256:` followed by 64 lowercase hexadecimal digits.
+
+**Authorization.** A caller who can see a version that links the bundle: a served version of the caller's tenant whose layer is visible to the caller under the caller's read scope. The registry reads the layer from each linked version.
+
+**Response.** `200` with the bundle bytes in canonical base64 (standard alphabet with padding):
+
+```json
+{"bundle": "eyJtZWRpYVR5cGUiOiJhcHBsaWNhdGlvbi92bmQuZGV2LnNpZ3N0b3JlLmJ1bmRsZS52MC4zK2pzb24iLC4uLn0="}
+```
+
+The response carries `Cache-Control: private, max-age=31536000, immutable`, because the bytes of a digest never change. Apply your own size limit to the response.
+
+**Errors.** `404 registry.not_found` for a caller who sees no linked version, for a digest the registry does not store, and for a `{digest}` that is not in the form above, so a caller who sees no linked version cannot tell whether the bundle exists.
 
 ## Catalog and sync
 
@@ -1589,7 +1628,7 @@ GET /v1/quota
 | Field | Reported value |
 |:--|:--|
 | `search_qps`, `materialize_rate`, `audit_volume_per_day` | The limit the registry enforces against the calling tenant. A zero tenant value is replaced by the deployment default (`PODIUM_QUOTA_SEARCH_QPS`, `PODIUM_QUOTA_MATERIALIZE_RATE`, or `PODIUM_QUOTA_AUDIT_VOLUME_PER_DAY`). A negative tenant value disables the budget for that tenant. A `0` in these fields means the budget is not enforced, so they can differ from the stored values that `GET /v1/admin/tenants` reports. |
-| `storage_bytes` | The stored value. |
+| `storage_bytes` | The stored value. `usage.storage_bytes` counts the stored manifests and the stored author attestation bundles. |
 | `max_user_layers` | The stored value. A positive value is the enforced cap. A zero value selects the deployment default, which is `PODIUM_MAX_USER_LAYERS` when the deployment sets it and 3 otherwise. A negative value disables the cap. |
 
 **Notes.**

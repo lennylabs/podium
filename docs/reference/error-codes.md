@@ -254,11 +254,12 @@ A cycle of a layer under `require` is refused with one of these codes, answered 
 | `ingest.attestation_missing` | `no_accepted_bundle` | No bundle is accepted by a signer of the requirement. `details.bundles` lists up to 5 with their refusal reasons. |
 | `ingest.attestation_missing` | `no_layer_subject` | The accepted bundles list no layer subject for this layer's root. |
 | `ingest.attestation_missing` | `incomplete` | Accepted bundles list the layer subject, and the listed artifacts have no subject. |
+| `ingest.attestation_missing` | `link_downgraded` | Appears only in the `attestation_outcome` of a served version: a re-evaluation changed a link of the version to `unverified`, and `requirement` names the first requirement that accepts the bundle of none of its remaining verified links. |
 | `ingest.attestation_mismatch` | `layer_digest` | No accepted bundle carries the snapshot's layer digest. `details` lists the differing subjects, and `subjects_agree: true` places the difference in a `DOMAIN.md` or `.layer-config`. |
 | `ingest.attestation_stale` | `mark` | The newest layer subject is older than the attestation mark. |
 | `ingest.attestation_stale` | `not_in_history`, `not_descendant` | The signed commit is outside the history of the tracked ref, or does not descend from the recorded commit. |
 | `ingest.attestation_invalid` | `limits`, `subject_name`, `unreadable` | The directory exceeds `PODIUM_ATTESTATION_MAX_BUNDLES` or `PODIUM_ATTESTATION_MAX_BYTES`, a package ID holds a character no subject name allows, or the directory or a `*.sigstore.json` entry, such as a dangling symbolic link or a link to a directory, cannot be read; `details.file` names it. |
-| `ingest.attestation_policy_invalid` | `no_requirements`, `unknown_instance`, `policy_rule` | The layer's trust policy cannot be applied, which includes a stored `trust_mode` other than `none`, `warn`, `require`, and empty, such as `REQUIRE`. |
+| `ingest.attestation_policy_invalid` | `no_requirements`, `unknown_instance`, `policy_rule` | The layer's trust policy cannot be applied, which includes a stored `trust_mode` other than `none`, `warn`, `require`, and empty, such as `REQUIRE`. While the policy is invalid, each `verified` version of the layer is served with the `attestation_outcome` `failed`, this code, and the scope `layer`. |
 
 A `details` object stays below 32 KiB. When its lists would make it longer, the registry drops entries from the end of the longest list and sets `details.truncated` to `true`.
 
