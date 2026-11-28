@@ -28,7 +28,7 @@ var layerObjectMembers = []string{
 	"user_defined", "owner", "public", "organization", "groups", "users",
 	"git_provider", "last_ingested_ref", "created_at", "deleted_at",
 	// Spec: §4.7.11 — the trust policy members are carried on every layer.
-	"trust_mode", "trust_requirements", "trust_layer_root",
+	"trust_mode", "trust_requirements", "trust_require_types", "trust_layer_root",
 }
 
 // mustPut sends a PUT with a JSON body, which is the verb the update route

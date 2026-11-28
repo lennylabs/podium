@@ -147,7 +147,7 @@ func TestArtifactStep_OptionalAndRequiredTypes(t *testing.T) {
 	bundles := []*snapshotBundle{{accepted: []*sign.VerifiedAttestation{
 		verified("a/x@1.0.0="+hex('1'), "a/y@1.0.0="+hex('2'), "a/z@1.0.0="+hex('3')),
 		nil,
-		verified("a/x@1.0.0="+hex('1')),
+		verified("a/x@1.0.0=" + hex('1')),
 	}}}
 	hook := record("a/y", "1.0.0", '2')
 	hook.Artifact = &manifest.Artifact{Type: manifest.TypeHook}

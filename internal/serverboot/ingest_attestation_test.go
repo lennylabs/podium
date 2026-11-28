@@ -45,7 +45,13 @@ func TestResolveBootstrapRequirements(t *testing.T) {
 	if b.err != nil || len(b.reqs) != 1 || b.roots["one"] != "skills/team" {
 		t.Fatalf("valid: %+v", b)
 	}
+	several := `{"trust_requirements":[{"signers":[{"issuer":"i","identity":"alice@acme.com"}],"covers_layer":true},` +
+		`{"signers":[{"issuer":"i","identity":"scanner@acme.com"}],"predicate_type":"https://acme.com/scan/v1","optional":true}]}`
+	if b := resolveBootstrapRequirements(write(several), known); b.err != nil || len(b.reqs) != 2 || !b.reqs[0].CoversLayer || !b.reqs[1].Optional {
+		t.Fatalf("several: %+v", b)
+	}
 	for name, path := range map[string]string{
+		"unmarked":     write(strings.Replace(several, `,"covers_layer":true`, "", 1)),
 		"missing":      filepath.Join(t.TempDir(), "none.json"),
 		"not json":     write("x"),
 		"no signer":    write(`{"trust_requirements":[{"signers":[]}]}`),

@@ -869,11 +869,13 @@ type LayerRegisterRequest struct {
 	RepoToken RepoSecret `json:"repo_token,omitempty"`
 	// ClearRepoCredential removes the stored repository credential.
 	ClearRepoCredential bool `json:"clear_repo_credential,omitempty"`
-	// TrustMode, TrustRequirements, and TrustLayerRoot are the §4.7.11 layer
-	// trust policy. A registration stores them as carried, with the derived
-	// source binding; an update reads them by presence (decodeTrustPatch).
+	// TrustMode, TrustRequirements, TrustRequireTypes, and TrustLayerRoot are
+	// the §4.7.11 layer trust policy. A registration stores them as carried,
+	// with the derived source binding; an update reads them by presence
+	// (decodeTrustPatch).
 	TrustMode         string                   `json:"trust_mode,omitempty"`
 	TrustRequirements []store.TrustRequirement `json:"trust_requirements,omitempty"`
+	TrustRequireTypes []string                 `json:"trust_require_types,omitempty"`
 	TrustLayerRoot    string                   `json:"trust_layer_root,omitempty"`
 }
 
@@ -1959,11 +1961,9 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		GitProvider:     req.GitProvider,
 		ForcePushPolicy: req.ForcePushPolicy,
 		CreatedAt:       time.Now().UTC(),
-		// Spec: §4.7.11 (Layer trust policy)
-		TrustMode:         trust.TrustMode,
-		TrustRequirements: trust.TrustRequirements,
-		TrustLayerRoot:    trust.TrustLayerRoot,
 	}
+	// Spec: §4.7.11 (Layer trust policy)
+	cfg = cfg.WithTrustPolicy(store.PolicyOf(trust))
 
 	if userDefined {
 		// spec: §4.6 / §7.3.1 — a user-defined layer has implicit visibility
@@ -2018,7 +2018,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "registry.invalid_argument", msg)
 			return
 		}
-		cfg.TrustMode, cfg.TrustRequirements, cfg.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
+		cfg = cfg.WithTrustPolicy(store.PolicyOf(stored))
 	}
 
 	// spec: §7.3.1 / §1.4 — cap of N user-defined layers per identity

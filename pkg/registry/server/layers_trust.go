@@ -95,8 +95,7 @@ func (e *LayerEndpoint) declaredRegistrationError(stored store.LayerConfig, exis
 		(cfg.SourceType != stored.SourceType || reportedRepo(cfg) != reportedRepo(stored)) {
 		return fmt.Sprintf("layer %s is declared in registry.yaml with a trust requirement, which was checked against its declared source; change its source in the declaration", cfg.ID)
 	}
-	kept := cfg
-	kept.TrustMode, kept.TrustRequirements, kept.TrustLayerRoot = stored.TrustMode, stored.TrustRequirements, stored.TrustLayerRoot
+	kept := cfg.WithTrustPolicy(store.PolicyOf(stored))
 	if err := layer.CheckTrustPolicy(kept, e.trustInstances, ""); err != nil {
 		return err.Error()
 	}
@@ -112,9 +111,10 @@ func (e *LayerEndpoint) declaredRegistrationError(stored store.LayerConfig, exis
 //
 // Spec: §7.3.1 (Patch semantics on the update body)
 type trustPatch struct {
-	mode *string
-	reqs *[]store.TrustRequirement
-	root *string
+	mode  *string
+	reqs  *[]store.TrustRequirement
+	types *[]string
+	root  *string
 }
 
 // decodeTrustPatch reads the trust policy members out of a register or update
@@ -123,7 +123,8 @@ type trustPatch struct {
 // that carries one member under two spellings, a member whose name reads as
 // a trust member and is none (layer.IsTrustLikeName), and a null trust_mode
 // or trust_layer_root are refused. A requirement or signer that holds an
-// unknown member fails its decode (store.TrustRequirement.UnmarshalJSON).
+// unknown member fails its decode (store.TrustRequirement.UnmarshalJSON),
+// and a trust_require_types that is not an array of strings fails as well.
 //
 // Spec: §7.3.1 (Layer trust policy), §7.3.1 (Patch semantics on the update body)
 func decodeTrustPatch(body []byte) (trustPatch, error) {
@@ -160,6 +161,13 @@ func decodeTrustPatch(body []byte) (trustPatch, error) {
 		}
 		p.reqs = &reqs
 	}
+	if v, ok := found["trust_require_types"]; ok {
+		var types []string
+		if err := json.Unmarshal(v, &types); err != nil {
+			return trustPatch{}, fmt.Errorf("layer request: trust_require_types: %w", err)
+		}
+		p.types = &types
+	}
 	return p, nil
 }
 
@@ -192,7 +200,7 @@ func trustString(found map[string]json.RawMessage, name string) (*string, error)
 
 // carried reports whether the body carried a trust policy member.
 func (p trustPatch) carried() bool {
-	return p.mode != nil || p.reqs != nil || p.root != nil
+	return p.mode != nil || p.reqs != nil || p.types != nil || p.root != nil
 }
 
 // applyTo overlays the carried members onto cfg and derives the §4.7.11
@@ -210,6 +218,11 @@ func (p trustPatch) applyTo(cfg store.LayerConfig) store.LayerConfig {
 	}
 	if p.reqs != nil {
 		cfg.TrustRequirements = layer.DeriveSourceBinding(cfg.SourceType, cfg.Repo, nilIfNoRequirement(*p.reqs))
+	}
+	if p.types != nil && len(*p.types) > 0 {
+		cfg.TrustRequireTypes = *p.types
+	} else if p.types != nil {
+		cfg.TrustRequireTypes = nil
 	}
 	return cfg
 }
@@ -236,7 +249,7 @@ func (e *LayerEndpoint) trustPolicyError(cfg store.LayerConfig) string {
 
 // trustEventFields returns the §8.1 event fields that record a trust policy
 // change from before to after: the previous and the new mode, requirements,
-// and trust_layer_root. It returns nil when the policy did not change, so an
+// listed types, and trust_layer_root. It returns nil when the policy did not change, so an
 // event of another change carries no trust fields. The requirements are
 // recorded as JSON, which carries any use of any_source and any_ref.
 //
@@ -246,13 +259,25 @@ func trustEventFields(before, after store.LayerConfig) map[string]string {
 		return nil
 	}
 	return map[string]string{
-		"trust_mode_before":         before.TrustMode,
-		"trust_mode":                after.TrustMode,
-		"trust_requirements_before": requirementsJSON(before.TrustRequirements),
-		"trust_requirements":        requirementsJSON(after.TrustRequirements),
-		"trust_layer_root_before":   before.TrustLayerRoot,
-		"trust_layer_root":          after.TrustLayerRoot,
+		"trust_mode_before":          before.TrustMode,
+		"trust_mode":                 after.TrustMode,
+		"trust_requirements_before":  requirementsJSON(before.TrustRequirements),
+		"trust_requirements":         requirementsJSON(after.TrustRequirements),
+		"trust_require_types_before": typesJSON(before.TrustRequireTypes),
+		"trust_require_types":        typesJSON(after.TrustRequireTypes),
+		"trust_layer_root_before":    before.TrustLayerRoot,
+		"trust_layer_root":           after.TrustLayerRoot,
 	}
+}
+
+// typesJSON encodes a type list for an event field, "[]" for none.
+func typesJSON(types []string) string {
+	if len(types) == 0 {
+		return "[]"
+	}
+	// A list of strings always encodes.
+	b, _ := json.Marshal(types)
+	return string(b)
 }
 
 // requirementsJSON encodes reqs for an event field, "[]" for none.

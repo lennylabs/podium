@@ -77,6 +77,8 @@ func (c *Config) trustInstanceKnown(name string) bool {
 type yamlTrustRequirement struct {
 	Signers       []yamlTrustSigner `yaml:"signers"`
 	PredicateType string            `yaml:"predicate_type"`
+	CoversLayer   bool              `yaml:"covers_layer"`
+	Optional      bool              `yaml:"optional"`
 }
 
 // yamlTrustSigner is one signer of a declared requirement. The identifier
@@ -97,7 +99,7 @@ type yamlTrustSigner struct {
 // The keys a declared requirement and signer accept, which are the yaml tags
 // above.
 var (
-	requirementKeys = []string{"signers", "predicate_type"}
+	requirementKeys = []string{"signers", "predicate_type", "covers_layer", "optional"}
 	signerKeys      = []string{"issuer", "identity", "source_repository", "source_repository_owner",
 		"source_repository_id", "source_repository_owner_id", "any_source", "source_repository_ref", "any_ref", "instance"}
 )
@@ -121,6 +123,7 @@ func declaredTrustPolicy(entry yamlLayerEntry, sourceType, repo string, known la
 		SourceType:        sourceType,
 		TrustMode:         entry.TrustMode,
 		TrustRequirements: layer.DeriveSourceBinding(sourceType, repo, reqs),
+		TrustRequireTypes: entry.TrustRequireTypes,
 		TrustLayerRoot:    entry.TrustLayerRoot,
 	}
 	// The empty default: a declared layer whose empty mode only the default
@@ -166,7 +169,7 @@ func declaredTrustRequirements(node yaml.Node) ([]store.TrustRequirement, error)
 	}
 	out := make([]store.TrustRequirement, 0, len(decoded))
 	for _, r := range decoded {
-		req := store.TrustRequirement{PredicateType: r.PredicateType}
+		req := store.TrustRequirement{PredicateType: r.PredicateType, CoversLayer: r.CoversLayer, Optional: r.Optional}
 		for _, s := range r.Signers {
 			req.Signers = append(req.Signers, store.TrustSigner(s))
 		}
@@ -238,8 +241,7 @@ func keepStoredTrust(ctx context.Context, st store.Store, cfg store.LayerConfig)
 	case err != nil:
 		return cfg, fmt.Errorf("read layer config %s: %w", cfg.ID, err)
 	}
-	cfg.TrustMode, cfg.TrustRequirements, cfg.TrustLayerRoot = prev.TrustMode, prev.TrustRequirements, prev.TrustLayerRoot
-	return cfg, nil
+	return cfg.WithTrustPolicy(store.PolicyOf(prev)), nil
 }
 
 // logUnrequiredTrustLayers logs the §4.7.11 start warning for each stored

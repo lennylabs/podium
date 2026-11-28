@@ -83,6 +83,7 @@ func TestWakesWatchers_EveryField(t *testing.T) {
 		{"TrustRequirements", func(c *store.LayerConfig) {
 			c.TrustRequirements = []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: "i", Identity: "alice@acme.com"}}}}
 		}, false},
+		{"TrustRequireTypes", func(c *store.LayerConfig) { c.TrustRequireTypes = []string{"hook"} }, false},
 		{"TrustLayerRoot", func(c *store.LayerConfig) { c.TrustLayerRoot = "skills" }, false},
 		{"LastIngestedAt", func(c *store.LayerConfig) { c.LastIngestedAt = &other }, false},
 		{"CreatedAt", func(c *store.LayerConfig) { c.CreatedAt = other }, false},

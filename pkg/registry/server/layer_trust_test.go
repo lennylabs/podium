@@ -153,7 +153,12 @@ func TestLayerTrust_RegisterRefusals(t *testing.T) {
 		want string
 	}{
 		{"mode", gitTrustBody(map[string]any{"trust_mode": "strict"}), `trust_mode "strict"`},
-		{"several", gitTrustBody(map[string]any{"trust_requirements": append(requirement(ownSigner()), requirement(ownSigner())...)}), "several requirements are not available yet"},
+		{"several unmarked", gitTrustBody(map[string]any{"trust_requirements": append(requirement(ownSigner()), requirement(ownSigner())...)}), "0 of them set covers_layer"},
+		{"optional covering", gitTrustBody(map[string]any{"trust_requirements": []any{map[string]any{"signers": []any{ownSigner()}, "optional": true}}}), "cannot be optional"},
+		{"unknown type", gitTrustBody(map[string]any{"trust_mode": "warn", "trust_requirements": requirement(ownSigner()), "trust_require_types": []string{"hooks"}}), `"hooks" is not an artifact type`},
+		{"types under none", gitTrustBody(map[string]any{"trust_mode": "none", "trust_requirements": requirement(ownSigner()), "trust_require_types": []string{"hook"}}), "trust_mode is none"},
+		{"types not strings", gitTrustBody(map[string]any{"trust_require_types": []any{1}}), "trust_require_types"},
+		{"types misspelled", gitTrustBody(map[string]any{"trust_require_type": []string{"hook"}}), `"trust_require_type" is not a trust policy member`},
 		{"no requirement", gitTrustBody(map[string]any{"trust_mode": "require"}), "needs a requirement"},
 		{"no signer", gitTrustBody(map[string]any{"trust_requirements": []any{map[string]any{"signers": []any{}}}}), "names no signer"},
 		{"no binding", gitTrustBody(map[string]any{"trust_mode": "warn", "trust_requirements": requirement(unbound)}), "no source binding"},
@@ -163,7 +168,7 @@ func TestLayerTrust_RegisterRefusals(t *testing.T) {
 		{"root on git", gitTrustBody(map[string]any{"trust_layer_root": "skills"}), "applies to a local layer"},
 		{"local root", map[string]any{"id": "finance", "source_type": "local", "local_path": t.TempDir(), "trust_layer_root": "a/../b"}, `segment ".."`},
 		{"unknown member", gitTrustBody(map[string]any{"trust_requirements": requirement(map[string]any{"issuer": trustIssuer, "identity": "alice@acme.com", "instance_name": "x"})}), `unknown field "instance_name"`},
-		{"covers_layer", gitTrustBody(map[string]any{"trust_requirements": []any{map[string]any{"signers": []any{ownSigner()}, "covers_layer": true}}}), `unknown field "covers_layer"`},
+		{"covers_layer misspelled", gitTrustBody(map[string]any{"trust_requirements": []any{map[string]any{"signers": []any{ownSigner()}, "covers_layers": true}}}), `unknown field "covers_layers"`},
 	} {
 		resp, body := mustPost(t, h.base, "/v1/layers", tc.body)
 		env := server.ErrorResponse{}
@@ -581,5 +586,65 @@ func TestLayerTrust_PolicyChangeRunsTheReevaluation(t *testing.T) {
 	}
 	if strings.Join(calls, ",") != "finance warn admin,finance require admin" {
 		t.Errorf("calls %v", calls)
+	}
+}
+
+// Spec: §4.7.11 (Layer trust policy, Policy rules), §7.3.1 (Patch semantics
+// on the update body) — a registration stores several requirements with
+// their covering and optional markers and the listed types; an update
+// applies trust_require_types by presence, so null and [] remove the list
+// and an update of another trust member keeps it; and the event records the
+// previous and the new list.
+func TestLayerTrust_SeveralRequirementsAndRequireTypes(t *testing.T) {
+	t.Parallel()
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, nil)
+	scanner := map[string]any{"issuer": trustIssuer, "identity": "scanner@acme.com"}
+	reqs := []any{
+		map[string]any{"signers": []any{ownSigner()}, "predicate_type": "https://slsa.dev/provenance/v1", "covers_layer": true},
+		map[string]any{"signers": []any{scanner}, "predicate_type": "https://acme.com/scan/v1"},
+		map[string]any{"signers": []any{scanner}, "predicate_type": "https://acme.com/review/v1", "optional": true},
+	}
+	reg := gitTrustBody(map[string]any{"trust_mode": "warn", "trust_requirements": reqs, "trust_require_types": []string{"hook", "mcp-server"}})
+	if resp, body := mustPost(t, h.base, "/v1/layers", reg); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d %s", resp.StatusCode, body)
+	}
+	got := h.stored(t, "finance")
+	if len(got.TrustRequirements) != 3 || !got.TrustRequirements[0].CoversLayer || got.TrustRequirements[1].Optional ||
+		!got.TrustRequirements[2].Optional || strings.Join(got.TrustRequireTypes, ",") != "hook,mcp-server" ||
+		got.TrustRequirements[0].Signers[0].SourceRepository != trustRepo {
+		t.Fatalf("stored policy = %+v types %v", got.TrustRequirements, got.TrustRequireTypes)
+	}
+	if ctx := h.lastAuditContext(t); ctx["trust_require_types_before"] != "[]" || ctx["trust_require_types"] != `["hook","mcp-server"]` {
+		t.Errorf("register event context = %v", ctx)
+	}
+	for i, step := range []struct {
+		body  map[string]any
+		types string
+	}{
+		{map[string]any{"trust_mode": "require"}, "hook,mcp-server"},
+		{map[string]any{"trust_require_types": []string{"agent"}}, "agent"},
+		{map[string]any{"trust_require_types": nil}, ""},
+		{map[string]any{"trust_require_types": []string{"hook"}}, "hook"},
+		{map[string]any{"trust_require_types": []string{}}, ""},
+	} {
+		if resp, body := mustPut(t, h.base, "/v1/layers/update?id=finance", step.body); resp.StatusCode != http.StatusOK {
+			t.Fatalf("step %d: %d %s", i, resp.StatusCode, body)
+		}
+		if got := h.stored(t, "finance"); strings.Join(got.TrustRequireTypes, ",") != step.types || len(got.TrustRequirements) != 3 {
+			t.Errorf("step %d: types %v, %d requirements, want %q", i, got.TrustRequireTypes, len(got.TrustRequirements), step.types)
+		}
+	}
+	if ctx := h.lastAuditContext(t); ctx["trust_require_types_before"] != `["hook"]` || ctx["trust_require_types"] != "[]" {
+		t.Errorf("update event context = %v", ctx)
+	}
+	// A change that leaves several requirements with no covering marker is
+	// refused and writes nothing.
+	reqs[0].(map[string]any)["covers_layer"] = false
+	resp, body := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_requirements": reqs})
+	if resp.StatusCode != http.StatusBadRequest || !strings.Contains(string(body), "0 of them set covers_layer") {
+		t.Fatalf("unmarked update: %d %s", resp.StatusCode, body)
+	}
+	if got := h.stored(t, "finance"); !got.TrustRequirements[0].CoversLayer {
+		t.Errorf("a refused update changed the policy: %+v", got.TrustRequirements)
 	}
 }
