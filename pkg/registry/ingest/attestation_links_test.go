@@ -365,4 +365,13 @@ func TestAttestationLinks_TwoInstancesOneIdentity(t *testing.T) {
 	if strings.Count(got, "finance/pay ") != 2 || !strings.Contains(got, "github/") || !strings.Contains(got, "staging/") {
 		t.Errorf("links:\n%s", got)
 	}
+	// Spec: §4.7.11 (Re-evaluation) — the staging signer leaves the policy:
+	// its link is downgraded, and the outcome stays verified because the
+	// requirement still accepts the bundle of the github link.
+	f.setPolicy("require", emailSigner())
+	f.reevaluate()
+	got = strings.Join(f.links(), "\n")
+	if !strings.Contains(got, "finance/pay staging/"+sh.DefaultSAN) || strings.Count(got, " unverified ") != 2 || f.outcome("finance/pay") != "verified" {
+		t.Errorf("after the staging signer left:\n%s\noutcome %s", got, f.outcome("finance/pay"))
+	}
 }

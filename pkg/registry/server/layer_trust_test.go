@@ -554,3 +554,32 @@ func TestLayerTrust_DeclaredLayerAdmitsARestatedPolicy(t *testing.T) {
 		t.Errorf("a refused re-registration wrote source type %q", got.SourceType)
 	}
 }
+
+// Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy) — a register or
+// an update that changes the stored trust policy of an existing layer runs
+// the re-evaluation hook with the layer as written and the caller; a first
+// registration and a write that keeps the policy run none.
+func TestLayerTrust_PolicyChangeRunsTheReevaluation(t *testing.T) {
+	t.Parallel()
+	var calls []string
+	h := newTrustHarness(t, layer.Identity{Sub: "admin", IsAuthenticated: true}, true, func(e *server.LayerEndpoint) *server.LayerEndpoint {
+		return e.WithTrustPolicyChange(func(_ context.Context, cfg store.LayerConfig, caller string) {
+			calls = append(calls, cfg.ID+" "+cfg.TrustMode+" "+caller)
+		})
+	})
+	if resp, body := mustPost(t, h.base, "/v1/layers", gitTrustBody(nil)); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("register: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"ref": "release"}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("update: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := mustPut(t, h.base, "/v1/layers/update?id=finance", map[string]any{"trust_mode": "warn", "trust_requirements": requirement(ownSigner())}); resp.StatusCode != http.StatusOK {
+		t.Fatalf("policy update: %d %s", resp.StatusCode, body)
+	}
+	if resp, body := mustPost(t, h.base, "/v1/layers", gitTrustBody(map[string]any{"trust_mode": "require", "trust_requirements": requirement(ownSigner())})); resp.StatusCode != http.StatusCreated {
+		t.Fatalf("re-registration: %d %s", resp.StatusCode, body)
+	}
+	if strings.Join(calls, ",") != "finance warn admin,finance require admin" {
+		t.Errorf("calls %v", calls)
+	}
+}

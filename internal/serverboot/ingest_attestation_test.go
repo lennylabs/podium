@@ -8,8 +8,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -158,4 +160,39 @@ func TestPublicGoodRefresh_StartsOnce(t *testing.T) {
 	if built.DefaultMode != "warn" || built.MaxBundles != 3 || built.OnPublicGood == nil {
 		t.Fatalf("config %+v", built)
 	}
+}
+
+// errListLinks fails the link read of the re-evaluation.
+type errListLinks struct{ store.Store }
+
+func (errListLinks) ListAttestationLinks(context.Context, string, store.LinkFilter) ([]store.AttestationLink, error) {
+	return nil, errors.New("store down")
+}
+
+// Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy) — the hook a
+// policy change runs re-evaluates the layer's links, records the downgrade
+// on the audit stream with the caller, and logs a failure without failing.
+func TestTrustPolicyChangeHook(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	if err := st.PutManifest(ctx, store.ManifestRecord{TenantID: "t", ArtifactID: "a/x", Version: "1.0.0", ContentHash: "sha256:x",
+		Type: "agent", Layer: "L", AttestationOutcome: store.OutcomeVerified}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{Versions: []store.VersionAttestations{{ArtifactID: "a/x", Version: "1.0.0",
+		Links: []store.AttestationLink{{PredicateType: "p", Instance: "github", Digest: "sha256:d", Verdict: store.VerdictVerified, VerifiedUnder: "k", LinkedAt: at}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingSink{}
+	lc := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", TrustMode: "none"}
+	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, sink, nil)(ctx, lc, "alice")
+	events := sink.events
+	if len(events) != 1 || events[0].Type != audit.EventLayerAttestationLinksDowngraded || events[0].Caller != "alice" || events[0].Context["cause"] != "policy_change" {
+		t.Fatalf("events %+v", events)
+	}
+	trustPolicyChangeHook(errListLinks{st}, &ingest.AttestationConfig{}, nil, nil)(ctx, lc, "alice")
 }
