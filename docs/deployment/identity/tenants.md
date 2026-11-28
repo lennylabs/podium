@@ -79,6 +79,7 @@ An instance operator provisions tenants at runtime on a multi-tenant registry.
 - `create` derives the org ID from the name, and it is idempotent, so re-creating an existing name returns that tenant unchanged.
 - `update` changes only the fields whose flags it receives, and it cannot rename a tenant.
 - Deactivation is soft. A deactivated tenant stops resolving while its data, including its audit history, persists.
+- The operator sets a tenant's [trust floor](../content/layers#tenant-trust-floor), the minimum every layer trust policy of the tenant meets, through the `trust_floor_mode`, `trust_floor_require_types`, and `trust_floor_signers` members of `POST` and `PATCH /v1/admin/tenants`. The per-tenant `admin` role cannot change it. A single-tenant registry takes the floor of its org from `PODIUM_LAYER_TRUST_FLOOR_FILE` or the `registry.yaml` key `trust_floor` instead.
 - A request to the tenant-management API without the operator role is rejected with `auth.forbidden`. The API is exempt from per-request tenant selection, so the first operator can create the first tenant beyond `default`.
 
 The [CLI reference](../../reference/cli#podium-admin-tenant) lists the full flag set, including the per-tenant quota flags.

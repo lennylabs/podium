@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, ingest verification of author attestations with several requirements and required types, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, ingest verification of author attestations with several requirements, required types, and a tenant trust floor, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -60,6 +60,16 @@ From 0.8.0, a layer trust policy holds several requirements, an optional require
 - A requirement stores its `covers_layer` and `optional` members in the `trust_requirements` column, so no other migration applies.
 - `podium layer update --trust-signer` on a layer whose policy holds several requirements exits 1 and sends nothing, because the flags would replace every requirement with one. Write such a policy with `--trust-requirements-file`.
 - A rollback to 0.7.0 needs no step beyond the one of *Layer trust policy* above. 0.7.0 does not read the column.
+
+### Tenant trust floor
+
+From 0.8.0, a tenant carries a trust floor that every layer trust policy of the tenant meets (spec §4.7.11). [Tenant trust floor](../content/layers#tenant-trust-floor) describes it.
+
+- The SQLite and Postgres stores add the columns `trust_floor_mode`, `trust_floor_require_types`, and `trust_floor_signers` to the tenants table (on Postgres, `public.tenants`) at the first start, and every existing tenant reads with no floor. No step is needed.
+- A single-tenant registry reads `PODIUM_LAYER_TRUST_FLOOR_FILE` and the `registry.yaml` key `trust_floor` at each start. A value the registry cannot use refuses the start with `config.invalid_layer_trust`, and so does either setting on a multi-tenant registry. 0.7.0 read neither.
+- A floor applies to the layers that exist when it is set. A layer whose policy it makes invalid keeps serving its stored versions, its `verified` versions are reported as `failed` with `ingest.attestation_policy_invalid`, and its ingest cycles are refused until its policy meets the floor. Before a floor is raised, review the layers the start log or the `invalid_layers` member of the floor update names, and update their policies.
+- Raise a floor only after every replica that shares the store runs 0.8.0. A 0.7.0 replica does not read the floor and ingests a layer below it.
+- A rollback to 0.7.0 leaves the columns in place and does not read them; 0.7.0 ignores the setting. A floor that the tenant endpoints set is kept for a return to 0.8.0.
 
 ### Attestation links and outcomes
 
