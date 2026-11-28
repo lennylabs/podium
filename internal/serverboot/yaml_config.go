@@ -77,6 +77,10 @@ type yamlConfig struct {
 	// rejected as ingest.frozen unless the manual reingest path passes
 	// break-glass. Config-file-only.
 	FreezeWindows []yamlFreezeWindow `yaml:"freeze_windows,omitempty"`
+	// TrustFloor is the §13.12 trust_floor key: the §4.7.11 trust floor of
+	// a single-tenant registry. It is kept as a node, so LoadConfig refuses a
+	// key the floor does not define. PODIUM_LAYER_TRUST_FLOOR_FILE wins.
+	TrustFloor yaml.Node `yaml:"trust_floor,omitempty"`
 }
 
 // yamlFreezeWindow is one §4.7.2 freeze window in the `freeze_windows:` list.

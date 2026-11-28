@@ -73,8 +73,7 @@ type policyKeyInstance struct {
 // and is behind it. The replacement depends on no ingest claim.
 //
 // Spec: §4.7.11 (Policy key, Root record)
-func (c *AttestationConfig) policyState(ctx context.Context, st store.Store, lc store.LayerConfig) (policyState, error) {
-	mode := layer.ResolveTrustMode(lc.TrustMode, c.DefaultMode)
+func (c *AttestationConfig) policyState(ctx context.Context, st store.Store, lc store.LayerConfig, mode string) (policyState, error) {
 	if mode == layer.TrustModeNone {
 		return policyState{mode: mode, holds: true}, nil
 	}
@@ -173,7 +172,7 @@ func policyInstances(lc store.LayerConfig) []string {
 //
 // Spec: §4.7.11 (Re-evaluation)
 func (a *AttestationCycle) reevaluate(ctx context.Context, st store.Store, onWrite func()) (superseded bool, err error) {
-	r := reevaluation{cfg: a.cfg, st: st, layer: a.layer, claim: a.claim, clock: a.clock, audit: a.audit,
+	r := reevaluation{cfg: a.cfg, st: st, layer: a.layer, mode: a.mode, claim: a.claim, clock: a.clock, audit: a.audit,
 		cause: reevalCauseCycle, onWrite: onWrite}
 	ps, err := r.run(ctx)
 	if errors.Is(err, store.ErrIngestSuperseded) {
@@ -228,22 +227,31 @@ func (c *AttestationConfig) reevaluateClaimless(ctx context.Context, st store.St
 		c = &AttestationConfig{}
 	}
 	cyc := c.Cycle(lc, "")
-	if cyc == nil || cyc.policyFailure() != nil {
+	if cyc == nil {
+		return nil
+	}
+	if err := cyc.readFloor(ctx); err != nil {
+		return err
+	}
+	if cyc.policyFailure() != nil {
 		return nil
 	}
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	r := reevaluation{cfg: c, st: st, layer: lc, clock: clk, audit: emit, cause: cause, clearAll: true, rows: rows}
+	r := reevaluation{cfg: c, st: st, layer: lc, mode: cyc.mode, clock: clk, audit: emit, cause: cause, clearAll: true, rows: rows}
 	_, err := r.run(ctx)
 	return err
 }
 
 // reevaluation is one re-evaluation of the links of a layer.
 type reevaluation struct {
-	cfg     *AttestationConfig
-	st      store.Store
-	layer   store.LayerConfig
+	cfg   *AttestationConfig
+	st    store.Store
+	layer store.LayerConfig
+	// mode is the layer's resolved trust mode under the tenant floor and the
+	// trust default.
+	mode    string
 	claim   string
 	clock   clock.Clock
 	audit   AuditEmitterFunc
@@ -285,7 +293,7 @@ type linkCheck struct {
 // store write and records layer.attestation_links_downgraded for the
 // downgrades.
 func (r *reevaluation) run(ctx context.Context) (policyState, error) {
-	ps, err := r.cfg.policyState(ctx, r.st, r.layer)
+	ps, err := r.cfg.policyState(ctx, r.st, r.layer, r.mode)
 	if err != nil {
 		return policyState{}, err
 	}

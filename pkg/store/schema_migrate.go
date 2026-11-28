@@ -53,6 +53,11 @@ var additiveColumns = []additiveColumn{
 	{"tenants", "max_user_layers INTEGER NOT NULL DEFAULT 0", "max_user_layers BIGINT NOT NULL DEFAULT 0"},
 	{"tenants", "expose_scope_preview INTEGER", "expose_scope_preview BOOLEAN"},
 	{"tenants", "active INTEGER NOT NULL DEFAULT 1", "active BOOLEAN NOT NULL DEFAULT TRUE"},
+	// Spec: §4.7.11 (Tenant trust floor) — the floor of a multi-tenant
+	// tenant. An empty column is no floor.
+	{"tenants", "trust_floor_mode TEXT NOT NULL DEFAULT ''", "trust_floor_mode TEXT NOT NULL DEFAULT ''"},
+	{"tenants", "trust_floor_require_types TEXT NOT NULL DEFAULT ''", "trust_floor_require_types TEXT NOT NULL DEFAULT ''"},
+	{"tenants", "trust_floor_signers TEXT NOT NULL DEFAULT ''", "trust_floor_signers TEXT NOT NULL DEFAULT ''"},
 
 	// manifests
 	{"manifests", "description TEXT NOT NULL DEFAULT ''", "description TEXT NOT NULL DEFAULT ''"},

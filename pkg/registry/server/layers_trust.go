@@ -34,6 +34,38 @@ func (e *LayerEndpoint) WithTrustDefault(mode string) *LayerEndpoint {
 	return e
 }
 
+// WithTrustFloors installs the §4.7.11 trust floor of each tenant, which a
+// registration, and an update that carries a trust policy member, meets.
+// serverboot passes the tenant object's floor on a multi-tenant registry and
+// the deployment setting on a single-tenant one.
+//
+// Spec: §4.7.11 (Tenant trust floor), §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) WithTrustFloors(fn layer.TrustFloors) *LayerEndpoint {
+	e.trustFloors = fn
+	return e
+}
+
+// meetsTrustFloor refuses a policy that does not meet the trust floor of
+// cfg's tenant with 400 registry.invalid_argument and a message that names
+// the floor rule, and a floor the store cannot read with 500
+// registry.unavailable, and reports whether the request may proceed. Both
+// refusals precede every write of the request.
+//
+// Spec: §4.7.11 (Tenant trust floor), §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) meetsTrustFloor(w http.ResponseWriter, r *http.Request, cfg store.LayerConfig) bool {
+	floor, err := e.trustFloors.Floor(r.Context(), cfg.TenantID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "registry.unavailable",
+			fmt.Sprintf("read the trust floor of the tenant: %v", err))
+		return false
+	}
+	if refusal := layer.CheckFloor(cfg, floor, e.trustDefault); refusal != nil {
+		writeError(w, http.StatusBadRequest, "registry.invalid_argument", refusal.Error())
+		return false
+	}
+	return true
+}
+
 // WithTrustPolicyChange installs the §4.7.11 re-evaluation that a register or
 // an update runs after it changed a layer's stored trust policy. It receives
 // the layer as written, and the caller that made the change. A failure is
@@ -204,17 +236,25 @@ func trustString(found map[string]json.RawMessage, name string) (*string, error)
 // responseWarnings returns the warnings a register or update response
 // carries for the layer it wrote: the unapplied-visibility warning and the
 // trust_require_types warning.
-func (e *LayerEndpoint) responseWarnings(cfg store.LayerConfig) []string {
-	return append(e.visibilityWarnings(cfg), e.requireTypesWarning(cfg)...)
+func (e *LayerEndpoint) responseWarnings(ctx context.Context, cfg store.LayerConfig) []string {
+	return append(e.visibilityWarnings(cfg), e.requireTypesWarning(ctx, cfg)...)
 }
 
 // requireTypesWarning is the warning of a layer that lists
 // trust_require_types while its trust mode resolves to none, which runs no
 // attestation step, so the list enforces nothing until the mode is raised.
 //
+// The mode resolves under the floor of the layer's tenant; a floor that
+// cannot be read is left out, because the warning changes nothing the
+// request stored.
+//
 // Spec: §7.3.1 (Layer trust policy), §4.7.11 (Layer trust policy)
-func (e *LayerEndpoint) requireTypesWarning(cfg store.LayerConfig) []string {
-	if len(cfg.TrustRequireTypes) == 0 || layer.ResolveTrustMode(cfg.TrustMode, e.trustDefault) != layer.TrustModeNone {
+func (e *LayerEndpoint) requireTypesWarning(ctx context.Context, cfg store.LayerConfig) []string {
+	if len(cfg.TrustRequireTypes) == 0 {
+		return nil
+	}
+	floor, _ := e.trustFloors.Floor(ctx, cfg.TenantID)
+	if layer.ResolveTrustMode(cfg.TrustMode, floor.Mode, e.trustDefault) != layer.TrustModeNone {
 		return nil
 	}
 	return []string{fmt.Sprintf("layer %q lists trust_require_types, and its trust mode resolves to none, which runs no attestation step: the listed types are not enforced until the mode is warn or require", cfg.ID)}

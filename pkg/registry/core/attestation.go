@@ -47,8 +47,10 @@ type ServedOutcome struct {
 // AttestationPolicyCheck returns the constraint of the §4.7.11 policy rule
 // that the resolved trust policy of a stored layer breaks, and the empty
 // string for a valid policy. serverboot installs the check ingest applies,
-// with the trust default and the configured instances.
-type AttestationPolicyCheck func(store.LayerConfig) string
+// with the trust default, the tenant floor, and the configured instances.
+// An error means the check could not read what it needs, such as the
+// tenant floor, and fails the read.
+type AttestationPolicyCheck func(context.Context, store.LayerConfig) (string, error)
 
 // codeAttestationPolicyInvalid is the §6.10 code a verified version is
 // served with while its layer's policy is invalid.
@@ -118,7 +120,9 @@ func (r *Registry) servedOutcome(ctx context.Context, tenant string, rec store.M
 	lc, err := r.store.GetLayerConfig(ctx, tenant, rec.Layer)
 	switch {
 	case err == nil:
-		constraint = r.attestationPolicy(lc)
+		if constraint, err = r.attestationPolicy(ctx, lc); err != nil {
+			return nil, fmt.Errorf("%w: decide the trust policy of layer %s: %v", ErrUnavailable, rec.Layer, err)
+		}
 	case !errors.Is(err, store.ErrNotFound):
 		return nil, fmt.Errorf("%w: read layer %s: %v", ErrUnavailable, rec.Layer, err)
 	}
@@ -222,4 +226,38 @@ func validAttestationDigest(d string) bool {
 		}
 	}
 	return true
+}
+
+// InvalidTrustLayer names a live layer whose trust policy is invalid and
+// the constraint of the §4.7.11 rule it breaks.
+type InvalidTrustLayer struct {
+	ID         string `json:"id"`
+	Constraint string `json:"constraint"`
+}
+
+// InvalidTrustLayers returns the live layers of tenantID whose trust policy
+// is invalid under the installed policy check, which reads the tenant floor
+// as it is stored now, in the order the store lists them. A tenant floor
+// update reports them. Without a policy check it returns none.
+//
+// Spec: §4.7.11 (Tenant trust floor, Policy that became invalid), §7.3.3
+func (r *Registry) InvalidTrustLayers(ctx context.Context, tenantID string) ([]InvalidTrustLayer, error) {
+	out := []InvalidTrustLayer{}
+	if r.attestationPolicy == nil {
+		return out, nil
+	}
+	layers, err := r.store.ListLayerConfigs(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("%w: read the layers of tenant %s: %v", ErrUnavailable, tenantID, err)
+	}
+	for _, lc := range layers {
+		constraint, err := r.attestationPolicy(ctx, lc)
+		if err != nil {
+			return nil, fmt.Errorf("%w: decide the trust policy of layer %s: %v", ErrUnavailable, lc.ID, err)
+		}
+		if constraint != "" {
+			out = append(out, InvalidTrustLayer{ID: lc.ID, Constraint: constraint})
+		}
+	}
+	return out, nil
 }

@@ -95,7 +95,7 @@ func TestAttestationServing_ReadFailures(t *testing.T) {
 	ctx := context.Background()
 	st, digest := attFixture(t)
 	reg := core.New(st, "t", []layer.Layer{{ID: "L", Visibility: layer.Visibility{Public: true}}}).
-		WithAttestationPolicyCheck(func(store.LayerConfig) string { return "" })
+		WithAttestationPolicyCheck(func(context.Context, store.LayerConfig) (string, error) { return "", nil })
 	id := layer.Identity{IsPublic: true}
 	res, err := reg.LoadArtifact(ctx, id, "a/x", core.LoadArtifactOptions{})
 	if err != nil || res.AttestationOutcome == nil || res.AttestationOutcome.Outcome != store.OutcomeFailed ||

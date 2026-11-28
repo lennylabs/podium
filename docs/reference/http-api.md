@@ -1047,7 +1047,7 @@ Every endpoint in this section that returns a layer returns the same object, wit
 | `users` | array | Visibility. `null` when the layer grants no user. |
 | `git_provider` | string | The provider whose signature scheme verifies this layer's inbound deliveries. Empty resolves to `github`. |
 | `force_push_policy` | string | `tolerant` or `strict`. Present on a layer that sets a policy and absent on one that does not. |
-| `trust_mode` | string | Trust mode: `none`, `warn`, `require`, or empty, which takes `PODIUM_LAYER_TRUST_DEFAULT`. See [Layer trust policy](../deployment/content/layers#layer-trust-policy). |
+| `trust_mode` | string | Trust mode: `none`, `warn`, `require`, or empty, which takes the stricter of the tenant trust floor's mode and `PODIUM_LAYER_TRUST_DEFAULT`. See [Layer trust policy](../deployment/content/layers#layer-trust-policy). |
 | `trust_requirements` | array | The trust requirements, each with `signers`, `predicate_type`, `covers_layer`, and `optional` where set, and with any source binding members the registry derived. `null` when the layer has none. |
 | `trust_require_types` | array | The artifact types whose failure drops the artifact under `warn` as under `require`. `null` when the layer lists none. |
 | `trust_layer_root` | string | For a `local` layer, the `root` under which its content was signed. |
@@ -1854,8 +1854,8 @@ Creates, lists, updates, and deactivates tenants on a multi-tenant registry.
 
 ```
 GET    /v1/admin/tenants
-POST   /v1/admin/tenants        body: { "name": "...", "quota": {...}, "expose_scope_preview": true }
-PATCH  /v1/admin/tenants/{id}   body: { "quota": {...}, "expose_scope_preview": true, "active": false }
+POST   /v1/admin/tenants        body: { "name": "...", "quota": {...}, "expose_scope_preview": true, "trust_floor_mode": "warn", ... }
+PATCH  /v1/admin/tenants/{id}   body: { "quota": {...}, "expose_scope_preview": true, "active": false, "trust_floor_mode": "warn", ... }
 DELETE /v1/admin/tenants/{id}
 ```
 
@@ -1877,14 +1877,25 @@ DELETE /v1/admin/tenants/{id}
     "max_user_layers": 3
   },
   "expose_scope_preview": true,
-  "active": true
+  "active": true,
+  "trust_floor_mode": "warn",
+  "trust_floor_require_types": ["hook"],
+  "trust_floor_signers": [
+    {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "source_repository_owner_id": "7890",
+      "source_repository_ref": "refs/heads/main"
+    }
+  ]
 }
 ```
 
+`trust_floor_mode`, `trust_floor_require_types`, and `trust_floor_signers` hold the [tenant trust floor](../deployment/content/layers#tenant-trust-floor). An empty mode is reported as `""` and an empty list as `null`.
+
 | Method | Behavior |
 |:--|:--|
-| `POST` | Requires `name` and derives the tenant ID from it. Creation is idempotent: a new tenant returns `201 Created`, and re-creating an already-provisioned name returns `200 OK` with the existing tenant unchanged. |
-| `PATCH` | Overlays only the keys present in the body, so an omitted key keeps its current value. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. The name is fixed at creation and cannot be patched. |
+| `POST` | Requires `name` and derives the tenant ID from it. Creation is idempotent: a new tenant returns `201 Created`, and re-creating an already-provisioned name returns `200 OK` with the existing tenant unchanged, its floor included. |
+| `PATCH` | Overlays only the keys present in the body, so an omitted key keeps its current value. The write applies only while the tenant still holds the record the request read, and a change by another write in between is read again and the body applied to it, so a concurrent `PATCH` never writes back a floor it did not carry. A present `expose_scope_preview: null` clears the gate. `active` reactivates (`true`) or deactivates (`false`) the tenant. A floor member replaces the stored value, and `null` empties a list member. A body that carries a floor member also returns `invalid_layers`: each live layer of the tenant whose trust policy the merged floor makes invalid, as `{"id", "constraint"}`, or an empty list. A change of the floor re-evaluates the links of every layer of the tenant. The name is fixed at creation and cannot be patched. |
 | `DELETE` | Deactivates the tenant and returns `204 No Content`. The data persists while the tenant stops resolving. |
 
 **Errors.**
@@ -1894,7 +1905,9 @@ DELETE /v1/admin/tenants/{id}
 | `404 registry.tenant_management_unavailable` | The registry is single-tenant, started without `PODIUM_MULTI_TENANT`. This is checked before operator authorization. |
 | `403 auth.forbidden` | The caller does not hold the operator role. |
 | `404 registry.tenant_not_found` | A `PATCH` or `DELETE` names an unknown tenant. |
+| `400 registry.invalid_argument` | A `POST` or `PATCH` carries a floor that breaks a [floor rule](../deployment/content/layers#tenant-trust-floor), such as an entry that names an instance the registry does not configure, a `null` `trust_floor_mode`, a floor member twice, under the same name or under different letter case, or a member whose name begins with `trust` and is none of the three. Nothing is stored. |
 | `503 registry.read_only` | A `POST`, `PATCH`, or `DELETE` reached a registry in read-only mode. |
+| `503 registry.unavailable` | A `PATCH` found the tenant changed by another write on each of five attempts. Nothing is stored; send the request again. |
 
 ---
 

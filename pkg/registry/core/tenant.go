@@ -38,14 +38,14 @@ func (r *Registry) OperatorAuthorize(ctx context.Context, id layer.Identity) err
 	return nil
 }
 
-// ProvisionTenant creates a tenant from name, quota, and the scope-preview
-// gate when it is not already provisioned, deriving the org ID from the
+// ProvisionTenant creates a tenant from name, quota, the scope-preview gate,
+// and the §4.7.11 trust floor when it is not already provisioned, deriving the org ID from the
 // name. It reports whether the tenant was newly created. Provisioning is
 // idempotent: an already-provisioned name returns the stored tenant
 // unchanged, including its active state, with created=false (§7.3.3). The
 // returned Tenant is read back from the store so it carries the canonical
 // stored form (an active flag, the derived ID).
-func (r *Registry) ProvisionTenant(ctx context.Context, name string, quota store.Quota, exposeScopePreview *bool) (store.Tenant, bool, error) {
+func (r *Registry) ProvisionTenant(ctx context.Context, name string, quota store.Quota, exposeScopePreview *bool, floor store.TrustFloor) (store.Tenant, bool, error) {
 	id := OrgIDForName(name)
 	if existing, err := r.store.GetTenant(ctx, id); err == nil {
 		return existing, false, nil
@@ -53,7 +53,7 @@ func (r *Registry) ProvisionTenant(ctx context.Context, name string, quota store
 		return store.Tenant{}, false, err
 	}
 	if err := r.store.CreateTenant(ctx, store.Tenant{
-		ID: id, Name: name, Quota: quota, ExposeScopePreview: exposeScopePreview,
+		ID: id, Name: name, Quota: quota, ExposeScopePreview: exposeScopePreview, TrustFloor: floor,
 	}); err != nil {
 		return store.Tenant{}, false, err
 	}
@@ -80,6 +80,13 @@ func (r *Registry) GetTenant(ctx context.Context, id string) (store.Tenant, erro
 // UpdateTenant writes the whole mutable record.
 func (r *Registry) UpdateTenant(ctx context.Context, t store.Tenant) error {
 	return r.store.UpdateTenant(ctx, t)
+}
+
+// UpdateTenantIf writes a tenant's mutable configuration only while the
+// stored record equals expect, and returns store.ErrTenantChanged otherwise
+// (§7.3.3).
+func (r *Registry) UpdateTenantIf(ctx context.Context, t, expect store.Tenant) error {
+	return r.store.UpdateTenantIf(ctx, t, expect)
 }
 
 // DeactivateTenant soft-deactivates a tenant: it stops resolving while its

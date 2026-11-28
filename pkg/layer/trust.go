@@ -15,8 +15,8 @@ import (
 	"github.com/lennylabs/podium/pkg/typeprovider"
 )
 
-// The §4.7.11 trust modes. The empty mode resolves to the deployment
-// default.
+// The §4.7.11 trust modes. The empty mode resolves to the stricter of the
+// tenant floor's mode and the deployment default.
 const (
 	TrustModeNone    = "none"
 	TrustModeWarn    = "warn"
@@ -43,16 +43,19 @@ func ValidTrustMode(m string) bool {
 	return false
 }
 
-// ResolveTrustMode returns mode, or def for an empty mode, or none when both
-// are empty. The tenant floor of a later phase resolves between the two.
+// ResolveTrustMode returns mode, or for an empty mode the stricter of the
+// tenant floor's mode floorMode and the trust default def, or none when
+// neither sets a mode. The stricter of the two is taken rather than the
+// floor's mode first, so a floor of none, which sets no minimum, never
+// lowers the default.
 //
-// Spec: §4.7.11 (Layer trust policy)
-func ResolveTrustMode(mode, def string) string {
-	switch {
-	case mode != "":
+// Spec: §4.7.11 (Layer trust policy, Tenant trust floor)
+func ResolveTrustMode(mode, floorMode, def string) string {
+	if mode != "" {
 		return mode
-	case def != "":
-		return def
+	}
+	if m := stricterMode(floorMode, def); m != "" {
+		return m
 	}
 	return TrustModeNone
 }
@@ -87,7 +90,7 @@ func CheckTrustPolicy(cfg store.LayerConfig, instances TrustInstances, defaultMo
 	if err := checkCovering(cfg.TrustRequirements); err != nil {
 		return err
 	}
-	if mode := ResolveTrustMode(cfg.TrustMode, defaultMode); (mode == TrustModeWarn || mode == TrustModeRequire) && len(cfg.TrustRequirements) == 0 {
+	if mode := ResolveTrustMode(cfg.TrustMode, "", defaultMode); (mode == TrustModeWarn || mode == TrustModeRequire) && len(cfg.TrustRequirements) == 0 {
 		if cfg.TrustMode == "" {
 			return trustRefusal("trust_mode is empty and resolves to %s through PODIUM_LAYER_TRUST_DEFAULT, which needs a requirement in trust_requirements; add one or set trust_mode", mode)
 		}

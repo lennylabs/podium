@@ -149,7 +149,7 @@ The policy has these members, which the layer object reports and `podium layer s
 
 | Member | Meaning |
 |:--|:--|
-| `trust_mode` | `none`, `warn`, or `require`. An empty value takes `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
+| `trust_mode` | `none`, `warn`, or `require`. An empty value takes the stricter of the [tenant trust floor](#tenant-trust-floor)'s mode and `PODIUM_LAYER_TRUST_DEFAULT`, which defaults to `none`. |
 | `trust_requirements` | A list of requirements. A requirement has `signers`, an optional `predicate_type`, an optional `covers_layer`, and an optional `optional`. An artifact is verified when it meets every requirement that is not optional. |
 | `trust_require_types` | A list of artifact types, such as `hook` and `mcp-server`, whose failure drops the artifact under `warn` as under `require`. |
 | `trust_layer_root` | For a `local` layer, the `root` under which its content was signed. A `git` layer takes it from its `root`. |
@@ -240,7 +240,7 @@ A cycle of a layer whose mode resolves to `warn` or `require` reads the bundle f
 
 - Under `require`, a failed check refuses the cycle: nothing is stored or removed, the versions the registry already holds keep serving, and `podium layer reingest` exits 1 with the code, such as `ingest.attestation_missing`, and its `details`. A start whose ingest of a declared `local` or `--layer-path` layer is refused keeps running, and the start log names the layer and the code.
 - Under `warn`, a failed check is recorded and the cycle stores the snapshot, apart from the artifacts of the [required types](#required-types).
-- A layer whose policy has no requirement under a mode above `none`, or names an instance the registry no longer configures, is refused with `ingest.attestation_policy_invalid` on every cycle until the policy is updated.
+- A layer whose policy has no requirement under a mode above `none`, names an instance the registry no longer configures, or does not meet the [tenant trust floor](#tenant-trust-floor), is refused with `ingest.attestation_policy_invalid` on every cycle until the policy is updated. The floor applies in every mode, so a layer whose explicit `trust_mode` is `none` below a floor of `warn` is refused as well.
 
 Each such cycle writes the layer's attestation record, which the layer object reports and `podium layer show` prints: `attestation_mark`, `attested_commit`, `attestation_status` (`ok` or the code of the failure), `attestation_details`, `attestation_dropped`, and `attestation_checked_at`. When the status is not `ok`, `podium layer show` writes the next step for the code on standard error:
 
@@ -271,7 +271,7 @@ podium artifact show finance/ap/pay-invoice
 
 The default output writes one `attestation_outcome:` line and one `attestation:` line per link on standard error. The [HTTP API](../../reference/http-api#load_artifact) describes the members, and `GET /v1/attestations/{digest}` serves a linked bundle to a caller who can see a version that links it.
 
-A link records the policy under which the registry verified it. When the trust policy of a layer changes through `podium layer update` or a re-registration, at each registry start, which covers a changed `registry.yaml` declaration, `PODIUM_LAYER_TRUST_DEFAULT`, or trusted root, and at the start of each ingest cycle, the registry re-evaluates the links that were verified under another policy: each bundle a requirement still accepts keeps its link, and a link whose bundle no requirement accepts becomes `unverified`, its version's outcome becomes `failed` with `ingest.attestation_missing` and the constraint `link_downgraded` when a requirement that is not optional is left with no verified link, and the registry records `layer.attestation_links_downgraded`. A change to `none` changes every verified link to `unverified` and every outcome to `not_evaluated`. A policy change through the layer endpoints also starts an ingest cycle of the layer, and a cycle that was already running under the earlier policy stores its content but writes no link and no outcome. A re-evaluation changes an outcome only when it downgrades a link, so a change that adds a requirement, or that moves the only accepting signer to another signer of the requirement, leaves a stored version `verified` until a cycle evaluates it again; a version no longer in the tree keeps its last outcome. A change of policy refuses no stored version: a version with a downgraded link keeps serving, and the next cycle that passes the layer step links the versions still in the tree under the new policy. While a layer's policy is invalid, such as one that names an instance the registry no longer configures, its `verified` versions are served as `failed` with `ingest.attestation_policy_invalid`, and the stored outcome is served again once the policy is repaired.
+A link records the policy under which the registry verified it. When the trust policy of a layer changes through `podium layer update` or a re-registration, at each registry start, which covers a changed `registry.yaml` declaration, `PODIUM_LAYER_TRUST_DEFAULT`, or trusted root, and at the start of each ingest cycle, the registry re-evaluates the links that were verified under another policy: each bundle a requirement still accepts keeps its link, and a link whose bundle no requirement accepts becomes `unverified`, its version's outcome becomes `failed` with `ingest.attestation_missing` and the constraint `link_downgraded` when a requirement that is not optional is left with no verified link, and the registry records `layer.attestation_links_downgraded`. A change to `none` changes every verified link to `unverified` and every outcome to `not_evaluated`. A policy change through the layer endpoints also starts an ingest cycle of the layer, and a cycle that was already running under the earlier policy stores its content but writes no link and no outcome. A re-evaluation changes an outcome only when it downgrades a link, so a change that adds a requirement, or that moves the only accepting signer to another signer of the requirement, leaves a stored version `verified` until a cycle evaluates it again; a version no longer in the tree keeps its last outcome. A change of policy refuses no stored version: a version with a downgraded link keeps serving, and the next cycle that passes the layer step links the versions still in the tree under the new policy. While a layer's policy is invalid, such as one that names an instance the registry no longer configures or one that the tenant trust floor does not admit, its `verified` versions are served as `failed` with `ingest.attestation_policy_invalid`, and the stored outcome is served again once the policy is repaired or the floor is lowered. A change of a tenant's floor re-evaluates the links of every layer of the tenant.
 
 Stored bundles count toward the tenant's storage quota. A purge of a version deletes its links, and a bundle that no version links is deleted with it.
 
@@ -315,6 +315,56 @@ A registration or an update whose policy breaks one of these rules is refused wi
 An update that changes no trust member does not re-check the stored policy, so a policy whose instance was later removed from `registry.yaml` does not block an unrelated update. A layer whose empty mode `PODIUM_LAYER_TRUST_DEFAULT` resolves to `warn` or `require` and that has no requirement is logged as a warning at each start.
 
 Changing the policy of an admin-defined layer requires the tenant `admin` role, and the owner of a user-defined layer changes its own. A change is recorded on the layer's audit event with the previous and the new policy.
+
+### Tenant trust floor
+
+A tenant trust floor is a minimum that the trust policy of every layer of a tenant meets, a user-defined layer included. A floor with the mode `warn` or `require` and the required type `hook` keeps a tenant member from registering a layer that serves unsigned hooks, and a signer list keeps the member from choosing the signer of those hooks. A floor has three parts:
+
+| Part | Meaning |
+|:--|:--|
+| mode | `none`, `warn`, `require`, or empty. A layer's resolved mode is not below it, and an empty `trust_mode` resolves to at least it. |
+| required types | Artifact types every layer lists in its `trust_require_types`. A floor that lists a type sets the mode `warn` or `require`, because a layer under `none` verifies nothing and its list enforces nothing. |
+| signers | Admissible signer entries. When the list is not empty, every signer of every requirement of a layer matches an entry. |
+
+An entry has an `issuer` and optionally an `instance`, a `source_repository_owner` or a `source_repository_owner_id`, a `source_repository_ref`, and an `identity`. A layer's signer matches an entry when the issuers are equal, the instances are equal (an entry with no `instance` admits only signers of `public-good`), and the signer names each member the entry names: the owner, or a `source_repository` directly under the owner, so `https://github.com/acme-tools/x` does not match the owner `https://github.com/acme`; the same owner identifier; the same ref; and the same identity. A signer with `any_source` matches no entry that names an owner, an owner identifier, or an identity, and one with `any_ref` matches no entry that names a ref. A [derived source binding](#derived-source-binding) names the repository and no owner identifier, so it matches an entry that names the owner and not one that names the owner identifier; such a signer names `--trust-source-owner-id`.
+
+An entry with an owner and no ref admits any branch of any repository of that owner. An entry with no owner and no owner identifier admits the repositories of every owner: an entry that names only the identity of a public reusable signing workflow admits a signer bound to any repository that calls that workflow. Name the owner or the owner identifier and the ref in each entry, and the identity of a shared signing workflow where the tenant has one.
+
+On a multi-tenant registry the floor is part of the tenant object, in the members `trust_floor_mode`, `trust_floor_require_types`, and `trust_floor_signers`, which only the instance operator sets through [`PATCH /v1/admin/tenants/{id}`](../../reference/http-api#tenant-management). The per-tenant `admin` role cannot change it. The response lists in `invalid_layers` each layer of the tenant that the new floor makes invalid, with the rule it breaks:
+
+```json
+{
+  "trust_floor_mode": "require",
+  "trust_floor_require_types": ["hook"],
+  "trust_floor_signers": [
+    {
+      "issuer": "https://token.actions.githubusercontent.com",
+      "source_repository_owner_id": "7890",
+      "source_repository_ref": "refs/heads/main"
+    }
+  ]
+}
+```
+
+A single-tenant registry has no tenant endpoints, and the floor of its org is a deployment setting: the JSON file that [`PODIUM_LAYER_TRUST_FLOOR_FILE`](../../reference/configuration#layers) names, or the `registry.yaml` key `trust_floor`, each an object with the members `mode`, `require_types`, and `signers`. The variable takes precedence, and the registry reads the setting at each start:
+
+```yaml
+registry:
+  trust_floor:
+    mode: warn
+    require_types: [hook, mcp-server]
+    signers:
+      - issuer: https://token.actions.githubusercontent.com
+        source_repository_owner: https://github.com/acme
+        source_repository_ref: refs/heads/main
+```
+
+A floor that does not parse, holds a member of another name, names a mode other than `none`, `warn`, or `require`, an unknown or repeated type, required types under a mode below `warn`, an entry with no issuer or with both owner members, or an instance that `sigstore.instances` does not configure, refuses the start with `config.invalid_layer_trust`, and through the tenant endpoint it is refused with `registry.invalid_argument`. A multi-tenant registry refuses to start when either setting is set. A stored floor that breaks one of these rules, such as a tenant row edited by hand, counts as a floor the registry cannot read: the cycles of the tenant's layers fail, and loads of their verified versions answer `registry.unavailable`, until the floor is repaired.
+
+The floor applies at each point a policy is checked:
+
+- A registration, and an update that carries a trust member, whose policy does not meet the floor is refused with `registry.invalid_argument`, and the message names the rule.
+- A layer that already exists when the floor is raised keeps its policy. Each of its ingest cycles is refused with `ingest.attestation_policy_invalid` and the constraint `below_floor`, `missing_required_type`, or `signer_outside_floor`, its `verified` versions are served as `failed` with that code until the policy meets the floor, and each start logs it. A declared layer that only the floor makes invalid does not refuse the start.
 
 ---
 

@@ -220,7 +220,10 @@ var sharedTableStmts = append([]string{
 		audit_volume_quota BIGINT NOT NULL DEFAULT 0,
 		max_user_layers BIGINT NOT NULL DEFAULT 0,
 		expose_scope_preview BOOLEAN,
-		active BOOLEAN NOT NULL DEFAULT TRUE
+		active BOOLEAN NOT NULL DEFAULT TRUE,
+		trust_floor_mode TEXT NOT NULL DEFAULT '',
+		trust_floor_require_types TEXT NOT NULL DEFAULT '',
+		trust_floor_signers TEXT NOT NULL DEFAULT ''
 	)`,
 	`CREATE TABLE IF NOT EXISTS public.vector_pending (
 		tenant_id TEXT NOT NULL,
@@ -541,6 +544,9 @@ func (p *Postgres) ResetForTest(ctx context.Context) error {
 // (§4.7.1) and writes the registry row under the per-request podium.org_id so
 // the row passes the row-level-security WITH CHECK.
 func (p *Postgres) CreateTenant(ctx context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	if _, err := p.ensureOrg(ctx, t.ID); err != nil {
 		return err
 	}
@@ -552,15 +558,17 @@ func (p *Postgres) CreateTenant(ctx context.Context, t Tenant) error {
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, t.ID); err != nil {
 		return err
 	}
+	fm, ft, fs := floorColumns(t.TrustFloor)
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO public.tenants
-			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			(id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview,
+			 trust_floor_mode, trust_floor_require_types, trust_floor_signers)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		ON CONFLICT (id) DO NOTHING`,
 		t.ID, t.Name,
 		t.Quota.StorageBytes, t.Quota.SearchQPS,
 		t.Quota.MaterializeRate, t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers,
-		nullBoolFromPtr(t.ExposeScopePreview)); err != nil {
+		nullBoolFromPtr(t.ExposeScopePreview), fm, ft, fs); err != nil {
 		return err
 	}
 	return tx.Commit()
@@ -579,21 +587,15 @@ func (p *Postgres) GetTenant(ctx context.Context, id string) (Tenant, error) {
 		return Tenant{}, err
 	}
 	row := tx.QueryRowContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
+		SELECT `+tenantColumns+`
 		FROM public.tenants WHERE id = $1`, id)
-	var t Tenant
-	var exposeScopePreview sql.NullBool
-	err = row.Scan(&t.ID, &t.Name,
-		&t.Quota.StorageBytes, &t.Quota.SearchQPS,
-		&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
-		&exposeScopePreview, &t.Active)
+	t, err := scanTenant(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Tenant{}, ErrTenantNotFound
 	}
 	if err != nil {
 		return Tenant{}, err
 	}
-	t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
 	if err := tx.Commit(); err != nil {
 		return Tenant{}, err
 	}
@@ -615,7 +617,7 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT id, name, storage_quota, search_qps_quota, materialize_rate_quota, audit_volume_quota, max_user_layers, expose_scope_preview, active
+		SELECT `+tenantColumns+`
 		FROM public.tenants ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -623,15 +625,10 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 	defer func() { _ = rows.Close() }()
 	var out []Tenant
 	for rows.Next() {
-		var t Tenant
-		var exposeScopePreview sql.NullBool
-		if err := rows.Scan(&t.ID, &t.Name,
-			&t.Quota.StorageBytes, &t.Quota.SearchQPS,
-			&t.Quota.MaterializeRate, &t.Quota.AuditVolumePerDay, &t.Quota.MaxUserLayers,
-			&exposeScopePreview, &t.Active); err != nil {
+		t, err := scanTenant(rows)
+		if err != nil {
 			return nil, err
 		}
-		t.ExposeScopePreview = ptrFromNullBool(exposeScopePreview)
 		out = append(out, t)
 	}
 	if err := rows.Err(); err != nil {
@@ -644,10 +641,32 @@ func (p *Postgres) ListTenants(ctx context.Context) ([]Tenant, error) {
 }
 
 // UpdateTenant writes a tenant's mutable configuration (Quota,
-// ExposeScopePreview, active), preserving the ID and name. It runs under the
+// ExposeScopePreview, active, the trust floor), preserving the ID and name.
+// It runs under the
 // per-request podium.org_id so the row-level-security WITH CHECK passes. An
 // unknown ID returns ErrTenantNotFound.
 func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
+	return p.updateTenant(ctx, t, nil)
+}
+
+// UpdateTenantIf writes t only while the stored mutable record equals
+// expect's, in one conditional statement.
+//
+// Spec: §7.3.3
+func (p *Postgres) UpdateTenantIf(ctx context.Context, t Tenant, expect Tenant) error {
+	return p.updateTenant(ctx, t, &expect)
+}
+
+// updateTenant writes t's mutable record under the per-request
+// podium.org_id, conditional on expect's when it is not nil. The condition
+// compares decoded values: the row is read with SELECT ... FOR UPDATE and
+// decoded in the write's transaction, so a floor column that decodes to the
+// record the caller read matches whatever its stored text. An absent tenant
+// is ErrTenantNotFound and a changed record ErrTenantChanged.
+func (p *Postgres) updateTenant(ctx context.Context, t Tenant, expect *Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -656,14 +675,28 @@ func (p *Postgres) UpdateTenant(ctx context.Context, t Tenant) error {
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('podium.org_id', $1, true)`, t.ID); err != nil {
 		return err
 	}
+	if expect != nil {
+		held, err := scanTenant(tx.QueryRowContext(ctx, `SELECT `+tenantColumns+` FROM public.tenants WHERE id = $1 FOR UPDATE`, t.ID))
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			return ErrTenantNotFound
+		case err != nil:
+			return err
+		case !sameMutableTenant(held, *expect):
+			return ErrTenantChanged
+		}
+	}
+	fm, ft, fs := floorColumns(t.TrustFloor)
 	res, err := tx.ExecContext(ctx, `
 		UPDATE public.tenants SET
 			storage_quota = $2, search_qps_quota = $3, materialize_rate_quota = $4,
-			audit_volume_quota = $5, max_user_layers = $6, expose_scope_preview = $7, active = $8
+			audit_volume_quota = $5, max_user_layers = $6, expose_scope_preview = $7, active = $8,
+			trust_floor_mode = $9, trust_floor_require_types = $10, trust_floor_signers = $11
 		WHERE id = $1`,
 		t.ID,
 		t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
-		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active)
+		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active,
+		fm, ft, fs)
 	if err != nil {
 		return err
 	}

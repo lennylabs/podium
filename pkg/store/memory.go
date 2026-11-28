@@ -71,6 +71,9 @@ func mkey(tenantID, artifactID, version string) string {
 // matching the SQLite INSERT OR IGNORE and Postgres ON CONFLICT (id) DO
 // NOTHING backends.
 func (s *Memory) CreateTenant(_ context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, exists := s.tenants[t.ID]; exists {
@@ -80,6 +83,7 @@ func (s *Memory) CreateTenant(_ context.Context, t Tenant) error {
 	// active-column default; Memory sets it explicitly because the zero
 	// value of Active is false (§4.7.1).
 	t.Active = true
+	t.TrustFloor = t.TrustFloor.Clone()
 	s.tenants[t.ID] = t
 	return nil
 }
@@ -92,6 +96,7 @@ func (s *Memory) GetTenant(_ context.Context, id string) (Tenant, error) {
 	if !ok {
 		return Tenant{}, ErrTenantNotFound
 	}
+	t.TrustFloor = t.TrustFloor.Clone()
 	return t, nil
 }
 
@@ -101,6 +106,7 @@ func (s *Memory) ListTenants(_ context.Context) ([]Tenant, error) {
 	defer s.mu.Unlock()
 	out := make([]Tenant, 0, len(s.tenants))
 	for _, t := range s.tenants {
+		t.TrustFloor = t.TrustFloor.Clone()
 		out = append(out, t)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -108,11 +114,39 @@ func (s *Memory) ListTenants(_ context.Context) ([]Tenant, error) {
 }
 
 // UpdateTenant writes a tenant's mutable configuration (Quota,
-// ExposeScopePreview, Active) and preserves the ID and name. An unknown ID
+// ExposeScopePreview, Active, TrustFloor) and preserves the ID and name. An unknown ID
 // returns ErrTenantNotFound.
 func (s *Memory) UpdateTenant(_ context.Context, t Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.updateTenantLocked(t)
+}
+
+// UpdateTenantIf writes t only while the stored mutable record equals
+// expect's.
+//
+// Spec: §7.3.3
+func (s *Memory) UpdateTenantIf(_ context.Context, t Tenant, expect Tenant) error {
+	if err := checkTenantFloor(t); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	cur, ok := s.tenants[t.ID]
+	if !ok {
+		return ErrTenantNotFound
+	}
+	if !sameMutableTenant(cur, expect) {
+		return ErrTenantChanged
+	}
+	return s.updateTenantLocked(t)
+}
+
+// updateTenantLocked writes t's mutable record; s.mu is held.
+func (s *Memory) updateTenantLocked(t Tenant) error {
 	cur, ok := s.tenants[t.ID]
 	if !ok {
 		return ErrTenantNotFound
@@ -120,6 +154,7 @@ func (s *Memory) UpdateTenant(_ context.Context, t Tenant) error {
 	cur.Quota = t.Quota
 	cur.ExposeScopePreview = t.ExposeScopePreview
 	cur.Active = t.Active
+	cur.TrustFloor = t.TrustFloor.Clone()
 	s.tenants[t.ID] = cur
 	return nil
 }
