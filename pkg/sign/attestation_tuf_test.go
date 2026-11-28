@@ -546,6 +546,20 @@ func TestTUFRoot_IgnoresUnverifiedDiskCopy(t *testing.T) {
 			raw, _ = json.Marshal(m)
 			_ = os.WriteFile(p, raw, 0o600)
 		},
+		"no cached timestamp": func(t *testing.T, f *tufFixture) {
+			_ = os.Remove(filepath.Join(f.dir, tuf.URLToPath(f.repo.URL()), "timestamp.json"))
+		},
+		"no cached snapshot": func(t *testing.T, f *tufFixture) {
+			_ = os.Remove(filepath.Join(f.dir, tuf.URLToPath(f.repo.URL()), "snapshot.json"))
+		},
+		"no cached targets": func(t *testing.T, f *tufFixture) {
+			_ = os.Remove(filepath.Join(f.dir, tuf.URLToPath(f.repo.URL()), "targets.json"))
+		},
+		"snapshot in place of targets": func(t *testing.T, f *tufFixture) {
+			d := filepath.Join(f.dir, tuf.URLToPath(f.repo.URL()))
+			raw, _ := os.ReadFile(filepath.Join(d, "snapshot.json"))
+			_ = os.WriteFile(filepath.Join(d, "targets.json"), raw, 0o600)
+		},
 		"no cached metadata": func(t *testing.T, f *tufFixture) {
 			_ = os.RemoveAll(filepath.Join(f.dir, tuf.URLToPath(f.repo.URL())))
 		},
