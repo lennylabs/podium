@@ -304,9 +304,9 @@ A registration or an update whose policy breaks one of these rules is refused wi
 - A `trust_mode` of `warn` or `require` needs a requirement, and a requirement needs at least one signer. At the layer endpoints an empty `trust_mode` counts as `PODIUM_LAYER_TRUST_DEFAULT`, so while the default is `warn` or `require`, a registration or an update that leaves a layer with no mode and no requirement is refused. A declared layer in that state starts, and the start log names it.
 - A policy with several requirements sets `covers_layer: true` on exactly one of them, and that requirement does not set `optional: true`.
 - Each entry of `trust_require_types` names an artifact type the registry knows, no entry is listed twice, and a policy that lists a type has a requirement and a `trust_mode` other than `none`.
-- A signer names an `issuer` and an `identity`, and the binding rules above hold after the derivation.
+- A signer names an `issuer` and an `identity`, and the binding rules above hold after the derivation. A [key-based signer](#key-based-signers) names a `public_key` that holds one PEM block of an ECDSA P-256 key and no other member, an `instance` included.
 - A signer that sets `any_source` names no source binding member, and one that sets `any_ref` names no `source_repository_ref`.
-- A signer's `instance` is one the registry configures.
+- A certificate signer's `instance` is one the registry configures.
 - A `git` layer sets no `trust_layer_root`. A `trust_layer_root` neither begins nor ends with `/` and holds no empty, `.`, or `..` segment, and is valid UTF-8 with no white space, control character, or backslash.
 - A requirement or a signer holds no member of another name, including one reached through a YAML alias.
 - A request body or a `registry.yaml` layer entry holds no member that reads as a trust member and is none, such as `trust_mod` or `trust-mode`: a member whose name, with letters folded to lower case and each `-` read as `_`, begins with `trust`. In a layer entry this includes a key taken through a YAML merge key (`<<`), and an entry whose merge keys nest more than 16 deep is refused. A request body matches `trust_mode`, `trust_requirements`, `trust_require_types`, and `trust_layer_root` without regard to letter case and refuses one carried twice, and `trust_mode` and `trust_layer_root` refuse `null`.
@@ -315,6 +315,52 @@ A registration or an update whose policy breaks one of these rules is refused wi
 An update that changes no trust member does not re-check the stored policy, so a policy whose instance was later removed from `registry.yaml` does not block an unrelated update. A layer whose empty mode `PODIUM_LAYER_TRUST_DEFAULT` resolves to `warn` or `require` and that has no requirement is logged as a warning at each start.
 
 Changing the policy of an admin-defined layer requires the tenant `admin` role, and the owner of a user-defined layer changes its own. A change is recorded on the layer's audit event with the previous and the new policy.
+
+### Key-based signers
+
+A signer can name a public key in place of an issuer and an identity. A key-based signer serves a private repository whose host offers no private Sigstore instance, such as a private GitHub repository outside GitHub Enterprise Cloud, and an air-gapped deployment. Signing with a key contacts no outside service: the bundle carries the public key hint in place of a certificate, and no log entry and no timestamp. The operator distributes the key and rotates it.
+
+A key-based signer has the member `public_key` alone, a string that holds one PEM block of type `PUBLIC KEY`, as `cosign generate-key-pair` writes it to `cosign.pub`. The key is ECDSA on the P-256 curve, and a key of another algorithm or curve, a second block, and other text around the block are refused. In JSON the line breaks of the block are written as `\n`, and in `registry.yaml` the value is a block scalar:
+
+```yaml
+      trust_mode: require
+      trust_requirements:
+        - signers:
+            - public_key: |
+                -----BEGIN PUBLIC KEY-----
+                MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
+                -----END PUBLIC KEY-----
+```
+
+`podium layer register --trust-public-key cosign.pub` and `podium layer update --trust-public-key cosign.pub` read the block from the file. The flag is repeatable and can stand beside `--trust-signer` in one requirement.
+
+A key-signed bundle carries its time inside the signed statement. `podium attest --signed-time` adds the subject `.podium/signed-at/<seconds>`, the time at which the command ran in seconds since the Unix epoch, after the layer subject of each file, and that value is the attested time of the bundle. The registry reads no timestamp of a key-signed bundle, because any holder of the bundle can replace a timestamp, which lies outside the signed bytes. A statement that lists the layer subject and no signed-time subject is refused. The layer step accepts a key-signed layer subject only while its signed time is not later than the registry's clock plus `PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE`, which defaults to `5m`. A later one is refused with `ingest.attestation_stale` and the constraint `signed_time_ahead`, so a signing machine whose clock runs ahead of the registry's by more than the allowance fails closed.
+
+The bundle's public key hint and the `keyid` of its signature lie outside the signed bytes, and the registry reads neither: it verifies each bundle under the key of each key-based signer of the policy. The served `signer` of a key-signed link holds an empty `instance` and `issuer` and the key's identifier as `identity`, which is `sha256:` and the SHA-256 digest of the key's DER encoding. Two keys that sign one predicate type have separate links, so a rotation lists the old and the new key until every artifact is signed with the new one. A key carries no proof of the time at which it signed, so a policy trusts a key for as long as it lists the key, and the signatures of a removed key stop counting at once. A key holder who signs an older layer state again gives it a newer signed time, and only the attestation mark limits that. A [tenant trust floor](#tenant-trust-floor) entry names an issuer, so it matches no key-based signer, and a layer under a floor with a signer list cannot name one. A cycle under `none` links no key-signed bundle.
+
+#### Signing with a key outside GitHub Actions
+
+The recipe signs with [cosign](https://github.com/sigstore/cosign). It was tested with cosign 3.0.6. Pin the release your CI installs, and verify the download against the checksum the release publishes, because the signing tool handles the key. A cosign release with a different signing configuration can upload to a transparency log by default, and the registry refuses a key-signed bundle that carries a log entry. Create the key pair once and keep `cosign.key` and its password in the CI secret store:
+
+```bash
+cosign generate-key-pair
+podium layer register --id finance --repo https://github.com/acme/finance --ref podium/signed \
+  --trust require --trust-public-key cosign.pub
+```
+
+Each signing run writes the statements of the commit with a signed time, signs each one with the key without a transparency log, and imports the bundles:
+
+```bash
+podium attest --root skills --commit HEAD --format statement --signed-time --out out
+for f in out/podium-statement-*.json; do
+  cosign attest-blob --key cosign.key --statement "$f" --bundle "$f.sigstore.json" \
+    --use-signing-config=false --tlog-upload=false --yes
+done
+podium attest import out/*.sigstore.json --root skills --commit HEAD --public-key cosign.pub
+podium attest check --root skills --requirements requirements.json
+```
+
+cosign 3.0.6 reports `--tlog-upload` as deprecated in favour of a signing configuration file that names no transparency log, and a later release can require that file in its place. `podium attest import` accepts a key-signed bundle only with `--public-key`, and only when its signature verifies under that key, because the bundle names its key in no signed byte. `requirements.json` is the file `podium layer show finance --requirements` writes. The workflow then commits the attestation directory with the signed content to the ref the layer tracks.
 
 ### Tenant trust floor
 

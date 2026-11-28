@@ -1,7 +1,7 @@
 ---
 title: Upgrade notes
 nav_order: 5
-description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, ingest verification of author attestations with several requirements, required types, and a tenant trust floor, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
+description: "Release-specific upgrade steps, newest release first: the 0.8.0 Git snapshot deadline and bounded Git fetch, ingest verification of author attestations with several requirements, required types, a tenant trust floor, and key-based signers, the refusal of a workspace .podium symbolic link, the file hashes in the sync lock, the refusal of an empty or control-character visibility entry, the refusal of names that resolve to .git or .podium, the per-artifact refusal of a skill whose SKILL.md is missing or does not parse, the unreadable files of an unparseable package, an ARTIFACT.md below a dot-prefixed directory, symbolic-link layer paths, the removal of mcp-server artifacts from the MCP server, the refusal of an unrecognized identity provider value, the refusal of a start without the identity provider a registry ran with, the Sigstore keyless signature as a Sigstore bundle, and the package digest of stored versions, the 0.7.0 layer credential columns, skill metadata fields in stored rows, catalog lint advisories and listing budgets, per-artifact manifest refusal and skill lint severities, the semantic overlap check, and command and context removal, the 0.6.0 extends removal, and the 0.5.0 rewrite of stored content hashes."
 ---
 
 # Upgrade notes
@@ -70,6 +70,16 @@ From 0.8.0, a tenant carries a trust floor that every layer trust policy of the 
 - A floor applies to the layers that exist when it is set. A layer whose policy it makes invalid keeps serving its stored versions, its `verified` versions are reported as `failed` with `ingest.attestation_policy_invalid`, and its ingest cycles are refused until its policy meets the floor. Before a floor is raised, review the layers the start log or the `invalid_layers` member of the floor update names, and update their policies.
 - Raise a floor only after every replica that shares the store runs 0.8.0. A 0.7.0 replica does not read the floor and ingests a layer below it.
 - A rollback to 0.7.0 leaves the columns in place and does not read them; 0.7.0 ignores the setting. A floor that the tenant endpoints set is kept for a return to 0.8.0.
+
+### Key-based signers
+
+From 0.8.0, a trust policy signer can name an ECDSA P-256 `public_key` in place of an issuer and an identity, and the registry verifies a key-signed bundle under it with no certificate, log entry, or timestamp (spec §4.7.11). [Key-based signers](../content/layers#key-based-signers) describes the policy and the signing recipe.
+
+- The stored trust policy keeps the key in the existing `trust_requirements` column, so the stores need no migration step.
+- The registry reads `PODIUM_ATTESTATION_SIGNED_TIME_ALLOWANCE` at its start, `5m` by default. A value that is not a duration from `0s` to `24h` refuses the start with `config.invalid`. 0.7.0 does not read it.
+- A key-signed layer subject must list the signed-time subject that `podium attest --signed-time` writes, and the registry refuses one whose signed time is later than its clock plus the allowance (`ingest.attestation_stale`, `signed_time_ahead`). Keep the clocks of the signing machines and of every replica synchronized.
+- Register a key-based signer only after every replica that shares the store runs 0.8.0, because a 0.7.0 replica ingests without attestation steps.
+- A rollback to 0.7.0 follows the steps of *Layer trust policy* above, and the key needs no step of its own.
 
 ### Attestation links and outcomes
 
