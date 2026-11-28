@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/sign"
 )
 
@@ -42,7 +43,7 @@ func signCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		served, code := resolveArtifactSignature(*registry, artifact)
+		served, _, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {
 			return code
 		}
@@ -93,6 +94,9 @@ func verifyCmd(args []string) int {
 
 	hash := *contentHash
 	sig := *signature
+	// attestCode is the exit status of the §4.7.11 part of the <artifact>
+	// form, which reports apart from the delivery signature result.
+	attestCode := 0
 	if artifact != "" {
 		if *contentHash != "" {
 			fmt.Fprintln(os.Stderr, "error: pass either <artifact> or --content-hash, not both")
@@ -102,10 +106,23 @@ func verifyCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		served, code := resolveArtifactSignature(*registry, artifact)
+		// Spec: §4.7.9, §4.7.11 — the consumer trust policy loads first, so
+		// a policy that does not load exits 2 whatever the argument, and
+		// the requested ID meets the well-formed rule before it is sent.
+		att, err := newSyncAttestation(workingDir())()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+		if err := attest.CheckRequestedID(artifact); err != nil {
+			fmt.Fprintf(os.Stderr, "verify failed: %v\n", err)
+			return 1
+		}
+		served, body, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {
 			return code
 		}
+		attestCode = verifyAttestation(os.Stdout, att, *registry, artifact, body)
 		if hash, sig, code = verifiedPair(artifact, served, sig); code != 0 {
 			return code
 		}
@@ -125,7 +142,7 @@ func verifyCmd(args []string) int {
 		return 1
 	}
 	fmt.Fprintln(os.Stderr, "verify ok")
-	return 0
+	return attestCode
 }
 
 // verifiedPair selects the (hash, signature) pair the <artifact> form of
@@ -165,23 +182,23 @@ type servedAttestation struct {
 // form of `podium sign` / `podium verify` resolves the artifact rather than
 // operating on a raw hash. A non-zero code is the process exit to return; the
 // caller stops on a non-zero.
-func resolveArtifactSignature(registry, artifactID string) (servedAttestation, int) {
+func resolveArtifactSignature(registry, artifactID string) (servedAttestation, []byte, int) {
 	endpoint := registry + "/v1/load_artifact?id=" + url.QueryEscape(artifactID)
 	out, status := doJSON(endpoint, "GET", nil)
 	if status >= 400 {
 		fmt.Fprintf(os.Stderr, "resolve %s failed: HTTP %d\n%s\n", artifactID, status, out)
-		return servedAttestation{}, 1
+		return servedAttestation{}, nil, 1
 	}
 	var resp servedAttestation
 	if err := json.Unmarshal(out, &resp); err != nil {
 		fmt.Fprintf(os.Stderr, "resolve %s: decode response: %v\n", artifactID, err)
-		return servedAttestation{}, 1
+		return servedAttestation{}, nil, 1
 	}
 	if resp.ContentHash == "" {
 		fmt.Fprintf(os.Stderr, "resolve %s: registry returned no content hash\n", artifactID)
-		return servedAttestation{}, 1
+		return servedAttestation{}, nil, 1
 	}
-	return resp, 0
+	return resp, out, 0
 }
 
 // keyUse names the half of the registry-managed keypair a command needs.

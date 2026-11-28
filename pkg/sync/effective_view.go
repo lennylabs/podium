@@ -48,11 +48,16 @@ func ResolveEffectiveView(opts Options) ([]EffectiveArtifact, error) {
 		// at ingest, so the checklist omits it. The
 		// override's apply step reports the drops through
 		// OverrideResult.Dropped.
-		all, _, err := resolveRecords(opts)
+		view, err := resolveRecords(opts)
 		if err != nil {
 			return nil, err
 		}
-		for _, rec := range all {
+		for _, rec := range view.records {
+			if rec.refusal != nil {
+				// A record the well-formed rule or the request binding
+				// refused is no artifact of the view (§4.7.11).
+				continue
+			}
 			typ := ""
 			if rec.Artifact != nil {
 				typ = string(rec.Artifact.Type)

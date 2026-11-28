@@ -101,7 +101,15 @@ func (r *ArtifactRecord) Refusal() (constraint, reason string, ok bool) {
 	if r.Unparseable != "" {
 		return layer.ManifestUnparseableConstraint, r.Unparseable, true
 	}
-	return layer.RemovedFeature(r.AuthoredBytes, r.Type())
+	if constraint, reason, ok := layer.RemovedFeature(r.AuthoredBytes, r.Type()); ok {
+		return constraint, reason, true
+	}
+	// Spec: §4.1 (MCP server names) — after the removed-type rule and
+	// before lint, in both deployment modes.
+	if manifest.MCPServerNameRefused(r.Artifact) {
+		return layer.MCPServerNameConstraint, layer.MCPServerNameReason, true
+	}
+	return "", "", false
 }
 
 // CanonicalID is the path under the layer root, separated by "/".
@@ -143,9 +151,12 @@ func (r *Registry) Walk(opts WalkOptions) ([]ArtifactRecord, error) {
 	}
 	all := []ArtifactRecord{}
 	for _, layer := range r.Layers {
-		records, err := walkLayer(layer)
+		records, fsys, err := walkLayer(layer)
 		if err != nil {
 			return nil, err
+		}
+		if opts.OnLayer != nil {
+			opts.OnLayer(layer, records, fsys)
 		}
 		all = append(all, records...)
 	}
@@ -349,6 +360,14 @@ type WalkOptions struct {
 	// or a removed type fail the walk.
 	// Walk calls it synchronously in the calling goroutine.
 	OnDrop func(layer.Drop)
+	// OnLayer, when set, receives each layer with every package the walk
+	// found in it, before any refusal, and the layer's tree read through
+	// its resolved root. Filesystem-source sync computes the §4.7.6 layer
+	// digest from them and reads the layer's attestation directory, so the
+	// package digests the layer digest lists are those of the bytes the
+	// walk read and returns (§13.11.3). Walk calls it synchronously, once
+	// per layer, in layer order.
+	OnLayer func(l Layer, records []ArtifactRecord, fsys fs.FS)
 }
 
 // walkLayer enumerates every artifact package in a single layer. A
@@ -361,10 +380,10 @@ type WalkOptions struct {
 // fs.FS of the same path is.
 //
 // Spec: §4.2
-func walkLayer(layer Layer) ([]ArtifactRecord, error) {
+func walkLayer(layer Layer) ([]ArtifactRecord, fs.FS, error) {
 	root, err := layerRoot(layer)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	fsys := os.DirFS(root)
 	packages := map[string]bool{}
@@ -393,10 +412,10 @@ func walkLayer(layer Layer) ([]ArtifactRecord, error) {
 		return nil
 	})
 	if walkErr != nil {
-		return nil, walkErr
+		return nil, nil, walkErr
 	}
 	sort.Slice(records, func(i, j int) bool { return records[i].ID < records[j].ID })
-	return records, nil
+	return records, fsys, nil
 }
 
 // layerRoot returns the layer's path with every symbolic link resolved. The

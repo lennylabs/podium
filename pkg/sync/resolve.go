@@ -664,6 +664,9 @@ func validateTargetKind(kind string, entry TargetEntry, in PlanInput) error {
 					ErrConfigInvalid, entry.ID, h, err)
 			}
 		}
+		if err := ValidatePluginNames(entry.ID, entry.Plugins); err != nil {
+			return err
+		}
 	default:
 		return fmt.Errorf("%w: target %q has unknown kind %q (want workspace or marketplace)",
 			ErrConfigInvalid, entry.ID, kind)

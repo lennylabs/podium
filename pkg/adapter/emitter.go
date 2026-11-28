@@ -203,7 +203,10 @@ func ruleSkillBody(src Source) []byte {
 		desc = "Project rule shipped as a skill."
 	}
 	var b []byte
-	b = append(b, "---\nname: "+lastSeg(src.ArtifactID)+"\ndescription: "+desc+"\n---\n\n"...)
+	// The description is author text, so it is quoted: unquoted, a line
+	// break in it would add frontmatter keys such as allowed-tools to the
+	// published SKILL.md.
+	b = append(b, "---\nname: "+lastSeg(src.ArtifactID)+"\ndescription: "+yamlDoubleQuote(desc)+"\n---\n\n"...)
 	b = append(b, art.Body...)
 	if len(art.Body) == 0 || art.Body[len(art.Body)-1] != '\n' {
 		b = append(b, '\n')

@@ -132,6 +132,7 @@ func KnownMatrices() []Matrix {
 					"materialize.attestation_untrusted",
 					"materialize.attestation_mismatch",
 					"materialize.attestation_root_stale",
+					"materialize.output_conflict",
 					"quota.storage_exceeded",
 					"quota.materialize_rate_exceeded",
 					"mcp.unsupported_version",

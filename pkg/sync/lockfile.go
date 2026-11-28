@@ -69,7 +69,10 @@ type LockScope struct {
 // config-merge path records none, because the cleanup never deletes it. Type
 // records the artifact type the run's §7.5.1 type filter judged, so a later
 // run can judge the filter for an artifact whose manifest no longer parses
-// (§13.11.3).
+// (§13.11.3). PackageDigest and Attestations are the lock version 2 members
+// (§7.5.3): the package digest the consumer computed itself, and the
+// bundles that met a requirement with the signer the consumer verified.
+// Every entry of one artifact carries the same values.
 type LockArtifact struct {
 	ID               string `yaml:"id"`
 	Version          string `yaml:"version,omitempty"`
@@ -79,7 +82,41 @@ type LockArtifact struct {
 	MaterializedPath string `yaml:"materialized_path,omitempty"`
 	FileHash         string `yaml:"file_hash,omitempty"`
 	Merge            string `yaml:"merge,omitempty"`
+	PackageDigest    string `yaml:"package_digest,omitempty"`
+	// Attestations are never copied from a served attestations member.
+	Attestations []LockAttestation `yaml:"attestations,omitempty"`
 }
+
+// LockAttestation is one bundle that met a requirement of the §4.7.11
+// attestation check, with the signer the consumer verified (§7.5.3).
+type LockAttestation struct {
+	Digest        string     `yaml:"digest"`
+	PredicateType string     `yaml:"predicate_type,omitempty"`
+	Signer        LockSigner `yaml:"signer"`
+}
+
+// LockSigner is a signer the consumer verified: the instance name its own
+// policy gives the trusted root, and the issuer and identity of the
+// certificate, or, for a key-based signer, an empty instance and issuer and
+// the key's identifier as the identity.
+type LockSigner struct {
+	Instance string `yaml:"instance,omitempty"`
+	Issuer   string `yaml:"issuer,omitempty"`
+	Identity string `yaml:"identity"`
+}
+
+// String renders the signer for standard error.
+func (s LockSigner) String() string {
+	if s.Instance == "" && s.Issuer == "" {
+		return "key " + s.Identity
+	}
+	return s.Instance + " " + s.Issuer + " " + s.Identity
+}
+
+// LockVersion is the version of the lock format this release writes.
+// Version 2 adds the attestation members of an entry (§7.5.3). A lock of
+// version 1, or one that records no version, is read as before.
+const LockVersion = 2
 
 // LockToggles tracks ephemeral overrides applied since the last full
 // sync (§7.5.5).
@@ -119,6 +156,11 @@ func ReadLock(target string) (*LockFile, error) {
 	if err := yaml.Unmarshal(data, &lf); err != nil {
 		return nil, fmt.Errorf("lock: invalid yaml: %w", err)
 	}
+	// Spec: §7.5.3 — a lock of a later version is a lock this release
+	// cannot read, so its members are never taken as a version 2 lock's.
+	if lf.Version > LockVersion || lf.Version < 0 {
+		return nil, fmt.Errorf("lock: version %d is not a lock version this release reads (1 to %d)", lf.Version, LockVersion)
+	}
 	return &lf, nil
 }
 
@@ -142,9 +184,10 @@ func ReadLock(target string) (*LockFile, error) {
 // artifacts slice are left exactly as they were handed over.
 func WriteLock(target string, lf *LockFile) error {
 	out := *lf
-	if out.Version == 0 {
-		out.Version = 1
-	}
+	// Spec: §7.5.3 — every write records the version this release writes,
+	// so a lock of version 1 that a run or an override rewrites becomes
+	// version 2.
+	out.Version = LockVersion
 	out.Artifacts = slices.Clone(lf.Artifacts)
 	slices.SortStableFunc(out.Artifacts, func(a, b LockArtifact) int {
 		if c := strings.Compare(a.ID, b.ID); c != 0 {

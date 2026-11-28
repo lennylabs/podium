@@ -213,46 +213,54 @@ func TestRender_CommittedDirectoryLinkIntoGitRefused(t *testing.T) {
 	}
 }
 
-// Spec: §7.5.3 — the rule that admits a prior-lock entry governs what sync
-// writes. A bundled resource whose name holds a backslash, which is a legal
-// file name on Unix, is neither written nor recorded, so no later run warns
-// about the lock's own entry and no file is orphaned when the artifact goes.
-//
-// Not parallel: the test swaps the process-wide os.Stderr.
+// Spec: §7.5.3, §13.11.3, §4.7.11 (Well-formed requests and records) — a
+// bundled resource whose name holds a backslash, which is a legal file name
+// on Unix, breaks the well-formed rule, so the filesystem source refuses the
+// whole package with materialize.request_mismatch (resource_path): nothing of
+// it is written or recorded, the run reports it, and no file is orphaned when
+// the artifact goes.
 func TestRun_UnrecordablePathNeitherWrittenNorRecorded(t *testing.T) {
+	t.Parallel()
 	reg := t.TempDir()
 	testharness.WriteTree(t, reg,
 		testharness.WriteTreeOption{Path: "pack/a/ARTIFACT.md", Content: agentArtifactSrc},
 		testharness.WriteTreeOption{Path: `pack/a/notes\x.md`, Content: "n\n"},
+		testharness.WriteTreeOption{Path: "pack/b/ARTIFACT.md", Content: agentArtifactSrc},
 	)
 	target := filepath.Join(t.TempDir(), "target")
 	opts := Options{RegistryPath: reg, Target: target, AdapterID: "none"}
-	stderr := captureStderr(t, func() { syncChanged(t, opts) })
-	if !strings.Contains(stderr, `refusing to write "pack/a/notes\\x.md" for pack/a`) {
-		t.Errorf("stderr = %q, want the refused resource named", stderr)
+	res, err := Run(opts)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if len(res.Dropped) != 1 || res.Dropped[0].ArtifactID != "pack/a" || res.Dropped[0].Code != "materialize.request_mismatch" ||
+		res.Dropped[0].Details["constraint"] != "resource_path" {
+		t.Fatalf("dropped = %+v, want pack/a refused as resource_path", res.Dropped)
 	}
 	lock, err := ReadLock(target)
 	if err != nil || lock == nil {
 		t.Fatalf("ReadLock = (%v, %v)", lock, err)
 	}
 	for _, la := range lock.Artifacts {
-		if strings.Contains(la.MaterializedPath, `\`) {
-			t.Errorf("the lock records the refused path %q", la.MaterializedPath)
+		if la.ID == "pack/a" {
+			t.Errorf("the lock records the refused artifact: %+v", la)
 		}
 	}
-	if _, err := os.Lstat(filepath.Join(target, "pack", "a", `notes\x.md`)); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the refused resource must not be written; lstat err = %v", err)
+	if _, err := os.Lstat(filepath.Join(target, "pack", "a")); !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("nothing of the refused package may be written; lstat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(target, "pack", "b", "ARTIFACT.md")); err != nil {
+		t.Errorf("the other package must be written: %v", err)
 	}
 
 	if err := os.RemoveAll(filepath.Join(reg, "pack")); err != nil {
 		t.Fatalf("RemoveAll: %v", err)
 	}
-	stderr = captureStderr(t, func() { syncChanged(t, opts) })
-	if strings.Contains(stderr, "skipping") {
-		t.Errorf("removal run stderr = %q, want no skipped lock entry", stderr)
+	if _, err := Run(opts); err != nil {
+		t.Fatalf("removal run: %v", err)
 	}
 	if _, err := os.Lstat(filepath.Join(target, "pack")); !errors.Is(err, fs.ErrNotExist) {
-		t.Errorf("the removed artifact must leave nothing behind; lstat err = %v", err)
+		t.Errorf("the removed artifacts must leave nothing behind; lstat err = %v", err)
 	}
 }
 

@@ -95,21 +95,52 @@ func (c *Checker) Verify(ctx context.Context, d Delivery) (Result, error) {
 	if err := BindRequest(d.Request, rec); err != nil {
 		return Result{}, err
 	}
-	res := Result{Resolution: Resolution{ID: d.Request.ID, Mode: ModeNone, UserMode: ModeNone, key: "default"}}
-	if c.Policy != nil {
-		res.Resolution = c.Policy.Resolve(d.Request.ID)
-	}
+	res := c.resolve(d.Request.ID)
 	if !res.Resolution.Mode.AboveNone() {
 		return res, nil
 	}
 	res.Checked = true
-	if err := c.check(ctx, d, &res); err != nil {
-		if res.Resolution.Mode == ModeRequire {
-			return Result{}, err
-		}
-		res.Warnings = append(res.Warnings, asFailure(err))
+	return res.settle(c.check(ctx, d, &res))
+}
+
+// resolve returns the result of an ID before the check: its resolution
+// under the policy, or none when the checker holds no policy.
+func (c *Checker) resolve(id string) Result {
+	res := Result{Resolution: Resolution{ID: id, Mode: ModeNone, UserMode: ModeNone, key: "default"}}
+	if c.Policy != nil {
+		res.Resolution = c.Policy.Resolve(id)
 	}
-	return res, nil
+	return res
+}
+
+// settle applies the mode to the error of the check: under require it
+// refuses, and under warn it becomes a warning of the result.
+func (r Result) settle(err error) (Result, error) {
+	if err == nil {
+		return r, nil
+	}
+	if r.Resolution.Mode == ModeRequire {
+		return Result{}, err
+	}
+	r.Warnings = append(r.Warnings, asFailure(err))
+	return r, nil
+}
+
+// runPlan applies a rule check to the rules of a plan: a failure of an
+// enforced rule is returned, and a failure of a reported rule is added as a
+// warning, and the check goes on to the next rule.
+func (c *Checker) runPlan(plan CheckPlan, res *Result, apply func(RuleMatch) error) error {
+	for _, m := range plan.Enforced {
+		if err := apply(m); err != nil {
+			return err
+		}
+	}
+	for _, m := range plan.Reported {
+		if err := apply(m); err != nil {
+			res.Warnings = append(res.Warnings, asFailure(err))
+		}
+	}
+	return nil
 }
 
 // asFailure returns err as a *Failure, wrapping an error of another kind
@@ -153,17 +184,9 @@ func (c *Checker) check(ctx context.Context, d Delivery, res *Result) error {
 	if err != nil {
 		return err
 	}
-	for _, m := range plan.Enforced {
-		if err := c.applyRule(ctx, m, bundles, res); err != nil {
-			return err
-		}
-	}
-	for _, m := range plan.Reported {
-		if err := c.applyRule(ctx, m, bundles, res); err != nil {
-			res.Warnings = append(res.Warnings, asFailure(err))
-		}
-	}
-	return nil
+	return c.runPlan(plan, res, func(m RuleMatch) error {
+		return c.applyRule(ctx, m, bundles, res)
+	})
 }
 
 // applyRule runs steps 9 and 10 for one rule and records the bundles that

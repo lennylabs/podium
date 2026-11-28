@@ -299,6 +299,7 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 	// One resolver serves both the view and the override, so the check
 	// resolves once, before the checklist (§7.5).
 	delivery := newSyncDeliveryCheck(workingDir())
+	attestation := newSyncAttestation(workingDir())
 	// Spec: §7.2.2. The view and the apply step send the same harness, so one
 	// invocation never records its loads both with and without it.
 	harness := resolveOverrideHarness(merged, harnessFlag, target)
@@ -307,9 +308,10 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 		Target:       target,
 		AdapterID:    harness,
 		Delivery:     delivery,
+		Attestation:  attestation,
 	})
 	if err != nil {
-		if reportDeliveryConfigError(err, "") {
+		if reportDeliveryConfigError(err, "") || reportAttestationConfigError(err, "") {
 			return 2
 		}
 		fmt.Fprintf(os.Stderr, "override: resolve view: %v\n", err)
@@ -348,9 +350,10 @@ func runSyncOverrideInteractive(target, registryFlag, harnessFlag string, dryRun
 		AdapterID:     harness,
 		Delivery:      delivery,
 		OnUnparseable: onUnparseable,
+		Attestation:   attestation,
 	})
 	if err != nil {
-		if reportDeliveryConfigError(err, "") {
+		if reportDeliveryConfigError(err, "") || reportAttestationConfigError(err, "") {
 			return 2
 		}
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)

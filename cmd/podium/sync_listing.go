@@ -109,6 +109,9 @@ func overrideListingBudget(merged *sync.MergedConfig, harness string) (sync.Effe
 func overrideExit(res *sync.OverrideResult, budget sync.EffectiveListingBudget) int {
 	// An override re-materializes only without --dry-run, so a drop it reports
 	// comes from a run that wrote its output.
+	if res.Materialized != nil {
+		reportAttestationNotes(os.Stderr, res.Materialized.Warnings, res.Materialized.SignerChanges)
+	}
 	dropped := reportDropped(os.Stderr, res.Dropped, false)
 	overBudget := reportListing(os.Stderr, sync.Listing(res.Materialized, budget))
 	if dropped || overBudget {

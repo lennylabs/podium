@@ -15,6 +15,7 @@ const (
 	CodeAttestationRootStale = "materialize.attestation_root_stale"
 	CodePolicyUnavailable    = "config.attestation_policy_unavailable"
 	CodeRegistryUnreachable  = "network.registry_unreachable"
+	CodeOutputConflict       = "materialize.output_conflict"
 )
 
 // The details.constraint values of the consumer codes (§4.7.11, §6.10). A
@@ -39,6 +40,15 @@ const (
 	ConstraintNoRule          = "no_rule"
 	ConstraintNoRequirements  = "no_requirements"
 	ConstraintUserRule        = "user_rule"
+	ConstraintLayerDigest     = "layer_digest"
+	ConstraintUnreadable      = "unreadable"
+	ConstraintPinnedSigner    = "pinned_signer"
+	ConstraintOverlay         = "overlay"
+	ConstraintDuplicateID     = "duplicate_id"
+	ConstraintFile            = "file"
+	ConstraintEntry           = "entry"
+	ConstraintMCPServerName   = "mcp_server_name"
+	ConstraintLayerRootUnlist = "layer_root_unlisted"
 )
 
 // Failure is a refusal or a warning of the consumer procedure (§4.7.11): a
@@ -101,4 +111,12 @@ func FailureOf(err error) (*Failure, bool) {
 		return f, true
 	}
 	return nil, false
+}
+
+// NewFailure builds a Failure for a consumer condition that the consumer
+// decides itself, such as the signer comparison of podium sync (§7.5.3) or
+// an overlay artifact that is not applied (§7.5). detail is Podium's own
+// text.
+func NewFailure(code, constraint, detail string) *Failure {
+	return fail(code, constraint, detail, nil)
 }

@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
+	"slices"
 	"sort"
 
 	"github.com/lennylabs/podium/pkg/adapter"
@@ -44,6 +46,10 @@ type RenderOptions struct {
 	HTTPClient *http.Client
 	// Delivery resolves the §4.7.10 delivery check of a server-source render.
 	Delivery DeliveryCheckFunc
+	// Attestation resolves the §4.7.11 consumer trust policy of the
+	// render, the policy of the podium sync process (§7.8 Author
+	// attestation).
+	Attestation AttestationFunc
 }
 
 // RenderResult describes one render. Changed reports whether the render produced
@@ -62,6 +68,9 @@ type RenderResult struct {
 	// §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3). The render omits them; callers report
 	// each entry with its Code and Reason.
 	Dropped []layer.Drop
+	// Warnings are the §4.7.11 warning texts of the records the render
+	// rendered under warn, which callers write on standard error (§7.8).
+	Warnings []string
 }
 
 // ErrNoEmitter signals that a harness in the output's harness set has no §7.8
@@ -105,17 +114,28 @@ type assigned struct {
 //
 // spec: §7.8 (render pipeline), §4.6 (effective view), §7.5.1 (scope filters).
 func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
-	records, dropped, err := FetchRecords(Options{
+	view, err := fetchView(Options{
 		RegistryPath: opts.Registry,
 		Token:        opts.Token,
 		HTTPClient:   opts.HTTPClient,
 		Delivery:     opts.Delivery,
+		Attestation:  opts.Attestation,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("publish %q: fetch effective view: %w", opts.OutputID, err)
 	}
+	records := make([]Record, len(view.records))
+	for i, rec := range view.records {
+		records[i] = rec.export()
+	}
 
 	assignments := assignPlugins(records, opts.Plugins)
+	// Spec: §7.8 (Author attestation) — the check of every record a plugin
+	// selects decides the target before the render writes a file.
+	warnings, err := checkAssigned(ctx, view.records, assignments)
+	if err != nil {
+		return nil, fmt.Errorf("publish %q: %w", opts.OutputID, err)
+	}
 
 	// Resolve a distinct emitter per harness. The Claude surfaces collapse to
 	// one emitter keyed by its ID ("claude"), so a harness set naming more than
@@ -129,13 +149,71 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Spec: §7.8 (Author attestation) — two IDs that render one component
+	// file fail the target before it writes, whatever their modes.
+	if err := contestRendered(rendered); err != nil {
+		return nil, fmt.Errorf("publish %q: %w", opts.OutputID, err)
+	}
 
 	res, err := reconcile(opts.Workdir, opts.OutputID, rendered)
 	if err != nil {
 		return nil, err
 	}
-	res.Dropped = dropped
+	res.Dropped = view.dropped
+	res.Warnings = append(view.warnings, warnings...)
 	return res, nil
+}
+
+// contestRendered fails a render in which two distinct IDs write one
+// component file path, compared byte for byte and with ASCII letters folded.
+// The emitters name a skill directory by the last ID segment, so team/pay
+// and finance/pay render to one skills/pay/. The merged manifests belong to
+// no ID and are not contested.
+//
+// Spec: §7.8 (Author attestation)
+func contestRendered(rendered []renderedFile) error {
+	claims := map[string][]string{}
+	for _, rf := range rendered {
+		if rf.ownerID == manifestOwner {
+			continue
+		}
+		claims[rf.ownerID] = append(claims[rf.ownerID], outputClaims([]adapter.File{rf.file})...)
+	}
+	contests := contestedOutputs(claims)
+	if len(contests) == 0 {
+		return nil
+	}
+	id := slices.Sorted(maps.Keys(contests))[0]
+	return &RecordRefusedError{ID: id, Err: conflictFailure(id, contests[id])}
+}
+
+// checkAssigned runs the §4.7.11 attestation check on each record a plugin
+// selected, once per ID. A record that the check refuses under require
+// fails the render, and a failure under warn is a warning. Records that no
+// plugin selects are not checked, so they cannot fail the render.
+//
+// Spec: §7.8 (Author attestation)
+func checkAssigned(ctx context.Context, all []materialRecord, assignments []assigned) ([]string, error) {
+	selected := make(map[string]bool, len(assignments))
+	for _, a := range assignments {
+		selected[a.record.ID] = true
+	}
+	var warnings []string
+	// Every record of a selected ID is checked, each copy apart, because
+	// every copy is rendered; fetchView already refuses a repeated ID.
+	for _, rec := range all {
+		if !selected[rec.ID] || rec.check == nil {
+			continue
+		}
+		r, err := rec.check(ctx)
+		if err != nil {
+			return nil, &RecordRefusedError{ID: rec.ID, Err: err}
+		}
+		for _, w := range r.Warnings {
+			warnings = append(warnings, w.WarningText(rec.ID))
+		}
+	}
+	return warnings, nil
 }
 
 // renderedFile pairs an emitted file with the canonical artifact ID that

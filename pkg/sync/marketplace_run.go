@@ -60,6 +60,10 @@ type RunOptions struct {
 	// Delivery resolves the §4.7.10 delivery check of the render's
 	// server-source load.
 	Delivery DeliveryCheckFunc
+	// Attestation resolves the §4.7.11 consumer trust policy of the
+	// render. A render the policy refuses fails before it writes, and the
+	// publish phase does not run (§7.8 Author attestation).
+	Attestation AttestationFunc
 }
 
 // RunResult reports the outcome of one RunMarketplace. Workdir is the working
@@ -149,17 +153,20 @@ func runPipeline(ctx context.Context, opts RunOptions, out ResolvedOutput, workd
 	}
 
 	render, err := Render(ctx, RenderOptions{
-		OutputID:   out.ID,
-		Registry:   out.Registry,
-		Identity:   out.Identity,
-		Token:      opts.Token,
-		Workdir:    workdir,
-		Harnesses:  out.Harnesses,
-		Plugins:    out.Plugins,
-		HTTPClient: opts.HTTPClient,
-		Delivery:   opts.Delivery,
+		OutputID:    out.ID,
+		Registry:    out.Registry,
+		Identity:    out.Identity,
+		Token:       opts.Token,
+		Workdir:     workdir,
+		Harnesses:   out.Harnesses,
+		Plugins:     out.Plugins,
+		HTTPClient:  opts.HTTPClient,
+		Delivery:    opts.Delivery,
+		Attestation: opts.Attestation,
 	})
 	if err != nil {
+		// Spec: §7.8 — a failed render returns before the publish phase,
+		// so the remote keeps the tree of the last run that passed.
 		return nil, err
 	}
 	res.Render = render

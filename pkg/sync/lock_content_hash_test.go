@@ -199,7 +199,7 @@ func TestRun_FilesystemSourceLockHashesAPlainSkillBeforeSynthesis(t *testing.T) 
 	want := "sha256:" + version.CanonicalContentHash(nil, []byte(skill), nil)
 	// Guard the fixture: the synthesized document must hash differently, or
 	// the assertion below passes whichever bytes the composer read.
-	recs, _, err := filesystemRecords(Options{RegistryPath: registry})
+	recs, _, err := filesystemRecords(Options{RegistryPath: registry}, &Attestation{})
 	if err != nil {
 		t.Fatalf("filesystemRecords: %v", err)
 	}

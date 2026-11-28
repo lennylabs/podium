@@ -178,7 +178,7 @@ func claudeRuleBody(src Source) []byte {
 	if art.RuleMode == manifest.RuleModeGlob && art.RuleGlobs != "" {
 		fm.WriteString("paths:\n")
 		for _, g := range splitGlobs(art.RuleGlobs) {
-			fm.WriteString("  - \"" + g + "\"\n")
+			fm.WriteString("  - " + yamlDoubleQuote(g) + "\n")
 		}
 	}
 	var b strings.Builder

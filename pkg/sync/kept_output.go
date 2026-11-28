@@ -11,13 +11,14 @@ import (
 	"github.com/lennylabs/podium/pkg/materialize"
 )
 
-// keptOutput is the previous output a filesystem-source sync leaves in place
-// for the artifacts the §4.1 unparseable-manifest rule dropped this run. An
-// unparseable manifest is usually a file in the middle of an edit, so the
-// files and lock entries an earlier run wrote for such an artifact survive the
-// run instead of being reconciled away as stale.
+// keptOutput is the previous output a sync leaves in place for the artifacts
+// the §4.1 unparseable-manifest rule dropped this run, and for the records a
+// §4.7.11 check refused. An unparseable manifest is usually a file in the
+// middle of an edit, and a refused record must not reach the harness as a
+// removal, so the files and lock entries an earlier run wrote for such an
+// artifact survive the run instead of being reconciled away as stale.
 //
-// Spec: §13.11.3
+// Spec: §13.11.3, §7.5 (Author attestation)
 type keptOutput struct {
 	// ids holds the canonical IDs whose previous output is kept.
 	ids map[string]bool
@@ -50,13 +51,17 @@ type keepRun struct {
 	// target is the target directory, read for the config-merge files a kept
 	// artifact holds an entry in.
 	target string
+	// refused holds the IDs the §4.7.11 checks refused this run, whose
+	// previous output a workspace sync keeps (§7.5).
+	refused map[string]bool
 }
 
 // keepPreviousOutput returns the previous output to keep and marks each drop
-// whose output it keeps. Under OnUnparseableRemove it keeps nothing, so the
-// unparseable artifact's previous output is reconciled away like any other
-// drop's. Otherwise an artifact qualifies when the unparseable-manifest rule
-// dropped it, the prior lock records it, and the run resolved no other copy
+// whose output it keeps. A record a §4.7.11 check refused qualifies whatever
+// the setting. Under OnUnparseableRemove no unparseable drop qualifies, so
+// its previous output is reconciled away like any other drop's. Otherwise an
+// artifact qualifies when the unparseable-manifest rule dropped it, the prior
+// lock records it, and the run resolved no other copy
 // of it: a lower-precedence layer or the workspace overlay can still
 // contribute the ID, and that copy is then materialized and reconciled as
 // usual. A collision, no-inheritance, or removed-type drop keeps nothing,
@@ -73,7 +78,7 @@ type keepRun struct {
 // Spec: §13.11.3
 func keepPreviousOutput(dropped []layer.Drop, prior *LockFile, run keepRun) keptOutput {
 	kept := keptOutput{ids: map[string]bool{}, standalone: map[string]bool{}}
-	if prior == nil || run.policy == OnUnparseableRemove {
+	if prior == nil {
 		return kept
 	}
 	// Output another adapter wrote sits at that harness's paths, which this
@@ -92,7 +97,7 @@ func keepPreviousOutput(dropped []layer.Drop, prior *LockFile, run keepRun) kept
 	written := run.writtenPaths()
 	for i, d := range dropped {
 		entries := locked[d.ArtifactID]
-		if !d.Unparseable() || len(entries) == 0 || present[d.ArtifactID] {
+		if !run.keeps(d) || len(entries) == 0 || present[d.ArtifactID] {
 			continue
 		}
 		if !run.selects(d.ArtifactID, entries[0].Type) || run.takesOver(d.ArtifactID, entries, written) {
@@ -111,6 +116,16 @@ func keepPreviousOutput(dropped []layer.Drop, prior *LockFile, run keepRun) kept
 		}
 	}
 	return kept
+}
+
+// keeps reports whether a drop's previous output qualifies to be kept: a
+// refusal of the §4.7.11 checks always (§7.5), and a drop under the §4.1
+// unparseable-manifest rule unless the setting is remove (§13.11.3).
+func (r keepRun) keeps(d layer.Drop) bool {
+	if r.refused[d.ArtifactID] {
+		return true
+	}
+	return d.Unparseable() && r.policy != OnUnparseableRemove
 }
 
 // selects reports whether the run's §7.5.1 scope and §7.5.5 toggles select id,

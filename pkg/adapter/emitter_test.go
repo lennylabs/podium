@@ -297,7 +297,7 @@ func TestClaudeMarketplace_RuleShipsAsSkill(t *testing.T) {
 	if !strings.Contains(body, "Rule prose.") {
 		t.Errorf("synthesized SKILL.md must carry the rule prose:\n%s", body)
 	}
-	if !strings.Contains(body, "description: Be careful.") {
+	if !strings.Contains(body, `description: "Be careful."`) {
 		t.Errorf("synthesized SKILL.md must carry the rule description:\n%s", body)
 	}
 	if strings.Contains(body, "rule_mode") || strings.Contains(body, "type: rule") {
@@ -520,7 +520,7 @@ func TestClaudeMarketplace_RuleSkillBodyDefaultDescription(t *testing.T) {
 	}
 	skill := fileByPath(t, out, "claude/finance-pack/skills/bare-rule/SKILL.md")
 	body := string(skill.Content)
-	if !strings.Contains(body, "description: Project rule shipped as a skill.") {
+	if !strings.Contains(body, `description: "Project rule shipped as a skill."`) {
 		t.Errorf("rule without a description must use the generic fallback:\n%s", body)
 	}
 	if !strings.HasSuffix(body, "\n") {

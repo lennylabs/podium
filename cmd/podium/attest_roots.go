@@ -158,6 +158,12 @@ func (c *checkInstances) refreshedPublicGood() (sign.AttestationInstance, error)
 	if err != nil {
 		return sign.AttestationInstance{}, fmt.Errorf("the Sigstore instance %q: the home directory: %w", sign.PublicGoodInstance, err)
 	}
+	return c.refreshedPublicGoodIn(home)
+}
+
+// refreshedPublicGoodIn is refreshedPublicGood with the root copy under
+// home, which podium sync and podium verify share with podium attest check.
+func (c *checkInstances) refreshedPublicGoodIn(home string) (sign.AttestationInstance, error) {
 	embeddedAt, _ := buildinfo.ReleaseTime()
 	src, err := sign.NewTUFAttestationRoot(sign.TUFRootConfig{
 		Dir:          filepath.Join(home, filepath.FromSlash(attestRootDirSegments)),
