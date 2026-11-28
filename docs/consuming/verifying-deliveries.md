@@ -16,6 +16,10 @@ covers the rest of the MCP server setup.
 Generating, distributing, backing up, and rotating the registry's signing key are
 operator tasks that [Signing keys](../deployment/operations/signing-keys) covers.
 
+After the delivery check, `podium-mcp` checks that the record answers the
+request and, under an attestation policy, that a trusted author signed it.
+[Attestation policy](attestation-policy) covers those checks.
+
 ---
 
 ## Checks before the registry serves

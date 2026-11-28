@@ -35,6 +35,7 @@ operator task that
 | [Browsing the catalog](browsing-the-catalog) | **Progressive discovery.** How an agent traverses domains and finds artifacts at runtime through `load_domain`, `search_domains`, `search_artifacts`, and `load_artifact`, materializing artifacts and their bundled files only when it loads them. |
 | [Handling artifact responses](handling-artifact-responses) | What a consumer does with the manifest and materialized files returned by `load_artifact`: how resource bytes travel, routing by hints, safety and trust constraints, capability checks, dependency walks, and external resources. |
 | [Building custom consumers with the SDK](custom-via-sdk) | Building programmatic consumers (LangChain, Bedrock, OpenAI Assistants, custom orchestrators, and eval harnesses) with `podium-py` or `podium-ts`. |
+| [Attestation policy](attestation-policy) | The consumer trust policy of `podium-mcp`: the request binding, the attestation check, the user's `sync.yaml` and the machine file, the sources a repository can set, trusted roots, and start refusals. |
 | [Verifying deliveries](verifying-deliveries) | The checks a delivered artifact passes: the registry's stored-row check, the delivery hash and signature checks in `podium-mcp`, `podium sync`, and the SDKs, the verification key set, cached records after a key rotation, and stale `latest` protection. |
 
 ## Where to start

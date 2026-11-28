@@ -12,6 +12,17 @@ This page lists the upgrade steps that belong to one release, newest release fir
 
 The current release is 0.7.0. The notes in this section describe behavior on `main` that ships in 0.8.0.
 
+### Attestation check in podium-mcp
+
+From 0.8.0, `podium-mcp` checks that every record it loads answers the request, and, under an [attestation policy](../../consuming/attestation-policy), that a trusted author signed it.
+
+- The request binding and the well-formed rule run with no policy. A registry that follows the spec answers no request with a record of another ID or another pinned version, so these refusals (`materialize.request_mismatch`) appear only for a misbehaving registry or for a requested ID such as `GIT~1` that is not well formed.
+- `podium-mcp` reads `~/.podium/sync.yaml` from the home directory that the account database records for the user, and no longer from `HOME`. A deployment that pointed `HOME` at another directory to give `podium-mcp` a `defaults.registry` moves that file to the account home, or sets `PODIUM_REGISTRY`. A container that runs under a user ID with no entry in `/etc/passwd` reads no user file, and each load result carries `config.attestation_policy_unavailable (constraint user_home)` in `attestation_warning`.
+- `podium-mcp` reads `/etc/podium/sync.yaml`, or `podium\sync.yaml` under `ProgramData` on Windows, when root or an administrator owns it and no other user can write it. A file that fails that check is reported in every load result.
+- A `~/.podium/sync.yaml` or workspace `sync.yaml` that does not parse now refuses the start of `podium-mcp` with `config.attestation_policy_unavailable`, because the policy it may hold is unknown. 0.7.0 ignored such a file.
+- Cached records from 0.7.0 carry no `attestations` member. Under a policy above `none` the first load of each is a cache miss and is fetched again; under `offline-only` it is refused until it is loaded online.
+- A rollback to 0.7.0 needs no step. 0.7.0 ignores `defaults.attestation`, the bundle cache under `${PODIUM_CACHE_DIR}/attestations/`, and the root copy under `~/.podium/sigstore/public-good/`.
+
 ### Git snapshot deadline
 
 From 0.8.0, every ingest of a `git` layer clones under the deadline that `PODIUM_GIT_FETCH_TIMEOUT` or the `registry.yaml` key `git_fetch_timeout` sets, 10 minutes by default. 0.7.0 set no deadline.
