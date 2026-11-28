@@ -351,7 +351,10 @@ func (p *linkPlan) verifyAnyInstance(ctx context.Context, b *snapshotBundle) *si
 		if err == nil {
 			return v
 		}
-		if _, refused := sign.AttestationReasonOf(err); !refused {
+		// A refusal of the bundle, and a public-good root past its maximum age,
+		// which no policy under none starts the refresh of, are no failures
+		// worth a line per bundle and cycle.
+		if _, refused := sign.AttestationReasonOf(err); !refused && !errors.Is(err, sign.ErrAttestationRootStale) {
 			log.Printf("attestation: layer %s: bundle %s under instance %s: %v", p.cycle.layer.ID, b.digest, n, err)
 		}
 	}
