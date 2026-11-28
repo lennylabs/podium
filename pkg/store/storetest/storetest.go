@@ -66,6 +66,7 @@ func Suite(t *testing.T, factory Factory) {
 	t.Run("LayerAttestationRecord", func(t *testing.T) { layerAttestationRecord(t, factory(t)) })
 	t.Run("LayerAttestationMigration", func(t *testing.T) { layerAttestationMigration(t, factory(t)) })
 	t.Run("LayerBootstrapVisibility", func(t *testing.T) { layerBootstrapVisibility(t, factory(t)) })
+	t.Run("LayerVisibilityKeptAndConditional", func(t *testing.T) { layerVisibilityKeptAndConditional(t, factory(t)) })
 	t.Run("AttestationStorage", func(t *testing.T) { attestationStorage(t, factory(t)) })
 	t.Run("LayerConfigDelete", func(t *testing.T) { layerConfigDelete(t, factory(t)) })
 	t.Run("LayerVisibilityEntries", func(t *testing.T) { layerVisibilityEntries(t, factory(t)) })

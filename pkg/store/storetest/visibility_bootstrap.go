@@ -112,3 +112,76 @@ func layerBootstrapVisibility(t *testing.T, s store.Store) {
 		t.Errorf("visibility members:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
 	}
 }
+
+// layerVisibilityKeptAndConditional covers the writes that must not put a
+// stale visibility back: PutLayerConfigKeepingVisibility keeps the stored
+// visibility members of a live and a soft-deleted row and writes a new row
+// as given, and SetLayerVisibilityIf applies only while the row holds the
+// members the writer read, comparing lists in their stored form.
+//
+// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Start write, Writes that keep the visibility), §7.3.1
+func layerVisibilityKeptAndConditional(t *testing.T, s store.Store) {
+	t.Helper()
+	ctx := context.Background()
+	mustCreateTenant(t, s, "t")
+	var got []string
+	read := func(id, note string) {
+		cfg, err := s.GetLayerConfig(ctx, "t", id)
+		must(t, err)
+		got = append(got, fmt.Sprintf("%s %s order=%d", note, visibilityView(cfg), cfg.Order))
+	}
+	narrow := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x", Groups: []string{"g"},
+		VisibilitySource: store.VisibilitySourceDeclared, VisibilityPending: &store.LayerVisibility{Public: true}}
+	must(t, s.PutLayerConfig(ctx, narrow))
+	stale := narrow
+	stale.Public, stale.Groups, stale.VisibilityPending, stale.Order = true, nil, nil, 20
+	must(t, s.PutLayerConfigKeepingVisibility(ctx, stale))
+	read("L", "kept")
+	must(t, s.DeleteLayerConfig(ctx, "t", "L"))
+	stale.Order = 30
+	must(t, s.PutLayerConfigKeepingVisibility(ctx, stale))
+	read("L", "kept-deleted")
+	must(t, s.PutLayerConfigKeepingVisibility(ctx, store.LayerConfig{TenantID: "t", ID: "N", SourceType: "local", Users: []string{"alice"}, VisibilitySource: store.VisibilitySourceDefault}))
+	read("N", "new")
+
+	cur, err := s.GetLayerConfig(ctx, "t", "L")
+	must(t, err)
+	expect := cur.VisibilityState()
+	next := store.VisibilityState{Visibility: store.LayerVisibility{Organization: true}, Source: store.VisibilitySourceDefault}
+	set := func(note string, e store.VisibilityState) {
+		err := s.SetLayerVisibilityIf(ctx, "t", "L", e, next)
+		got = append(got, fmt.Sprintf("%s changed=%v", note, errors.Is(err, store.ErrVisibilityChanged)))
+	}
+	other := expect
+	other.Visibility.Groups = []string{"h"}
+	set("other-groups", other)
+	other = expect
+	other.Pending = nil
+	set("other-pending", other)
+	other = expect
+	other.Source = store.VisibilitySourceDefault
+	set("other-source", other)
+	set("held", expect)
+	read("L", "set")
+	set("again", expect)
+	err = s.SetLayerVisibilityIf(ctx, "t", "absent", expect, next)
+	got = append(got, fmt.Sprintf("absent notfound=%v", errors.Is(err, store.ErrNotFound)))
+	err = s.SetLayerVisibilityIf(ctx, "t", "L", next, store.VisibilityState{Visibility: store.LayerVisibility{Users: []string{"a\nb"}}})
+	got = append(got, fmt.Sprintf("line-feed %v", errors.Is(err, store.ErrLayerListEntry)))
+	want := strings.Join([]string{
+		`kept false/false/["g"]/[] declared true/false/[]/[] order=20`,
+		`kept-deleted false/false/["g"]/[] declared true/false/[]/[] order=30`,
+		`new false/false/[]/["alice"] default - order=0`,
+		`other-groups changed=true`,
+		`other-pending changed=true`,
+		`other-source changed=true`,
+		`held changed=false`,
+		`set false/true/[]/[] default - order=30`,
+		`again changed=true`,
+		`absent notfound=true`,
+		`line-feed true`,
+	}, "\n")
+	if strings.Join(got, "\n") != want {
+		t.Errorf("visibility writes:\n%s\nwant:\n%s", strings.Join(got, "\n"), want)
+	}
+}

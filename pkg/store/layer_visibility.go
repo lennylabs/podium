@@ -2,7 +2,9 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 	"time"
@@ -187,4 +189,154 @@ func (p *Postgres) WriteLayerVisibility(ctx context.Context, tenantID, layerID, 
 		return ErrIngestSuperseded
 	}
 	return nil
+}
+
+// ErrVisibilityChanged reports a conditional visibility write whose row no
+// longer holds the members the writer read.
+var ErrVisibilityChanged = errors.New("store: the layer's visibility members changed")
+
+// VisibilityState is the visibility members of a layer row: the visibility
+// fields, visibility_source, and visibility_pending.
+type VisibilityState struct {
+	Visibility LayerVisibility
+	Source     string
+	Pending    *LayerVisibility
+}
+
+// VisibilityState returns the visibility members of the row.
+func (c LayerConfig) VisibilityState() VisibilityState {
+	return VisibilityState{Visibility: c.Visibility(), Source: c.VisibilitySource, Pending: clonePending(c.VisibilityPending)}
+}
+
+// visibilityStateColumns returns the stored form of s: the groups, users,
+// and pending columns, which every backend compares.
+func visibilityStateColumns(layerID string, s VisibilityState) (groups, users, pending string, err error) {
+	return visibilityColumns(layerID, VisibilityWrite{Visibility: s.Visibility, Pending: s.Pending})
+}
+
+// sameStoredVisibility reports whether a row's members equal s in their
+// stored form, as the SQL stores compare them.
+func sameStoredVisibility(cfg LayerConfig, s VisibilityState) (bool, error) {
+	g1, u1, p1, err := visibilityStateColumns(cfg.ID, cfg.VisibilityState())
+	if err != nil {
+		return false, err
+	}
+	g2, u2, p2, err := visibilityStateColumns(cfg.ID, s)
+	if err != nil {
+		return false, err
+	}
+	return cfg.Public == s.Visibility.Public && cfg.Organization == s.Visibility.Organization &&
+		g1 == g2 && u1 == u2 && p1 == p2 && cfg.VisibilitySource == s.Source, nil
+}
+
+// PutLayerConfigKeepingVisibility writes cfg and keeps the visibility
+// members of a row the store holds, under the store lock.
+func (s *Memory) PutLayerConfigKeepingVisibility(_ context.Context, cfg LayerConfig) error {
+	cfg, err := storedLayerForm(cfg)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if held, ok := s.layers[layerKey(cfg.TenantID, cfg.ID)]; ok {
+		cfg.Public, cfg.Organization, cfg.Groups, cfg.Users = held.Public, held.Organization, held.Groups, held.Users
+		cfg.VisibilitySource, cfg.VisibilityPending = held.VisibilitySource, held.VisibilityPending
+	}
+	s.putLayerLocked(cfg)
+	return nil
+}
+
+// SetLayerVisibilityIf sets the visibility members of the row while they
+// equal expect, under the store lock.
+func (s *Memory) SetLayerVisibilityIf(_ context.Context, tenantID, layerID string, expect, next VisibilityState) error {
+	if _, _, _, err := visibilityStateColumns(layerID, next); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := layerKey(tenantID, layerID)
+	cfg, ok := s.layers[key]
+	if !ok {
+		return ErrNotFound
+	}
+	same, err := sameStoredVisibility(cfg, expect)
+	if err != nil {
+		return err
+	}
+	if !same {
+		return ErrVisibilityChanged
+	}
+	s.layers[key] = VisibilityWrite{Visibility: next.Visibility, Source: next.Source, Pending: next.Pending}.apply(cfg)
+	return nil
+}
+
+// SetLayerVisibilityIf sets the visibility members of the row with one
+// update conditional on the members expect holds.
+func (s *SQLite) SetLayerVisibilityIf(ctx context.Context, tenantID, layerID string, expect, next VisibilityState) error {
+	ng, nu, np, err := visibilityStateColumns(layerID, next)
+	if err != nil {
+		return err
+	}
+	eg, eu, ep, err := visibilityStateColumns(layerID, expect)
+	if err != nil {
+		return err
+	}
+	written, err := rowsChanged(s.db.ExecContext(ctx, `
+		UPDATE layer_configs SET public = ?, organization = ?, groups = ?, users = ?, visibility_source = ?, visibility_pending = ?
+		WHERE tenant_id = ? AND id = ? AND public = ? AND organization = ? AND groups = ? AND users = ?
+			AND visibility_source = ? AND visibility_pending = ?`,
+		boolToInt(next.Visibility.Public), boolToInt(next.Visibility.Organization), ng, nu, next.Source, np,
+		tenantID, layerID, boolToInt(expect.Visibility.Public), boolToInt(expect.Visibility.Organization), eg, eu, expect.Source, ep))
+	if err != nil {
+		return err
+	}
+	if written {
+		return nil
+	}
+	var one int
+	switch err := s.db.QueryRowContext(ctx, `SELECT 1 FROM layer_configs WHERE tenant_id = ? AND id = ?`, tenantID, layerID).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrNotFound
+	case err != nil:
+		return err
+	}
+	return ErrVisibilityChanged
+}
+
+// SetLayerVisibilityIf sets the visibility members of the row with one
+// update conditional on the members expect holds.
+func (p *Postgres) SetLayerVisibilityIf(ctx context.Context, tenantID, layerID string, expect, next VisibilityState) error {
+	ng, nu, np, err := visibilityStateColumns(layerID, next)
+	if err != nil {
+		return err
+	}
+	eg, eu, ep, err := visibilityStateColumns(layerID, expect)
+	if err != nil {
+		return err
+	}
+	conn, release, err := p.org(ctx, tenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	written, err := rowsChanged(conn.ExecContext(ctx, `
+		UPDATE layer_configs SET public = $1, organization = $2, groups = $3, users = $4, visibility_source = $5, visibility_pending = $6
+		WHERE tenant_id = $7 AND id = $8 AND public = $9 AND organization = $10 AND groups = $11 AND users = $12
+			AND visibility_source = $13 AND visibility_pending = $14`,
+		next.Visibility.Public, next.Visibility.Organization, ng, nu, next.Source, np,
+		tenantID, layerID, expect.Visibility.Public, expect.Visibility.Organization, eg, eu, expect.Source, ep))
+	if err != nil {
+		return err
+	}
+	if written {
+		return nil
+	}
+	var one int
+	switch err := conn.QueryRowContext(ctx, `SELECT 1 FROM layer_configs WHERE tenant_id = $1 AND id = $2`, tenantID, layerID).Scan(&one); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrNotFound
+	case err != nil:
+		return err
+	}
+	return ErrVisibilityChanged
 }

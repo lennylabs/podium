@@ -1095,8 +1095,20 @@ func (s *SQLite) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	return sqlitePutLayer(ctx, s.db, cfg)
 }
 
+// PutLayerConfigKeepingVisibility writes cfg and keeps the visibility
+// members of a row the store holds.
+func (s *SQLite) PutLayerConfigKeepingVisibility(ctx context.Context, cfg LayerConfig) error {
+	return sqliteUpsertLayer(ctx, s.db, cfg, layerKeepVisibilityAssignments)
+}
+
 // sqlitePutLayer writes cfg through ex, a database or a transaction.
 func sqlitePutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) error {
+	return sqliteUpsertLayer(ctx, ex, cfg, layerWriteAssignments)
+}
+
+// sqliteUpsertLayer writes cfg through ex, updating a held row with
+// assignments.
+func sqliteUpsertLayer(ctx context.Context, ex execContexter, cfg LayerConfig, assignments string) error {
 	// Spec: §7.3.1 (Repository credentials). The write rule runs before any
 	// statement, so a config it refuses writes nothing.
 	repo, userinfo, err := LayerRepoColumns(cfg)
@@ -1130,7 +1142,7 @@ func sqlitePutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) erro
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root, visibility_source, visibility_pending)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-		ON CONFLICT (tenant_id, id) DO UPDATE SET `+layerWriteAssignments,
+		ON CONFLICT (tenant_id, id) DO UPDATE SET `+assignments,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, boolToInt(cfg.UserDefined), cfg.Owner,
 		boolToInt(cfg.Public), boolToInt(cfg.Organization),

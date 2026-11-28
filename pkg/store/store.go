@@ -530,6 +530,19 @@ type Store interface {
 
 	// Layer configs (§4.6 layer list, managed via the layer CLI).
 	PutLayerConfig(ctx context.Context, cfg LayerConfig) error
+	// PutLayerConfigKeepingVisibility writes cfg as PutLayerConfig does,
+	// except that a row the store holds, live or soft-deleted, keeps its
+	// visibility fields, VisibilitySource, and VisibilityPending, so a write
+	// built from a row read earlier does not put back a visibility another
+	// writer has changed since. A row the store does not hold is written as
+	// given. Reorder and an update that carries no visibility member use it
+	// (§4.7.11 Visibility of a path-bootstrapped layer).
+	PutLayerConfigKeepingVisibility(ctx context.Context, cfg LayerConfig) error
+	// SetLayerVisibilityIf sets the visibility members of the layer row,
+	// live or soft-deleted, to next while they equal expect, and returns
+	// ErrVisibilityChanged, changing nothing, otherwise, and ErrNotFound for
+	// a row the store does not hold. Lists compare in their stored form.
+	SetLayerVisibilityIf(ctx context.Context, tenantID, layerID string, expect, next VisibilityState) error
 	GetLayerConfig(ctx context.Context, tenantID, id string) (LayerConfig, error)
 	ListLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
 	// DeleteLayerConfig soft-deletes a layer per §8.4: the layer config

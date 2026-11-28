@@ -1553,12 +1553,28 @@ func (p *Postgres) PutLayerConfig(ctx context.Context, cfg LayerConfig) error {
 	return pgPutLayer(ctx, conn, cfg)
 }
 
+// PutLayerConfigKeepingVisibility writes cfg and keeps the visibility
+// members of a row the store holds.
+func (p *Postgres) PutLayerConfigKeepingVisibility(ctx context.Context, cfg LayerConfig) error {
+	conn, release, err := p.org(ctx, cfg.TenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	return pgUpsertLayer(ctx, conn, cfg, layerKeepVisibilityAssignments)
+}
+
 // pgPutLayer writes cfg through ex, an org connection or a transaction on
 // one. The write rules run before any statement, so a config they refuse
 // writes nothing.
 //
 // Spec: §7.3.1 (Repository credentials)
 func pgPutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) error {
+	return pgUpsertLayer(ctx, ex, cfg, layerWriteAssignments)
+}
+
+// pgUpsertLayer writes cfg through ex, updating a held row with assignments.
+func pgUpsertLayer(ctx context.Context, ex execContexter, cfg LayerConfig, assignments string) error {
 	repo, userinfo, err := LayerRepoColumns(cfg)
 	if err != nil {
 		return err
@@ -1586,7 +1602,7 @@ func pgPutLayer(ctx context.Context, ex execContexter, cfg LayerConfig) error {
 			 webhook_secret, last_ingested_ref, force_push_policy, git_provider, created_at, deleted_at, last_ingested_at,
 			 repo_userinfo, trust_mode, trust_requirements, trust_layer_root, visibility_source, visibility_pending)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27)
-		ON CONFLICT (tenant_id, id) DO UPDATE SET `+layerWriteAssignments,
+		ON CONFLICT (tenant_id, id) DO UPDATE SET `+assignments,
 		cfg.TenantID, cfg.ID, cfg.SourceType, repo, cfg.Ref, cfg.Root, cfg.LocalPath,
 		cfg.Order, cfg.UserDefined, cfg.Owner,
 		cfg.Public, cfg.Organization,
