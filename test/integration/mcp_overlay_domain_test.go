@@ -43,7 +43,7 @@ func TestPodiumMCP_LoadDomainOverlayIncludeMergedView(t *testing.T) {
 	)
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(os.Environ(),
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,

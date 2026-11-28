@@ -1231,7 +1231,9 @@ func TestHarness_StandaloneSyncFromServer(t *testing.T) {
 // rather than failing with config.no_registry.
 func TestHarness_StandaloneMCPResolvesRegistryFromSyncYAML(t *testing.T) {
 	t.Parallel()
-	home := t.TempDir()
+	// The MCP server reads ~/.podium/sync.yaml under the account home
+	// (§4.7.11 User home), which the test seam sets to the isolated home.
+	home := cmdharness.IsolatedHome(t)
 	// The §6.11 standalone bootstrap writes the loopback server URL; initialize
 	// is a local handshake and does not contact the registry, so no live server
 	// is required to exercise the resolution.
@@ -1575,7 +1577,7 @@ func TestHarness_MCPRefusesBelowMinServerVersion(t *testing.T) {
 	}
 	// loadConfig refuses before the serve loop, so the bridge exits without
 	// reading stdin; a bounded deadline guards against any hang.
-	res := runBin(t, cmdharness.Bin(t, "podium-mcp"), ws, env, nil, 30*time.Second)
+	res := runBin(t, cmdharness.Bin(t, "podium-mcp"), ws, env, nil, 30*time.Second, mcpSeamArgs(t)...)
 	if res.Exit != 2 {
 		t.Fatalf("podium-mcp exit=%d, want 2\nstderr=%s", res.Exit, res.Stderr)
 	}

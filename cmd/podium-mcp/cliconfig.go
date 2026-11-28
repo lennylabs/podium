@@ -131,24 +131,27 @@ func applyConfigKV(c *config, key, val string) {
 		c.metricsAddr = val
 	case "min-client-version":
 		c.minClientVersion = val
+	case "attestation-policy":
+		c.attestationPolicy = val
+	case "attestation-policy-file":
+		c.attestationPolicyFile = val
 	}
 }
 
 // registryFromSyncYAML resolves defaults.registry from sync.yaml per
 // §7.5.2: the workspace overlay (<cwd>/.podium/sync.yaml) is consulted
 // first, then the home-global ~/.podium/sync.yaml that the standalone
-// recipe bootstraps (§6.11, §13.10). Returns "" when neither supplies a
-// registry.
+// recipe bootstraps (§6.11, §13.10), under the account home (§4.7.11 User
+// home). Returns "" when neither supplies a registry. An empty cwd or home
+// skips that scope.
 //
-// spec: §6.2, §7.5.2, §6.11.
-func registryFromSyncYAML() string {
-	if ws, err := os.Getwd(); err == nil {
-		if reg := registryFromWorkspace(ws); reg != "" {
-			return reg
+// spec: §6.2, §7.5.2, §6.11, §4.7.11.
+func registryFromSyncYAML(cwd, home string) string {
+	for _, ws := range []string{cwd, home} {
+		if ws == "" {
+			continue
 		}
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		if reg := registryFromWorkspace(home); reg != "" {
+		if reg := registryFromWorkspace(ws); reg != "" {
 			return reg
 		}
 	}
@@ -174,15 +177,11 @@ func registryFromWorkspace(workspace string) string {
 // Returns the first config.server_version_too_old error found, or nil.
 //
 // spec: §6.7 "Versioning", §6.9 "older binaries refuse to start".
-func checkServerVersionFromSyncYAML(binaryVersion string) error {
-	scopes := []string{}
-	if ws, err := os.Getwd(); err == nil {
-		scopes = append(scopes, ws)
-	}
-	if home, err := os.UserHomeDir(); err == nil {
-		scopes = append(scopes, home)
-	}
-	for _, workspace := range scopes {
+func checkServerVersionFromSyncYAML(binaryVersion, cwd, home string) error {
+	for _, workspace := range []string{cwd, home} {
+		if workspace == "" {
+			continue
+		}
 		cfg, err := synccfg.ReadConfig(workspace)
 		if err != nil || cfg == nil {
 			continue

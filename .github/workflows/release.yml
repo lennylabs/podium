@@ -300,13 +300,55 @@ jobs:
             -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT:0:7} \
             -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE} \
             -X github.com/lennylabs/podium/internal/buildinfo.ReleaseDate=${DATE}"
+          # The static Linux binaries look users up with the pure-Go reader
+          # of /etc/passwd (osusergo). A static glibc getpwuid_r loads NSS
+          # modules of the build's glibc at run time, which fails or behaves
+          # differently on musl and other glibc versions; podium-mcp locates
+          # the account home by that lookup (spec §4.7.11 User home).
+          TAGS=''
+          if [ "${GOOS}" = 'linux' ]; then
+            TAGS='osusergo'
+          fi
           mkdir -p dist
           for cmd in podium podium-server podium-mcp; do
             out="dist/${cmd}-${GOOS}-${GOARCH}${{ matrix.suffix }}"
             echo "building ${out}"
-            go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
+            go build -trimpath -tags "${TAGS}" -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
           done
           ls -la dist/
+      - name: Refuse a podium-mcp test build
+        # The end-to-end harness builds podium-mcp with the podiumtest tag,
+        # which compiles the hidden --test-account-home and
+        # --test-machine-config-dir flags. They replace the account home and
+        # the machine sync.yaml that hold a user's protective attestation
+        # policy, and a project .mcp.json can pass a flag to the server, so a
+        # shipped binary must not carry them (spec §4.7.11 Test seam). The
+        # build settings that `go version -m` reads survive -s -w. The
+        # linux/arm64 binary is cross-compiled on an amd64 runner and gets
+        # the settings check alone; every other target also runs the binary
+        # and requires it to refuse each flag as undefined.
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          SUFFIX: ${{ matrix.suffix }}
+          RUNNABLE: ${{ matrix.goarch == 'amd64' || matrix.goos == 'darwin' }}
+        run: |
+          set -eu
+          bin="dist/podium-mcp-${GOOS}-${GOARCH}${SUFFIX}"
+          if go version -m "${bin}" | grep -Eq '^[[:space:]]+build[[:space:]]+-tags=.*podiumtest'; then
+            echo "::error::${bin} was built with the podiumtest tag" >&2
+            exit 1
+          fi
+          if [ "${RUNNABLE}" = 'true' ]; then
+            for flag in test-account-home test-machine-config-dir; do
+              rc=0
+              out=$("${bin}" "--${flag}" /tmp </dev/null 2>&1) || rc=$?
+              if [ "${rc}" != 2 ] || ! printf '%s' "${out}" | grep -q "flag provided but not defined: -${flag}"; then
+                echo "::error::${bin} did not refuse --${flag} (exit ${rc}): ${out}" >&2
+                exit 1
+              fi
+            done
+          fi
       - name: Package archive for Homebrew tap / Scoop bucket
         # Brew + scoop consumers expect a single archive per platform
         # containing all three binaries with their canonical names

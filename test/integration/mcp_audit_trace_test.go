@@ -65,7 +65,7 @@ func TestPodiumMCP_LocalAuditSharesTraceID(t *testing.T) {
 
 	auditPath := filepath.Join(t.TempDir(), "local-audit.log")
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(os.Environ(),
 		"PODIUM_REGISTRY="+stub.URL,
 		"PODIUM_CACHE_DIR="+t.TempDir(),

@@ -329,8 +329,15 @@ func TestStartAttestationRoots_RefreshesPublicGood(t *testing.T) {
 	if r.Digest() != mustDigest(t, served) || r.Digest() == ghDigest {
 		t.Fatalf("public-good digest = %s, want the refreshed root and never the §4.7.9 root file", r.Digest())
 	}
-	copyPath := filepath.Join(dir, "data", "sigstore", "public-good", "trusted_root.json")
-	if raw, err := os.ReadFile(copyPath); err != nil || mustDigest(t, raw) != r.Digest() {
+	copyPath := filepath.Join(dir, "data", "sigstore", "public-good", "root_copy.json")
+	raw, err := os.ReadFile(copyPath)
+	var copied struct {
+		TrustedRoot []byte `json:"trusted_root"`
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &copied)
+	}
+	if err != nil || mustDigest(t, copied.TrustedRoot) != r.Digest() {
 		t.Fatalf("copy at %s: %v", copyPath, err)
 	}
 }

@@ -461,6 +461,9 @@ func (s *mcpServer) loadArtifactFromCache(contentHash, idHint string) (*loadArti
 		DeprecationWarning: d.DeprecationWarning,
 		ETag:               d.ETag,
 	}
+	if d.Attestations != "" {
+		resp.Attestations = json.RawMessage(d.Attestations)
+	}
 	// A skill's verbatim SKILL.md is bucket-level, because the authored
 	// package the content hash names carries it.
 	if sr, err := os.ReadFile(filepath.Join(bucket, "skill_raw")); err == nil {
@@ -527,6 +530,7 @@ func readDeliveryFiles(dir, id string) (deliveryFiles, error) {
 		ReplacedBy:         optional("replaced_by"),
 		DeprecationWarning: optional("deprecation_warning"),
 		ETag:               optional("etag"),
+		Attestations:       optional("attestations"),
 	}, nil
 }
 

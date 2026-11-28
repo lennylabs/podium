@@ -639,7 +639,18 @@ func mcpExec(t testing.TB, env []string, reqs ...rpcReq) cliResult {
 		in.Write(b)
 		in.WriteByte('\n')
 	}
-	return runBin(t, cmdharness.Bin(t, "podium-mcp"), "", env, in.Bytes(), 45*time.Second)
+	return runBin(t, cmdharness.Bin(t, "podium-mcp"), "", env, in.Bytes(), 45*time.Second, mcpSeamArgs(t)...)
+}
+
+// mcpSeamArgs are the hidden flags of a podiumtest build that replace the
+// account home and the machine file directory (§4.7.11 Test seam). The
+// account home is the isolated HOME of the test, which the bridge reads
+// ~/.podium/sync.yaml from, and the machine file directory does not exist,
+// so no test reads the home of the developer or /etc/podium/sync.yaml.
+func mcpSeamArgs(t testing.TB) []string {
+	t.Helper()
+	home := cmdharness.IsolatedHome(t)
+	return []string{"--test-account-home", home, "--test-machine-config-dir", filepath.Join(home, ".no-machine-config")}
 }
 
 // toolCall is a convenience for a tools/call request.

@@ -31,7 +31,7 @@ func TestPodiumMCP_LoadArtifactMaterializes(t *testing.T) {
 	cache := t.TempDir()
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -103,7 +103,7 @@ func TestPodiumMCP_TargetHarnessesSuppressesMaterialize(t *testing.T) {
 	cache := t.TempDir()
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -166,7 +166,7 @@ func TestPodiumMCP_UntranslatableFieldFailsMaterialize(t *testing.T) {
 	target := t.TempDir()
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -227,7 +227,7 @@ func TestPodiumMCP_UserInvokedSkillGuardNamesInvocation(t *testing.T) {
 		},
 	)
 	target := t.TempDir()
-	cmd := exec.Command(buildMCP(t))
+	cmd := exec.Command(buildMCP(t), mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -283,7 +283,7 @@ func TestPodiumMCP_LoadArtifactWithClaudeCodeAdapter(t *testing.T) {
 	target := t.TempDir()
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -324,7 +324,7 @@ func TestPodiumMCP_PerCallHarnessOverride(t *testing.T) {
 	target := t.TempDir()
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -368,7 +368,7 @@ func TestPodiumMCP_LoadArtifactPopulatesContentCache(t *testing.T) {
 	cache := t.TempDir()
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,
@@ -414,7 +414,7 @@ func TestPodiumMCP_NoMaterializeRootReturnsManifestOnly(t *testing.T) {
 		},
 	)
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,

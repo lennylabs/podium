@@ -69,6 +69,12 @@ type Defaults struct {
 	// older binary refuses to start). A profile pin overrides this default-wide
 	// pin when it is higher.
 	MinServerVersion string `yaml:"min_server_version,omitempty"`
+	// Attestation is the `defaults.attestation` block of the §4.7.11
+	// consumer trust policy, held undecoded for the reason ListingBudgets
+	// is: a reader that needs only defaults.registry keeps working when the
+	// block holds a value of the wrong YAML type. AttestationDefaults
+	// decodes it. A Kind of 0 means the file has no such key.
+	Attestation yaml.Node `yaml:"attestation,omitempty"`
 }
 
 // Profile is one entry under `profiles:`. Names without explicit

@@ -53,6 +53,7 @@ import (
 	"github.com/lennylabs/podium/internal/buildinfo"
 	"github.com/lennylabs/podium/internal/revmark"
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/hook"
 	"github.com/lennylabs/podium/pkg/identity"
@@ -140,7 +141,14 @@ func main() {
 //
 // Spec: §6.8, §8.3
 func run() int {
-	cfg, err := loadConfig()
+	// §4.7.11 Test seam: a release build refuses the hidden test flags,
+	// and a podiumtest build applies them to the system paths.
+	paths := productionPaths()
+	if err := applyTestSeam(os.Args[1:], &paths); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	cfg, err := loadConfig(paths)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 2
@@ -161,6 +169,11 @@ func run() int {
 		return 2
 	}
 	defer srv.auditStream.Shutdown()
+	// §4.7.11: refresh the public-good roots the policy verifies under for
+	// the life of the process.
+	refreshCtx, stopRefresh := context.WithCancel(context.Background())
+	defer stopRefresh()
+	srv.startAttestationRefresh(refreshCtx)
 	// §6.8: SIGINT and SIGTERM end the bridge the way stdin EOF does. The
 	// channel holds one signal and run never stops the registration, so a
 	// later signal is held or dropped and cannot cut the flush short.
@@ -279,9 +292,22 @@ type config struct {
 	// pairs a specific host with the binary sets the floor. Sourced from
 	// PODIUM_MIN_CLIENT_VERSION or the min-client-version flag / config key.
 	minClientVersion string
+	// attestationPolicy and attestationPolicyFile are the
+	// --attestation-policy and --attestation-policy-file flags or their
+	// configuration-file keys: a default mode and a policy file of the
+	// §4.7.11 consumer trust policy, read as a repository source.
+	attestationPolicy     string
+	attestationPolicyFile string
+	// attestation is the resolved §4.7.11 consumer trust policy of every
+	// source, built by loadConfig.
+	attestation *consumerAttestation
 }
 
-func loadConfig() (*config, error) {
+// loadConfig reads the configuration of the bridge. paths locates the user
+// sources of the §4.7.11 consumer trust policy: the account home, under
+// which ~/.podium/sync.yaml and its defaults.registry are read, and the
+// machine file.
+func loadConfig(paths systemPaths) (*config, error) {
 	// §6.3.2 PODIUM_SESSION_TOKEN_ENV: hosts can name an env var
 	// holding the JWT instead of putting the secret directly in
 	// PODIUM_SESSION_TOKEN; the named var's value is read here.
@@ -351,11 +377,20 @@ func loadConfig() (*config, error) {
 	if err := applyFlagsAndConfig(c, os.Args[1:]); err != nil {
 		return nil, err
 	}
+	// §4.7.11 User home: ~/.podium/sync.yaml is the file under the home the
+	// account database records, never under HOME, which a project
+	// configuration can set for the bridge. A failed lookup reads no user
+	// file and is reported by the attestation policy below.
+	home, homeErr := paths.accountHome()
+	if homeErr != nil {
+		home = ""
+	}
+	cwd, _ := os.Getwd()
 	// §6.2 / §7.5.2: when no registry is configured, fall back to
 	// sync.yaml's defaults.registry (workspace overlay first, then the
 	// home-global ~/.podium/sync.yaml the standalone recipe bootstraps).
 	if c.registry == "" {
-		c.registry = registryFromSyncYAML()
+		c.registry = registryFromSyncYAML(cwd, home)
 	}
 	if c.registry == "" {
 		// §6.10 / §7.5.2 / §13.10: the registry is unset across env, flags, and
@@ -378,7 +413,7 @@ func loadConfig() (*config, error) {
 	// validated; otherwise defaults.verify_signatures from the §7.5.2 file
 	// scopes applies; otherwise always. An unknown value refuses to start so
 	// a typo cannot silently disable signature enforcement.
-	if err := resolveVerifyPolicy(c); err != nil {
+	if err := resolveVerifyPolicy(c, cwd, home); err != nil {
 		return nil, err
 	}
 	if c.cacheDir == "" {
@@ -419,9 +454,20 @@ func loadConfig() (*config, error) {
 	// newer adapter behavior pins a minimum binary version via
 	// min_server_version in sync.yaml; an older binary refuses to start rather
 	// than materializing with stale adapter behavior.
-	if err := checkServerVersionFromSyncYAML(buildinfo.Version); err != nil {
+	if err := checkServerVersionFromSyncYAML(buildinfo.Version, cwd, home); err != nil {
 		return nil, err
 	}
+	// §4.7.11: the consumer trust policy of every source, loaded once at
+	// the start. A source that cannot be loaded refuses the start.
+	att, err := loadConsumerAttestation(attestationInputs{
+		getenv: os.Getenv, flagMode: c.attestationPolicy, flagFile: c.attestationPolicyFile,
+		paths: paths, home: home, homeErr: homeErr, cwd: cwd, now: time.Now(),
+		stderr: func(format string, args ...any) { fmt.Fprintf(os.Stderr, format, args...) },
+	})
+	if err != nil {
+		return nil, err
+	}
+	c.attestation = att
 	// §4.7.9 / §6.9: resolve the verification material once, after every
 	// other validation, so an earlier refusal (config.no_registry and the
 	// rest) keeps its own code on a bridge that also has no material.
@@ -442,9 +488,7 @@ func loadConfig() (*config, error) {
 // reads as empty, which skips the scopes that depend on it.
 //
 // Spec: §4.7.9, §6.2, §7.5.2.
-func resolveVerifyPolicy(c *config) error {
-	cwd, _ := os.Getwd()
-	home, _ := os.UserHomeDir()
+func resolveVerifyPolicy(c *config, cwd, home string) error {
 	policy, _, warning, err := synccfg.ResolveVerifyPolicy(string(c.verifyPolicy), cwd, home)
 	if err != nil {
 		return err
@@ -587,6 +631,12 @@ type mcpServer struct {
 	// call when its span has no span context, and "" otherwise. It is set and
 	// restored with activeCtx under the same single-call invariant.
 	callTraceID string
+	// checker runs the §4.7.11 request binding and attestation check on
+	// every registry-served record.
+	checker *attest.Checker
+	// overlaySkipped holds the IDs whose workspace overlay package the
+	// §4.7.11 policy did not apply. overlayMu guards it with overlay.
+	overlaySkipped map[string]bool
 }
 
 // reqCtx returns the in-flight call's trace context, or context.Background()
@@ -651,6 +701,7 @@ func newServer(cfg *config) (*mcpServer, error) {
 		// registry URL (matching `podium login`).
 		tokens: identity.KeychainStore{Service: cfg.tokenKeychainName},
 	}
+	srv.checker = srv.newAttestationChecker()
 	// §13.8 opt-in metrics: build the bridge metric set and wire the
 	// resolution-cache hit/miss observer only when a listener address is
 	// configured, so the default stdio bridge takes no recording overhead.
@@ -664,8 +715,7 @@ func newServer(cfg *config) (*mcpServer, error) {
 	if cfg.overlayPath != "" {
 		records, domains, err := resolveOverlayAll(cfg.overlayPath)
 		if err == nil {
-			srv.overlay = records
-			srv.overlayDomains = domains
+			srv.setOverlay(records, domains)
 		} else {
 			// spec: §6.9 "Workspace overlay path missing" — skip the
 			// overlay but warn once, identifying the path, so a
@@ -911,9 +961,14 @@ func (s *mcpServer) overlaySnapshot() []filesystem.ArtifactRecord {
 // merged DOMAIN.md set) under the write lock. Called at startup, by the §6.4
 // watcher on a filesystem change, and by the roots/list resolution. Both maps
 // are replaced wholesale so request handlers always observe a consistent pair.
+//
+// The §4.7.11 overlay rules apply here, so a package they skip is absent
+// from every read of the overlay: a load, a search, and a domain listing.
 func (s *mcpServer) setOverlay(records []filesystem.ArtifactRecord, domains map[string]*manifest.Domain) {
+	kept, skipped := s.admitOverlay(records)
 	s.overlayMu.Lock()
-	s.overlay = records
+	s.overlay = kept
+	s.overlaySkipped = skipped
 	s.overlayDomains = domains
 	s.overlayMu.Unlock()
 }
@@ -1441,21 +1496,38 @@ func (s *mcpServer) dispatchTool(p toolCallParams) any {
 
 // loadArtifact fetches the artifact from the registry, runs the
 // §6.6 materialization pipeline, and returns the manifest body plus
-// the materialized paths the host can read.
+// the materialized paths the host can read. Every result carries the
+// §4.7.11 notices of the process in its attestation_warning member.
+//
+// Spec: §6.6, §4.7.11 (Request binding, User home, Machine file)
 func (s *mcpServer) loadArtifact(args map[string]any) any {
+	// §4.7.11: the id and version sent are the trimmed arguments, and the
+	// request binding compares the values sent.
+	args = normalizeLoadArgs(args)
+	id, _ := argsIDAndVersion(args)
+	return s.withLoadNotices(s.loadRequested(args), id)
+}
+
+// loadRequested serves one load_artifact call with normalized arguments.
+func (s *mcpServer) loadRequested(args map[string]any) any {
+	id, version := argsIDAndVersion(args)
+	// §4.7.11 Well-formed requests: a requested ID that breaks the rule is
+	// refused before any request, under every mode. No overlay package
+	// breaks it, so the overlay serves no such ID either.
+	if err := attest.CheckRequestedID(id); err != nil {
+		return verifyFailureResult(err, id)
+	}
 	// §6.4 workspace overlay precedence: the overlay layer sits at the
 	// highest precedence in the effective view. When an overlay record
 	// matches the requested ID, return it directly without consulting
 	// the registry.
-	if id, ok := args["id"].(string); ok && id != "" {
-		if rec := s.overlayMatch(id); rec != nil {
-			return s.loadArtifactFromOverlay(rec, args)
-		}
+	if rec := s.overlayMatch(id); rec != nil {
+		return s.loadArtifactFromOverlay(rec, args)
 	}
+	request := &attest.Request{ID: id, Pin: version}
 
 	// §6.5 cache modes: in offline-first / offline-only modes, try
 	// the resolution + content cache before going to the network.
-	id, version := argsIDAndVersion(args)
 	now := time.Now()
 	ttl := s.cfg.resolutionTTL
 	if (s.cfg.cacheMode == "offline-first" || s.cfg.cacheMode == "offline-only") && id != "" {
@@ -1469,7 +1541,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		// A genuine miss (no entry at all) still falls through to the registry
 		// in offline-first. Pinned versions are immutable and never expire.
 		if hash, ok := s.resolutions.Resolve(id, version, now, ttl, true); ok {
-			opts := deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)}
+			opts := deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args), request: request}
 			if s.cfg.cacheMode == "offline-first" {
 				if out, served := s.cachedOrRefetch(hash, id, args, opts); served {
 					return out
@@ -1499,6 +1571,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 					harness:     harnessFromArgs(s.cfg.harness, args),
 					destination: destFromArgs(args),
 					resolution:  &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now, RefreshOnly: true},
+					request:     request,
 				}); served {
 					return out
 				}
@@ -1532,6 +1605,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 			harness:     harnessFromArgs(s.cfg.harness, args),
 			destination: destFromArgs(args),
 			resolution:  &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now, RefreshOnly: true},
+			request:     request,
 		}); served {
 			return out
 		}
@@ -1582,6 +1656,7 @@ func (s *mcpServer) deliverFreshLoad(body []byte, etag string, args map[string]a
 		refresh:         s.largeResourceRefresher(args),
 		manifestRefresh: s.manifestBodyRefresher(args),
 		resolution:      &resolutionWrite{ID: id, Version: version, Session: s.effectiveSessionID(args), Now: now},
+		request:         &attest.Request{ID: id, Pin: version},
 	})
 }
 
@@ -1630,6 +1705,10 @@ func applyServed(served version.Served) (loadArtifactResponse, error) {
 	}
 	if err := memberValue(served.Members, "layer", &resp.Layer); err != nil {
 		return loadArtifactResponse{}, err
+	}
+	// Spec: §4.7.11 — the attestation check reads the member as served.
+	if raw, ok := served.Members["attestations"]; ok {
+		resp.Attestations = append(json.RawMessage(nil), raw...)
 	}
 	// Spec: §7.2 (Deprecation members), §5 — read by exact name like layer.
 	for name, dst := range map[string]any{
@@ -1704,12 +1783,12 @@ func (s *mcpServer) cachedOrRefetch(hash, id string, args map[string]any, opts d
 	if err != nil {
 		return nil, false
 	}
-	verr := s.verifyCachedRecord(*cached)
+	verr := s.verifyCachedRecord(*cached, opts)
 	if verr == nil {
 		return s.deliverLoadArtifact(*cached, opts), true
 	}
-	if !errors.Is(verr, sign.ErrSignatureInvalid) {
-		return errorResult(verr.Error()), true
+	if !cacheMiss(verr) {
+		return verifyFailureResult(verr, id), true
 	}
 	body, etag, _, ferr := s.fetchJSONConditional("/v1/load_artifact", args, "")
 	if ferr != nil {
@@ -1723,8 +1802,24 @@ func (s *mcpServer) cachedOrRefetch(hash, id string, args map[string]any, opts d
 
 // verifyCachedRecord runs the §6.6 step-2 checks on a copy of a cached record,
 // so the caller can decide how to serve it before deliverLoadArtifact runs.
-func (s *mcpServer) verifyCachedRecord(rec loadArtifactResponse) error {
-	return s.verifyServedArtifact(&rec, deliverOpts{})
+// o supplies the request the record would answer, so the §4.7.11 request
+// binding and attestation check run on every delivery from the cache.
+func (s *mcpServer) verifyCachedRecord(rec loadArtifactResponse, o deliverOpts) error {
+	return s.verifyServedArtifact(&rec, deliverOpts{request: o.request})
+}
+
+// cacheMiss reports whether a cached record that failed the §6.6 step-2
+// checks is a §6.5 cache miss: a delivery signature the current key set
+// refuses, and a record that fails the §4.7.11 request binding or the
+// attestation check. Every other failure is a refusal.
+//
+// Spec: §6.5, §4.7.11 (Attestation check)
+func cacheMiss(err error) bool {
+	if errors.Is(err, sign.ErrSignatureInvalid) {
+		return true
+	}
+	_, ok := attest.FailureOf(err)
+	return ok
 }
 
 // degradedCacheFallback is the §7.4 degraded-network fallback: in
@@ -1746,10 +1841,11 @@ func (s *mcpServer) degradedCacheFallback(id, version string, now time.Time, arg
 	if err != nil {
 		return nil, false
 	}
-	if verr := s.verifyCachedRecord(*cached); errors.Is(verr, sign.ErrSignatureInvalid) {
+	opts := deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args), request: &attest.Request{ID: id, Pin: version}}
+	if verr := s.verifyCachedRecord(*cached, opts); cacheMiss(verr) {
 		return nil, false
 	}
-	out := s.deliverLoadArtifact(*cached, deliverOpts{harness: harnessFromArgs(s.cfg.harness, args), destination: destFromArgs(args)})
+	out := s.deliverLoadArtifact(*cached, opts)
 	if m, ok := out.(map[string]any); ok {
 		m["status"] = "offline"
 		m["served_from_cache"] = true
@@ -1834,6 +1930,10 @@ type deliverOpts struct {
 	// always-revalidate HEAD match, and the 304 path set it; the offline
 	// modes, the degraded-network fallback, and the overlay leave it nil.
 	resolution *resolutionWrite
+	// request is the request the record answers: the requested ID and the
+	// pin as the bridge sent them, which the §4.7.11 request binding
+	// compares and the attestation check resolves the policy for.
+	request *attest.Request
 }
 
 // resolutionWrite describes one §6.5 resolution-index update. Version is the
@@ -1966,6 +2066,7 @@ func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
 		ReplacedBy:         resp.ReplacedBy,
 		DeprecationWarning: resp.DeprecationWarning,
 		ETag:               resp.ETag,
+		Attestations:       string(resp.Attestations),
 	})
 }
 
@@ -2039,7 +2140,7 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		o = opts[0]
 	}
 	if err := s.verifyServedArtifact(&resp, o); err != nil {
-		return errorResult(err.Error())
+		return verifyFailureResult(err, requestOf(resp, o).ID)
 	}
 	// §5: the bridge serves no mcp-server artifact. The registry refuses a
 	// load the bridge sends for one (§7.2.2), so this check covers a record
@@ -2193,6 +2294,11 @@ func (s *mcpServer) deliverLoadArtifact(resp loadArtifactResponse, opts ...deliv
 		"materialized_at": materialized,
 	}
 	addDeprecationMembers(result, resp)
+	// §4.7.11: a failure of the attestation check under warn is delivered
+	// with its warning text.
+	if len(resp.attestationWarnings) > 0 {
+		result["attestation_warning"] = strings.Join(resp.attestationWarnings, "; ")
+	}
 	// §6.6 step 4 — surface any warnings the hook chain emitted alongside the
 	// materialized paths so the host sees them without failing the call.
 	if len(warnings) > 0 {
@@ -2226,7 +2332,13 @@ func (s *mcpServer) verifyServedArtifact(resp *loadArtifactResponse, o deliverOp
 		return fetchFailure(err)
 	}
 	check := sign.DeliveryCheck{Policy: s.cfg.verifyPolicy, Verifier: s.cfg.verifier}
-	return check.Verify(s.reqCtx(), deliveryRecordOf(*resp), resp.DeliveryHash, resp.DeliverySignature)
+	if err := check.Verify(s.reqCtx(), deliveryRecordOf(*resp), resp.DeliveryHash, resp.DeliverySignature); err != nil {
+		return err
+	}
+	// §4.7.11: the request binding, the well-formed rule, and the
+	// attestation check run after the delivery check and before anything
+	// of the record is cached, returned, or written.
+	return s.attestationCheck(resp, requestOf(*resp, o))
 }
 
 // fetchFailure maps a §6.6 step-1 fetch error to its §6.10 code. A fetched
@@ -2508,6 +2620,14 @@ type loadArtifactResponse struct {
 	Deprecated         bool   `json:"deprecated,omitempty"`
 	ReplacedBy         string `json:"replaced_by,omitempty"`
 	DeprecationWarning string `json:"deprecation_warning,omitempty"`
+	// Attestations is the raw attestations member of the response, which
+	// the §4.7.11 attestation check reads and the cache keeps with the
+	// record; nil when the response carried none.
+	Attestations json.RawMessage `json:"-"`
+	// attestationWarnings are the warning texts the attestation check
+	// reported under warn, which the load result carries in its
+	// attestation_warning member.
+	attestationWarnings []string
 }
 
 // largeResourceLink mirrors the registry's per-resource link. The
@@ -3124,6 +3244,12 @@ type deliveryFiles struct {
 	//
 	// Spec: §7.2
 	ETag string
+	// Attestations is the raw attestations member of the cached response,
+	// empty when it carried none. A delivery from the cache re-runs the
+	// §4.7.11 check on it.
+	//
+	// Spec: §4.7.11 (Attestation check), §6.5
+	Attestations string
 }
 
 // putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
@@ -3152,6 +3278,7 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 		"deprecated":          boolFile(d.Deprecated),
 		"replaced_by":         d.ReplacedBy,
 		"deprecation_warning": d.DeprecationWarning,
+		"attestations":        d.Attestations,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err

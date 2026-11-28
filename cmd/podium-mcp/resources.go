@@ -3,6 +3,8 @@ package main
 import (
 	"encoding/json"
 	"strings"
+
+	"github.com/lennylabs/podium/pkg/attest"
 )
 
 // resourceURIPrefix is the scheme + path the bridge uses to address an
@@ -76,6 +78,13 @@ func (s *mcpServer) handleResourcesList() any {
 //
 // Spec: §5.0, §6.6 step 2, §4.7.9, §4.7.10, §6.5
 func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
+	// §4.7.11: every read result carries the notices of the process, as
+	// every load result does.
+	return s.withLoadNotices(s.resourcesRead(raw), "")
+}
+
+// resourcesRead serves one resources/read request.
+func (s *mcpServer) resourcesRead(raw json.RawMessage) any {
 	var args struct {
 		URI string `json:"uri"`
 	}
@@ -85,6 +94,11 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	id, ok := artifactIDFromResourceURI(args.URI)
 	if !ok {
 		return errorResult("resources.invalid_argument: uri must be " + resourceURIPrefix + "<id>")
+	}
+	// §4.7.11: the requested ID is the ID in the resource URI, with no pin.
+	// An ID that breaks the well-formed rule is refused before the request.
+	if err := attest.CheckRequestedID(id); err != nil {
+		return verifyFailureResult(err, id)
 	}
 	loadArgs := map[string]any{"id": id}
 	body, err := s.fetchJSON("/v1/load_artifact", loadArgs)
@@ -104,8 +118,9 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 	if err := s.verifyServedArtifact(&resp, deliverOpts{
 		refresh:         s.largeResourceRefresher(loadArgs),
 		manifestRefresh: s.manifestBodyRefresher(loadArgs),
+		request:         &attest.Request{ID: id},
 	}); err != nil {
-		return errorResult(err.Error())
+		return verifyFailureResult(err, id)
 	}
 	// §5: load_artifact refuses an mcp-server artifact, so the mirror returns
 	// no text for one either, with the error a missing ID returns. The type is
@@ -122,7 +137,7 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 		return env
 	}
 	s.resolutions.NoteSession(s.markKey(resp.ID), session, rev)
-	return map[string]any{
+	result := map[string]any{
 		"contents": []map[string]any{
 			{
 				"uri":      args.URI,
@@ -131,6 +146,12 @@ func (s *mcpServer) handleResourcesRead(raw json.RawMessage) any {
 			},
 		},
 	}
+	// §4.7.11: a read delivered under warn carries its warnings, and every
+	// read carries the notices of the process.
+	if len(resp.attestationWarnings) > 0 {
+		result["attestation_warning"] = strings.Join(resp.attestationWarnings, "; ")
+	}
+	return result
 }
 
 // artifactIDFromResourceURI strips the podium artifact-resource scheme

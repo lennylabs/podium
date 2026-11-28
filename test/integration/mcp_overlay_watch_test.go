@@ -40,7 +40,7 @@ func TestPodiumMCP_OverlayWatchReindexesOnChange(t *testing.T) {
 	defer cancel()
 
 	bin := buildMCP(t)
-	cmd := exec.CommandContext(ctx, bin)
+	cmd := exec.CommandContext(ctx, bin, mcpSeamArgs(t)...)
 	cmd.Env = append(os.Environ(),
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+h.URL,

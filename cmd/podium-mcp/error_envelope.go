@@ -146,6 +146,23 @@ func bridgeCodeMeta(code string) (retryable bool, suggested string) {
 		return false, "Set PODIUM_HARNESS to a registered adapter identifier."
 	case "materialize.signature_invalid":
 		return false, "The registry served bytes whose signature did not validate; verify the artifact's signing provenance before use."
+	// Spec: §4.7.11, §6.10 — the consumer verification codes the bridge
+	// originates. A stale root clears once a refresh succeeds; every other
+	// refusal repeats until the registry, the bundle, or the policy changes.
+	case "materialize.request_mismatch":
+		return false, "The registry answered with a record that does not answer the request, or the requested ID or a resource path breaks the well-formed rule. Check the ID and the version argument; a registry that substitutes records is not to be trusted."
+	case "materialize.attestation_missing":
+		return false, "The artifact carries no attestation the registry serves, or the bundle is not cached offline. Ask the author to sign the layer, or load it while the registry is reachable."
+	case "materialize.attestation_invalid":
+		return false, "An attestation of the artifact fails verification. Check the trusted roots of the policy and PODIUM_ATTESTATION_MAX_BYTES."
+	case "materialize.attestation_untrusted":
+		return false, "No signer the consumer trust policy names attested the artifact. Add a rule with the author's signer to the policy file that ~/.podium/sync.yaml names, or load another artifact."
+	case "materialize.attestation_mismatch":
+		return false, "The served record differs from what the signer attested. Reingest the layer from the signed commit."
+	case "materialize.attestation_root_stale":
+		return true, "The public-good trusted root is past its maximum age. Let the MCP server refresh it through the Sigstore TUF repository, or raise root_max_age."
+	case "config.attestation_policy_unavailable":
+		return false, "Fix the consumer trust policy that the message names: ~/.podium/sync.yaml, the machine sync.yaml, or the policy file."
 	case "materialize.stale_resolution":
 		// Spec: §6.9. Retrying in the same session reproduces the refusal,
 		// because the registry pins `latest` per session (§4.7.6).

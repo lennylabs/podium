@@ -617,6 +617,17 @@ type PolicyFile struct {
 //
 // Spec: §4.7.11 (Consumer trust policy, Trusted roots of a consumer, Policy load)
 func LoadPolicyFile(path string, publicGood sign.AttestationInstance, now time.Time) (*PolicyFile, error) {
+	return LoadPolicyFileWith(path, func() (sign.AttestationInstance, error) { return publicGood, nil }, now)
+}
+
+// LoadPolicyFileWith is LoadPolicyFile with the public-good instance built
+// by publicGood, which it calls only when a signer of the file names that
+// instance. A consumer builds a refreshed public-good root that way only
+// for a policy that verifies under it, so a policy of file instances and
+// keys alone makes no TUF request. An error of publicGood refuses the file.
+//
+// Spec: §4.7.11 (Consumer trust policy, Trusted roots of a consumer, Policy load)
+func LoadPolicyFileWith(path string, publicGood func() (sign.AttestationInstance, error), now time.Time) (*PolicyFile, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, wrapPolicyFile(path, policyUnavailable("cannot read the file: %v", err))
@@ -625,7 +636,13 @@ func LoadPolicyFile(path string, publicGood sign.AttestationInstance, now time.T
 	if err != nil {
 		return nil, wrapPolicyFile(path, err)
 	}
-	f, err := NewPolicyFile(path, doc, publicGood, func(file string) (*sign.AttestationRoot, error) {
+	var pg sign.AttestationInstance
+	if doc.NamesPublicGood() {
+		if pg, err = publicGood(); err != nil {
+			return nil, wrapPolicyFile(path, policyUnavailable("the public-good root: %v", err))
+		}
+	}
+	f, err := NewPolicyFile(path, doc, pg, func(file string) (*sign.AttestationRoot, error) {
 		if !filepath.IsAbs(file) {
 			file = filepath.Join(filepath.Dir(path), file)
 		}
@@ -679,6 +696,21 @@ func NewPolicyFile(path string, doc *PolicyDocument, publicGood sign.Attestation
 		}
 	}
 	return f, nil
+}
+
+// NamesPublicGood reports whether a signer of the document names the
+// public-good instance.
+func (d *PolicyDocument) NamesPublicGood() bool {
+	for _, r := range d.Rules {
+		for _, req := range r.Requirements {
+			for _, s := range req.Signers {
+				if s.Instance == sign.PublicGoodInstance {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // wrapPolicyFile prefixes a load refusal with the file's path.

@@ -176,7 +176,7 @@ func runTracedMCP(t *testing.T, bin, collector, registry string, calls []rpcCall
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	home := cmdharness.IsolatedHome(t)
-	cmd := exec.CommandContext(ctx, bin)
+	cmd := exec.CommandContext(ctx, bin, mcpSeamArgs(t)...)
 	cmd.Dir = home
 	cmd.Env = []string{
 		"HOME=" + home,

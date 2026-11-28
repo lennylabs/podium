@@ -73,10 +73,27 @@ func Run(t testing.TB, binary, cwd string, args ...string) Result {
 // process lifecycle (background servers, MCP stdio, SIGINT teardown)
 // construct their own exec.Command from this path; Run covers the
 // common single-shot case.
+//
+// The binary is built with the TestBuildTag build tag, which compiles the
+// hidden test flags, such as the podium flag that redirects the GitHub API
+// to an in-process server. No environment variable of a release build
+// replaces such a value.
 func Bin(t testing.TB, binary string) string {
 	t.Helper()
 	return buildBinary(t, binary)
 }
+
+// ReleaseBin builds the named binary without TestBuildTag, as the release
+// workflow builds it, and returns its path. A test runs it to confirm that a
+// release build refuses the hidden test flags.
+func ReleaseBin(t testing.TB, binary string) string {
+	t.Helper()
+	return buildBinaryTagged(t, binary, false)
+}
+
+// TestBuildTag is the build tag the harness builds binaries with. The
+// release workflow refuses a binary whose build settings carry it.
+const TestBuildTag = "podiumtest"
 
 var (
 	buildOnce sync.Map // map[string]*sync.Once
@@ -99,22 +116,33 @@ func IsolatedHome(t testing.TB) string {
 
 func buildBinary(t testing.TB, binary string) string {
 	t.Helper()
-	once, _ := buildOnce.LoadOrStore(binary, &sync.Once{})
+	return buildBinaryTagged(t, binary, true)
+}
+
+// buildBinaryTagged builds binary once per test process for each value of
+// tagged, which selects TestBuildTag.
+func buildBinaryTagged(t testing.TB, binary string, tagged bool) string {
+	t.Helper()
+	key := binary
+	if !tagged {
+		key += " (release)"
+	}
+	once, _ := buildOnce.LoadOrStore(key, &sync.Once{})
 	once.(*sync.Once).Do(func() {
-		path, err := compileBinary(binary)
+		path, err := compileBinary(binary, tagged)
 		if err != nil {
 			t.Fatalf("compile %s: %v", binary, err)
 		}
-		buildPath.Store(binary, path)
+		buildPath.Store(key, path)
 	})
-	v, ok := buildPath.Load(binary)
+	v, ok := buildPath.Load(key)
 	if !ok {
 		t.Fatalf("compile %s: cached path missing", binary)
 	}
 	return v.(string)
 }
 
-func compileBinary(binary string) (string, error) {
+func compileBinary(binary string, tagged bool) (string, error) {
 	root, err := repoRoot()
 	if err != nil {
 		return "", err
@@ -126,6 +154,9 @@ func compileBinary(binary string) (string, error) {
 	out := filepath.Join(tmp, binary)
 	pkg := "./cmd/" + binary
 	args := []string{"build"}
+	if tagged {
+		args = append(args, "-tags", TestBuildTag)
+	}
 	// When the test run requests subprocess coverage (GOCOVERDIR is set), build
 	// the binary instrumented so its execution writes coverage data into that
 	// directory. This lets end-to-end tests that drive the real binary (the

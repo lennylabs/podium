@@ -139,7 +139,7 @@ func TestLoadConfig_RejectsUnknownVerifyPolicy(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "medium-and-aboe")
-	if _, err := loadConfig(); err == nil {
+	if _, err := loadConfig(testPaths(t)); err == nil {
 		t.Fatal("unknown PODIUM_VERIFY_SIGNATURES: no error")
 	}
 }
@@ -153,7 +153,7 @@ func TestLoadConfig_AcceptsKnownVerifyPolicies(t *testing.T) {
 			t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 			t.Setenv("PODIUM_VERIFY_SIGNATURES", p)
 			t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", testVerifyKey(t))
-			if _, err := loadConfig(); err != nil {
+			if _, err := loadConfig(testPaths(t)); err != nil {
 				t.Fatalf("policy %q: %v", p, err)
 			}
 		})
@@ -166,7 +166,7 @@ func TestLoadConfig_RejectsUnknownIdentityProvider(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_IDENTITY_PROVIDER", "mtls")
-	if _, err := loadConfig(); err == nil {
+	if _, err := loadConfig(testPaths(t)); err == nil {
 		t.Fatal("unknown PODIUM_IDENTITY_PROVIDER: no error")
 	}
 }
@@ -177,7 +177,7 @@ func TestLoadConfig_AcceptsKnownIdentityProviders(t *testing.T) {
 			hermetic(t)
 			t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 			t.Setenv("PODIUM_IDENTITY_PROVIDER", p)
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(testPaths(t))
 			if err != nil {
 				t.Fatalf("provider %q: %v", p, err)
 			}
@@ -195,7 +195,7 @@ func TestLoadConfig_RejectsUnknownHarness(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_HARNESS", "claude-codex-typo")
-	_, err := loadConfig()
+	_, err := loadConfig(testPaths(t))
 	if err == nil {
 		t.Fatal("unknown PODIUM_HARNESS: no error")
 	}
@@ -217,7 +217,7 @@ func TestLoadConfig_AcceptsKnownHarness(t *testing.T) {
 			hermetic(t)
 			t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 			t.Setenv("PODIUM_HARNESS", h)
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(testPaths(t))
 			if err != nil {
 				t.Fatalf("harness %q: %v", h, err)
 			}
@@ -242,7 +242,7 @@ func TestLoadConfig_RejectsFilesystemRegistry(t *testing.T) {
 		t.Run(reg, func(t *testing.T) {
 			hermetic(t)
 			t.Setenv("PODIUM_REGISTRY", reg)
-			_, err := loadConfig()
+			_, err := loadConfig(testPaths(t))
 			if err == nil {
 				t.Fatalf("filesystem registry %q: loadConfig returned no error", reg)
 			}
@@ -263,7 +263,7 @@ func TestLoadConfig_AcceptsServerRegistry(t *testing.T) {
 		t.Run(reg, func(t *testing.T) {
 			hermetic(t)
 			t.Setenv("PODIUM_REGISTRY", reg)
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(testPaths(t))
 			if err != nil {
 				t.Fatalf("server registry %q: %v", reg, err)
 			}
@@ -287,7 +287,7 @@ func TestLoadConfig_RegistryFromWorkspaceSyncYAML(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(ws, ".podium", "sync.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(testPaths(t))
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestLoadConfig_RegistryFromHomeSyncYAML(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(home, ".podium", "sync.yaml"), []byte(yaml), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(testPaths(t))
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestLoadConfig_VerifySignaturesFromSyncYAML(t *testing.T) {
 	var cfg *config
 	out := captureStderr(t, func() {
 		var err error
-		if cfg, err = loadConfig(); err != nil {
+		if cfg, err = loadConfig(testPaths(t)); err != nil {
 			t.Fatalf("loadConfig: %v", err)
 		}
 	})
@@ -361,7 +361,7 @@ func TestLoadConfig_VerifySignaturesWalksUpToTheWorkspace(t *testing.T) {
 	var cfg *config
 	out := captureStderr(t, func() {
 		var err error
-		if cfg, err = loadConfig(); err != nil {
+		if cfg, err = loadConfig(testPaths(t)); err != nil {
 			t.Fatalf("loadConfig: %v", err)
 		}
 	})
@@ -393,7 +393,7 @@ func TestLoadConfig_VerifySignaturesDefaultsToAlways(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:8080")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "")
 	t.Setenv("PODIUM_SIGNATURE_VERIFY_KEY", testVerifyKey(t))
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(testPaths(t))
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
@@ -417,7 +417,7 @@ func TestLoadConfig_CacheDirWarnsWhenHomeUnresolvable(t *testing.T) {
 	var cfg *config
 	out := captureStderr(t, func() {
 		var err error
-		cfg, err = loadConfig()
+		cfg, err = loadConfig(testPaths(t))
 		if err != nil {
 			t.Fatalf("loadConfig: %v", err)
 		}
@@ -609,7 +609,7 @@ func TestLoadConfig_IgnoresPresignTTL(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_PRESIGN_TTL_SECONDS", "120")
-	if _, err := loadConfig(); err != nil {
+	if _, err := loadConfig(testPaths(t)); err != nil {
 		t.Fatalf("loadConfig with PODIUM_PRESIGN_TTL_SECONDS set: %v", err)
 	}
 }
@@ -736,7 +736,7 @@ func TestLoadConfig_VerifierResolution(t *testing.T) {
 			if c.keyFile {
 				keyA = writeHomeKeyFile(t)
 			}
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(testPaths(t))
 			if c.want.code != "" {
 				if err == nil || !strings.HasPrefix(err.Error(), c.want.code) {
 					t.Fatalf("loadConfig = %v, want a refusal with %s", err, c.want.code)
@@ -790,7 +790,7 @@ func TestLoadConfig_RefusesWithoutVerificationMaterial(t *testing.T) {
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:8080")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "")
-	_, err := loadConfig()
+	_, err := loadConfig(testPaths(t))
 	if err == nil || !strings.HasPrefix(err.Error(), "config.signature_provider_unavailable:") {
 		t.Fatalf("loadConfig = %v, want config.signature_provider_unavailable", err)
 	}
@@ -822,7 +822,7 @@ func TestLoadConfig_RuntimeVariables(t *testing.T) {
 			for _, k := range []string{"PODIUM_HOST_PYTHON", "PODIUM_HOST_NODE", "PODIUM_HOST_PACKAGES", "PODIUM_ENFORCE_RUNTIME_REQUIREMENTS", "PODIUM_IGNORE_RUNTIME_REQUIREMENTS"} {
 				t.Setenv(k, tc.env[k])
 			}
-			cfg, err := loadConfig()
+			cfg, err := loadConfig(testPaths(t))
 			if err != nil {
 				t.Fatalf("loadConfig: %v", err)
 			}
