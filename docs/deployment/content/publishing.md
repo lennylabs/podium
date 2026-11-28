@@ -288,7 +288,8 @@ A render checks author attestations under the consumer trust policy of the
   record would lose its published files at reconciliation.
 - Under `warn` the render writes the failure on standard error and renders the
   record. The harnesses that import the repository do not see the warning.
-- Two distinct IDs that render one component file fail the target with
+- Two distinct IDs that render one component file, or add one named entry
+  such as `mcpServers.db` to a plugin's MCP configuration, fail the target with
   `materialize.output_conflict`, whatever their modes. An emitter names a
   skill directory by the last segment of the ID, so `team/pay` and
   `finance/pay` collide in `skills/pay/`; rename one artifact or exclude one ID

@@ -389,8 +389,11 @@ trust policy* states the format.
   write over the output of an attested `finance/pay` on a file system that
   ignores case. A record that the attestation check refused still blocks its
   paths. Files that a config merge shares, such as `.mcp.json`, are not
-  compared. Paths that differ only in Unicode normalization are not compared
-  yet. A record that the run's scope does not select is not written, and the
+  compared as files, but the named entries a record adds to them are: two IDs
+  that add `mcpServers.db` to `.mcp.json`, or `[mcp_servers.db]` to
+  `.codex/config.toml`, are both refused with the constraint `entry`. Paths
+  that differ only in Unicode normalization, and a file one ID writes inside a
+  directory another ID owns, are not compared yet. A record that the run's scope does not select is not written, and the
   sync reports no refusal for it.
 - **Selected records under `warn` or `require`.** The attestation check runs on
   each record that the run's scope selects. Against a server registry it
