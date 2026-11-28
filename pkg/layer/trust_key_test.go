@@ -149,3 +149,23 @@ func TestRequirementsFile_KeySigner(t *testing.T) {
 		t.Errorf("CheckRequirements: %v", err)
 	}
 }
+
+// Spec: §4.7.11 (Key-based signers, Policy rules) — a public_key whose text
+// opens with a malformed PEM block, a block of another type, or a lone BEGIN
+// line before the key block is refused where the policy is loaded, so the
+// key that verifies is always the one block the value shows.
+func TestCheckTrustPolicy_TextBeforeTheKeyBlock(t *testing.T) {
+	t.Parallel()
+	shown := publicKeyPEM(t, elliptic.P256())
+	actual := publicKeyPEM(t, elliptic.P256())
+	for name, v := range map[string]string{
+		"broken copy before":     strings.Replace(shown, "\n", "\n!", 1) + actual,
+		"unterminated before":    "-----BEGIN JUNK-----\nhello world\n" + actual,
+		"lone BEGIN line before": "-----BEGIN attacker text\n" + actual,
+	} {
+		err := layer.CheckTrustPolicy(policy("require", store.TrustSigner{PublicKey: v}), nil, "")
+		if !errors.Is(err, layer.ErrTrustPolicy) {
+			t.Errorf("%s: CheckTrustPolicy = %v, want a refusal", name, err)
+		}
+	}
+}
