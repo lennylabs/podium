@@ -1230,7 +1230,7 @@ A non-blocking advisory and an artifact whose embedding call failed are reported
 
 ### `podium layer update`
 
-Patches a registered layer's mutable fields. Only the flags supplied are applied, and every other field keeps its prior value. At least one mutable field is required.
+Patches a registered layer's mutable fields. Only the flags supplied are applied, and every other field keeps its prior value. At least one mutable field is required. An update that sets no visibility flag keeps the stored visibility. An update that changes the visibility of a `--layer-path` layer under the trust mode `warn` or `require` writes a warning on standard error: the next ingest cycle that passes the layer step applies the signed `.layer-config` again, so a lasting narrowing is made in that file ([Visibility of a `--layer-path` layer](../deployment/content/layers#visibility-of-a---layer-path-layer)).
 
 ```
 podium layer update --id <id>

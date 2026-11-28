@@ -75,6 +75,8 @@ From 0.8.0, a layer that `--layer-path` or `PODIUM_LAYER_PATH` loads and whose t
 - A layer under the mode `none` is unaffected: each start applies its file, as in 0.7.0.
 - The SQLite and Postgres stores add the `visibility_source` and `visibility_pending` columns of `layer_configs` at the first start. No step is needed. A row stored by 0.7.0 is read as `declared`, so its stored visibility bounds the next file.
 - A read that cannot read the layer rows now uses the rows of the tenant's last successful read, and a tenant with no successful read sees no layer. 0.7.0 used the layers of the start for every tenant.
+- `podium layer update` with a visibility flag on such a layer narrows it until the next cycle that passes the layer step, including the startup ingest of a restart over the same signed state, and prints a warning that says so. 0.7.0 kept such an update until the next start applied the file. Make a lasting narrowing in `.layer-config`.
+- `podium layer reorder` and a `podium layer update` without a visibility flag no longer write the visibility of every layer they touch; they keep the stored one.
 - A rollback to 0.7.0 leaves the new columns in place and does not read them, and its next start applies each file as written.
 
 ### Bounded Git fetch
