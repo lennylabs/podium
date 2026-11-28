@@ -1277,7 +1277,7 @@ podium layer update --id <id>
 #### Trust policy updates
 
 - `--trust` replaces the stored mode, and `--trust-layer-root` replaces the stored root. Omitting a flag keeps the stored value.
-- A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored ones. The command first reads the layer through `GET /v1/layers` and exits 1 without sending the update when the layer stores more than one requirement, or when the read fails, because the replacement would drop the additional requirements. Update such a layer with `--trust-requirements-file`.
+- A `--trust-signer` builds a requirement from the signer and binding flags of this invocation, and that requirement replaces the stored ones. The command first reads the layer through `GET /v1/layers` and exits 1 without sending the update when the layer stores more than one requirement, or when the read fails, because the replacement would drop the additional requirements. Update such a layer with `--trust-requirements-file`. The update carries the requirements the command read as `expected_trust_requirements`, so the registry refuses it, and the command exits 1, when another writer changed the requirements between the read and the update.
 - `--trust-requirements-file` replaces the stored requirements with the file's, and `--trust-require-type` replaces the stored types.
 - `--clear-trust-requirements` removes the requirements, and `--clear-trust-require-types` removes the listed types. A layer whose mode is `warn` or `require` needs one, so the command that removes it also sets `--trust none`, or the registry refuses it.
 - An update that carries no trust flag leaves the stored policy as it is.
