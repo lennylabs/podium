@@ -84,7 +84,7 @@ func TestDeliveryVectors_MCP(t *testing.T) {
 			dest := t.TempDir()
 			s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyAlways, verifier: verifier})
 			s.http = &http.Client{Transport: objects}
-			out := s.deliverFreshLoad(body, map[string]any{"id": "acme/vector", "version": "1.0.0", "destination": dest}, time.Now())
+			out := s.deliverFreshLoad(body, "", map[string]any{"id": "acme/vector", "version": "1.0.0", "destination": dest}, time.Now())
 			got := errorMessageText(out)
 			if tc.Outcome == "ok" {
 				if got != "" {

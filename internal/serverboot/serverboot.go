@@ -1765,6 +1765,10 @@ func run(ctx context.Context, stop func()) error {
 	// §4.7.11 (Trusted root refresh): a stored policy that verifies on the
 	// public-good instance starts the refresh at the start.
 	startRefreshForStoredPolicies(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.ingestAttest)
+	// Spec: §4.7.11 (Re-evaluation) — a policy that a declaration, the trust
+	// default, or a replaced trusted root changed between two starts is
+	// re-evaluated before the registry serves.
+	reevaluateAtStart(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.ingestAttest, auditSink, scrubber)
 
 	// §13.10 Identity provider removed between starts: a start whose
 	// verifier is installed records verified identity, and an acknowledged
@@ -2012,10 +2016,16 @@ func run(ctx context.Context, stop func()) error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, useVectorOutbox, collocatedVec))
+	runner := buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, useVectorOutbox, collocatedVec)
+	layers.WithReingestRunner(runner)
 	// Spec: §4.7.11 (Re-evaluation) — a register or an update that changes a
-	// layer's trust policy re-evaluates the layer's links.
-	layers.WithTrustPolicyChange(trustPolicyChangeHook(st, cfg.ingestAttest, auditSink, scrubber))
+	// layer's trust policy re-evaluates the layer's links and requests an
+	// ingest cycle of the layer under the new policy.
+	layers.WithTrustPolicyChange(trustPolicyChangeHook(st, cfg.ingestAttest, auditSink, scrubber,
+		backgroundReingest(ctx, func(ctx context.Context, lc store.LayerConfig) error {
+			_, err := runner(ctx, lc, nil)
+			return err
+		})))
 
 	// §9: fire a §9.1 operational notification when the reingest path above fails
 	// to ingest a layer. Reuses the same NotificationProvider wired into the

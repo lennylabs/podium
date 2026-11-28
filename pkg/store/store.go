@@ -609,9 +609,11 @@ type Store interface {
 	// WriteAttestations stores the bundles, links, and outcomes of w in one
 	// store write (§4.7.11 Attestation storage). With a claim it applies only
 	// while the live layer layerID holds claim, and returns
-	// ErrIngestSuperseded, changing nothing, otherwise; an empty claim
-	// applies the write unconditionally and ignores layerID.
-	WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) error
+	// ErrIngestSuperseded, changing nothing, otherwise, which includes a
+	// layer that no longer stores w.Policy; an empty claim applies the write
+	// unconditionally and ignores layerID and w.Policy. The result names the
+	// conditional link updates that applied.
+	WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) (AttestationWriteResult, error)
 	// GetAttestation returns the stored bundle of digest, or ErrNotFound.
 	GetAttestation(ctx context.Context, tenantID, digest string) (StoredAttestation, error)
 	// ListAttestations returns every stored bundle of the tenant, by digest.

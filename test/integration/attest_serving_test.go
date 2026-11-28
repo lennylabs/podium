@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -27,6 +28,10 @@ import (
 
 // asUserHeader names the identity of each request of the serving fixture.
 const asUserHeader = "X-Test-User"
+
+// asScopesHeader carries the comma-separated read and load scopes of a
+// request of the serving fixture.
+const asScopesHeader = "X-Test-Scopes"
 
 // asPredicateType is the predicate type the serving fixture signs.
 const asPredicateType = "https://slsa.dev/provenance/v1"
@@ -100,7 +105,11 @@ func newServingFixture(t *testing.T, st store.Store) *servingFixture {
 	reg := core.New(st, "default", nil).WithAttestationPolicyCheck(cfg.PolicyConstraint)
 	srv := server.New(reg, server.WithIdentityResolver(func(r *http.Request) layer.Identity {
 		sub := r.Header.Get(asUserHeader)
-		return layer.Identity{Sub: sub, IsAuthenticated: sub != ""}
+		var scopes []string
+		if v := r.Header.Get(asScopesHeader); v != "" {
+			scopes = strings.Split(v, ",")
+		}
+		return layer.Identity{Sub: sub, IsAuthenticated: sub != "", Scopes: scopes}
 	}))
 	ts := httptest.NewServer(srv.Handler())
 	t.Cleanup(ts.Close)
@@ -367,7 +376,7 @@ func TestAttestServing_RevalidationCoversTheMembers(t *testing.T) {
 
 	// A new link.
 	at := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
-	if err := f.st.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
+	if _, err := f.st.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
 		Bundles: []store.StoredAttestation{{Digest: "sha256:" + strings.Repeat("e", 64), Bundle: []byte("x"), AttestedAt: at, StoredAt: at}},
 		Versions: []store.VersionAttestations{{ArtifactID: "finance/pay", Version: "1.0.0", Links: []store.AttestationLink{{
 			PredicateType: "https://example.com/scan/v1", Instance: "github", SignerIssuer: sh.DefaultIssuer, SignerIdentity: "scanner@acme.com",
@@ -377,5 +386,70 @@ func TestAttestServing_RevalidationCoversTheMembers(t *testing.T) {
 	}
 	if status, _, p := f.revalidate(t, http.MethodGet, downTag); status != http.StatusOK || len(p.Attestations) != 2 {
 		t.Errorf("new link = %d %+v", status, p.Attestations)
+	}
+}
+
+// listCountingStore counts the tenant listings of the manifests.
+type listCountingStore struct {
+	store.Store
+	lists atomic.Int64
+}
+
+func (c *listCountingStore) ListManifests(ctx context.Context, tenant string) ([]store.ManifestRecord, error) {
+	c.lists.Add(1)
+	return c.Store.ListManifests(ctx, tenant)
+}
+
+// Spec: §7.3.5 (Serving bundles), §6.3.1 — a caller whose read scope admits
+// only some artifact subjects of a bundle's statement is answered as for an
+// unknown digest, so it learns no artifact ID or digest outside its scope; a
+// scope that admits every artifact subject, and an unscoped caller, are
+// served the bundle; and a stored bundle the caller cannot see does the same
+// store reads as an unknown digest.
+func TestAttestServing_BundleEndpointScopeAndWork(t *testing.T) {
+	t.Parallel()
+	counting := &listCountingStore{Store: store.NewMemory()}
+	f := newServingFixture(t, counting)
+	digest := attest.AttestationDigest(f.bundle)
+	get := func(user, scopes, d string) int {
+		t.Helper()
+		req, err := http.NewRequest(http.MethodGet, f.ts.URL+"/v1/attestations/"+d, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set(asUserHeader, user)
+		if scopes != "" {
+			req.Header.Set(asScopesHeader, scopes)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+	for _, tc := range []struct {
+		scopes string
+		want   int
+	}{
+		{"podium:read:finance/pay,podium:load:finance/pay", http.StatusNotFound},
+		{"podium:read:finance/*,podium:load:finance/*", http.StatusOK},
+		{"", http.StatusOK},
+	} {
+		if got := get("alice", tc.scopes, digest); got != tc.want {
+			t.Errorf("scopes %q = %d, want %d", tc.scopes, got, tc.want)
+		}
+	}
+	counting.lists.Store(0)
+	if got := get("bob", "", "sha256:"+strings.Repeat("0", 64)); got != http.StatusNotFound {
+		t.Fatal(got)
+	}
+	unknown := counting.lists.Load()
+	counting.lists.Store(0)
+	if got := get("bob", "", digest); got != http.StatusNotFound {
+		t.Fatal(got)
+	}
+	if stored := counting.lists.Load(); stored != unknown {
+		t.Errorf("listings: unknown digest %d, stored invisible digest %d", unknown, stored)
 	}
 }

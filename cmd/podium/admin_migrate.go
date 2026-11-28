@@ -418,7 +418,7 @@ func pumpTenant(ctx context.Context, tp tenantPlan, target store.Store) error {
 	}
 	// Spec: §13.4, §4.7.11 (Attestation storage) — each migrated version takes
 	// the source's links, with the bundles they reference.
-	if err := target.WriteAttestations(ctx, tp.tenant.ID, "", "", tp.attestations); err != nil {
+	if _, err := target.WriteAttestations(ctx, tp.tenant.ID, "", "", tp.attestations); err != nil {
 		return fmt.Errorf("copy attestations of %s: %w", tp.tenant.ID, err)
 	}
 	// Spec: §13.4, §4.7.11 (Migration copy) — the copy carries the source's

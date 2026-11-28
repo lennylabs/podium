@@ -215,14 +215,41 @@ type VersionAttestations struct {
 	ReplaceLinks bool
 	Links        []AttestationLink
 	// Updates each replace the stored link of their key only while that
-	// link holds the same digest, so a write that read a link changes it only
-	// while no other writer replaced it.
-	Updates []AttestationLink
+	// link holds the digest, the verdict, and the recorded key the writer
+	// read, so a write that read a link changes it only while no other
+	// writer changed it.
+	Updates []LinkUpdate
 	// Outcome, when set, replaces the stored outcome, and only while the
 	// stored outcome is OutcomeIf when OutcomeIf is not empty. A version
 	// that has no stored row is passed over.
 	Outcome   *VersionOutcome
 	OutcomeIf string
+}
+
+// LinkUpdate is a conditional update of one stored link: Link carries the
+// new values, and the update applies only while the stored link of Link's
+// key holds Link.Digest, ReadVerdict, and ReadVerifiedUnder.
+type LinkUpdate struct {
+	Link              AttestationLink
+	ReadVerdict       string
+	ReadVerifiedUnder string
+}
+
+// applies reports whether u applies to the stored link cur.
+func (u LinkUpdate) applies(cur AttestationLink) bool {
+	return cur.Digest == u.Link.Digest && cur.Verdict == u.ReadVerdict && cur.VerifiedUnder == u.ReadVerifiedUnder
+}
+
+// TrustPolicy is the stored trust policy of a layer as a write compares it.
+type TrustPolicy struct {
+	Mode         string
+	Requirements []TrustRequirement
+	LayerRoot    string
+}
+
+// PolicyOf returns the trust policy lc stores.
+func PolicyOf(lc LayerConfig) TrustPolicy {
+	return TrustPolicy{Mode: lc.TrustMode, Requirements: lc.TrustRequirements, LayerRoot: lc.TrustLayerRoot}
 }
 
 // AttestationWrites is one store write of bundles, links, and outcomes.
@@ -231,11 +258,28 @@ type AttestationWrites struct {
 	// stored bundle keeps the layer and reference that first stored it.
 	Bundles  []StoredAttestation
 	Versions []VersionAttestations
+	// Policy, with a claim, makes the write apply only while the live layer
+	// stores this trust policy, compared in its stored form, so a cycle in
+	// flight across a policy change writes nothing under the earlier policy.
+	//
+	// Spec: §4.7.11 (Verified links)
+	Policy *TrustPolicy
+}
+
+// AttestationWriteResult reports the conditional link updates that applied.
+type AttestationWriteResult struct {
+	Updated []AttestationLink
 }
 
 // empty reports whether w writes nothing.
 func (w AttestationWrites) empty() bool {
 	return len(w.Bundles) == 0 && len(w.Versions) == 0
+}
+
+// policyColumns returns the stored form of p for the comparison.
+func policyColumns(p TrustPolicy) (mode, reqs, root string, err error) {
+	reqs, err = trustRequirementsColumn(p.Requirements)
+	return p.Mode, reqs, p.LayerRoot, err
 }
 
 // RootRecord is the root record of one Sigstore instance: the digest and the

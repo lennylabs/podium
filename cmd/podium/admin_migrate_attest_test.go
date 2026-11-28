@@ -33,6 +33,10 @@ func TestPumpStore_CopiesAttestationsOfMigratedVersions(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	mustWrite := func(_ store.AttestationWriteResult, err error) {
+		t.Helper()
+		must(err)
+	}
 	must(src.CreateTenant(ctx, store.Tenant{ID: "default", Name: "default"}))
 	for _, id := range []string{"alpha", "beta", "gone"} {
 		must(src.PutManifest(ctx, store.ManifestRecord{TenantID: "default", ArtifactID: id, Version: "1.0.0",
@@ -46,7 +50,7 @@ func TestPumpStore_CopiesAttestationsOfMigratedVersions(t *testing.T) {
 	bundle := func(digest string) store.StoredAttestation {
 		return store.StoredAttestation{Digest: digest, Bundle: []byte(digest), LayerID: "team", AttestedAt: at, StoredAt: at}
 	}
-	must(src.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
+	mustWrite(src.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
 		Bundles: []store.StoredAttestation{bundle("d1"), bundle("d3")},
 		Versions: []store.VersionAttestations{
 			{ArtifactID: "alpha", Version: "1.0.0", Links: []store.AttestationLink{link("d1")}},
@@ -57,7 +61,7 @@ func TestPumpStore_CopiesAttestationsOfMigratedVersions(t *testing.T) {
 	must(err)
 	target := store.NewMemory()
 	// A link the target holds for beta, which the source does not link.
-	must(target.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
+	mustWrite(target.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
 		Bundles:  []store.StoredAttestation{bundle("d2")},
 		Versions: []store.VersionAttestations{{ArtifactID: "beta", Version: "1.0.0", Links: []store.AttestationLink{link("d2")}}},
 	}))
@@ -102,9 +106,9 @@ func (s attFailStore) ListAttestations(ctx context.Context, t string) ([]store.S
 	return s.Store.ListAttestations(ctx, t)
 }
 
-func (s attFailStore) WriteAttestations(ctx context.Context, t, l, c string, w store.AttestationWrites) error {
+func (s attFailStore) WriteAttestations(ctx context.Context, t, l, c string, w store.AttestationWrites) (store.AttestationWriteResult, error) {
 	if s.write {
-		return errors.New("write down")
+		return store.AttestationWriteResult{}, errors.New("write down")
 	}
 	return s.Store.WriteAttestations(ctx, t, l, c, w)
 }

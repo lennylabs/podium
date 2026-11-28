@@ -30,11 +30,20 @@ func (s *Memory) attestationTables() *memoryAttestations {
 
 // WriteAttestations applies w under the store lock (§4.7.11 Attestation
 // storage).
-func (s *Memory) WriteAttestations(_ context.Context, tenantID, layerID, claim string, w AttestationWrites) error {
+func (s *Memory) WriteAttestations(_ context.Context, tenantID, layerID, claim string, w AttestationWrites) (AttestationWriteResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if claim != "" && !s.holdsClaimLocked(tenantID, layerID, claim) {
-		return ErrIngestSuperseded
+		return AttestationWriteResult{}, ErrIngestSuperseded
+	}
+	if claim != "" && w.Policy != nil {
+		same, err := s.storesPolicyLocked(tenantID, layerID, *w.Policy)
+		if err != nil {
+			return AttestationWriteResult{}, err
+		}
+		if !same {
+			return AttestationWriteResult{}, ErrIngestSuperseded
+		}
 	}
 	t := s.attestationTables()
 	for _, b := range w.Bundles {
@@ -44,14 +53,31 @@ func (s *Memory) WriteAttestations(_ context.Context, tenantID, layerID, claim s
 			t.bundles[key] = normalizeStoredAttestation(b)
 		}
 	}
+	var res AttestationWriteResult
 	for _, v := range w.Versions {
-		s.writeVersionLocked(tenantID, v)
+		res.Updated = append(res.Updated, s.writeVersionLocked(tenantID, v)...)
 	}
-	return nil
+	return res, nil
 }
 
-// writeVersionLocked applies the write of one version.
-func (s *Memory) writeVersionLocked(tenantID string, v VersionAttestations) {
+// storesPolicyLocked reports whether the live layer stores p, compared in
+// its stored form.
+func (s *Memory) storesPolicyLocked(tenantID, layerID string, p TrustPolicy) (bool, error) {
+	cfg := s.layers[layerKey(tenantID, layerID)]
+	wm, wr, wl, err := policyColumns(p)
+	if err != nil {
+		return false, err
+	}
+	sm, sr, sl, err := policyColumns(PolicyOf(cfg))
+	if err != nil {
+		return false, err
+	}
+	return wm == sm && wr == sr && wl == sl, nil
+}
+
+// writeVersionLocked applies the write of one version and returns the link
+// updates that applied.
+func (s *Memory) writeVersionLocked(tenantID string, v VersionAttestations) []AttestationLink {
 	t := s.attestationTables()
 	vk := mkey(tenantID, v.ArtifactID, v.Version)
 	links := t.links[vk]
@@ -62,10 +88,13 @@ func (s *Memory) writeVersionLocked(tenantID string, v VersionAttestations) {
 		l.ArtifactID, l.Version = v.ArtifactID, v.Version
 		links[l.Key()] = normalizeLink(l)
 	}
-	for _, l := range v.Updates {
-		if cur, ok := links[l.Key()]; ok && cur.Digest == l.Digest {
+	var updated []AttestationLink
+	for _, u := range v.Updates {
+		l := u.Link
+		if cur, ok := links[l.Key()]; ok && u.applies(cur) {
 			l.ArtifactID, l.Version = v.ArtifactID, v.Version
 			links[l.Key()] = normalizeLink(l)
+			updated = append(updated, links[l.Key()])
 		}
 	}
 	if len(links) == 0 {
@@ -74,15 +103,16 @@ func (s *Memory) writeVersionLocked(tenantID string, v VersionAttestations) {
 		t.links[vk] = links
 	}
 	if v.Outcome == nil {
-		return
+		return updated
 	}
 	rec, ok := s.manifests[vk]
 	if !ok || v.OutcomeIf != "" && rec.AttestationOutcome != v.OutcomeIf {
-		return
+		return updated
 	}
 	o := normalizedOutcome(*v.Outcome)
 	rec.AttestationOutcome, rec.AttestationFailure, rec.AttestationEvaluatedAt = o.Outcome, o.Failure, o.EvaluatedAt
 	s.manifests[vk] = rec
+	return updated
 }
 
 // GetAttestation returns the stored bundle of digest.

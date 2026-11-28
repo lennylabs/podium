@@ -73,7 +73,7 @@ func attFixture(t *testing.T) (*attStore, string) {
 		t.Fatal(err)
 	}
 	digest := "sha256:ab0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd"
-	if err := st.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{
+	if _, err := st.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{
 		Bundles: []store.StoredAttestation{{Digest: digest, Bundle: []byte("bundle"), AttestedAt: at, StoredAt: at}},
 		Versions: []store.VersionAttestations{{ArtifactID: "a/x", Version: "1.0.0", Links: []store.AttestationLink{{
 			PredicateType: "p", Instance: "github", SignerIssuer: "iss", SignerIdentity: "id", Digest: digest,

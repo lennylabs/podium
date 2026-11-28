@@ -240,14 +240,15 @@ func startupRefusal(layerID string, err error) bool {
 }
 
 // trustPolicyChangeHook returns the re-evaluation a register or an update
-// runs after it changed a layer's trust policy. The layer events record the
-// change; the re-evaluation records layer.attestation_links_downgraded
-// through the audit stream with the caller that made it. A failure is logged
-// and changes nothing the request did, because the next ingest cycle of the
-// layer runs the re-evaluation again.
+// runs after it changed a layer's trust policy, followed by the ingest cycle
+// the change requests. The layer events record the change; the
+// re-evaluation records layer.attestation_links_downgraded through the audit
+// stream with the caller that made it. A failure is logged and changes
+// nothing the request did, because the requested cycle runs the
+// re-evaluation again. reingest is nil where the registry runs no ingest.
 //
 // Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy)
-func trustPolicyChangeHook(st store.Store, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber) func(context.Context, store.LayerConfig, string) {
+func trustPolicyChangeHook(st store.Store, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber, reingest func(store.LayerConfig)) func(context.Context, store.LayerConfig, string) {
 	return func(ctx context.Context, lc store.LayerConfig, caller string) {
 		var emit ingest.AuditEmitterFunc
 		if sink != nil {
@@ -255,6 +256,43 @@ func trustPolicyChangeHook(st store.Store, att *ingest.AttestationConfig, sink a
 		}
 		if err := att.Reevaluate(ctx, st, lc, clock.Real{}, emit); err != nil {
 			log.Printf("attestation: layer %s: re-evaluate the links after a trust policy change: %v; the next ingest cycle of the layer runs it again", lc.ID, err)
+		}
+		if reingest != nil {
+			reingest(lc)
+		}
+	}
+}
+
+// backgroundReingest returns a request for an ingest cycle of a layer that
+// runs outside the request that made it, under ctx, so a git fetch does not
+// hold the update's response. The cycle ends with ctx at shutdown. A failure
+// is logged; the layer's next trigger runs a cycle again.
+//
+// Spec: §4.7.11 (Re-evaluation)
+func backgroundReingest(ctx context.Context, run func(context.Context, store.LayerConfig) error) func(store.LayerConfig) {
+	return func(lc store.LayerConfig) {
+		go func() {
+			if err := run(ctx, lc); err != nil {
+				log.Printf("attestation: layer %s: the ingest cycle a trust policy change requested failed: %v", lc.ID, err)
+			}
+		}()
+	}
+}
+
+// reevaluateAtStart runs the re-evaluation of every stored layer of each
+// tenant once the start has seeded its layers and loaded its trusted roots.
+// A failure is logged, and each layer's next cycle runs the re-evaluation
+// again.
+//
+// Spec: §4.7.11 (Re-evaluation)
+func reevaluateAtStart(ctx context.Context, st store.Store, tenants []string, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber) {
+	for _, tenant := range tenants {
+		var emit ingest.AuditEmitterFunc
+		if sink != nil {
+			emit = ingestAuditEmitter(ctx, sink, scrubber, "", tenant)
+		}
+		if err := att.ReevaluateStoredLayers(ctx, st, tenant, clock.Real{}, emit); err != nil {
+			log.Printf("attestation: tenant %s: re-evaluate the stored layers at the start: %v; each layer's next ingest cycle runs it again", tenant, err)
 		}
 	}
 }
