@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
 
 func hexOf(c byte) string { return strings.Repeat(string(c), 64) }
@@ -293,5 +294,28 @@ func TestCheckLayerRoot(t *testing.T) {
 		if _, err := CheckLayerRoot(in); !errors.Is(err, ErrNoSubjectName) {
 			t.Errorf("CheckLayerRoot(%q) = %v, want ErrNoSubjectName", in, err)
 		}
+	}
+}
+
+// Spec: §7.3.5, §4.7.11 (Key-based signers) — the signed-time subject
+// follows the layer subject of each file and counts toward the bound, which
+// is then at least 3; a time with no signed-time name is refused.
+func TestSignedSubjectFiles(t *testing.T) {
+	layer := Subject{Name: ".podium/layer", Digest: "sha256:" + strings.Repeat("a", 64)}
+	at := time.Date(2026, 11, 27, 9, 30, 0, 0, time.UTC)
+	signed, err := SignedTimeSubject(at, layer)
+	if err != nil || signed.Name != ".podium/signed-at/1795771800" || signed.Digest != layer.Digest {
+		t.Fatalf("SignedTimeSubject = %+v, %v", signed, err)
+	}
+	artifacts := []Subject{{Name: "b@1.0.0", Digest: layer.Digest}, {Name: "a@1.0.0", Digest: layer.Digest}}
+	files, err := SignedSubjectFiles(layer, signed, artifacts, 3)
+	if err != nil || len(files) != 2 || files[0][1] != signed || files[1][1] != signed || files[0][2].Name != "a@1.0.0" || len(files[1]) != 3 {
+		t.Fatalf("files %+v, %v", files, err)
+	}
+	if _, err := SignedSubjectFiles(layer, signed, artifacts, 2); !errors.Is(err, ErrMaxSubjectsSignedTime) {
+		t.Errorf("bound 2: %v", err)
+	}
+	if _, err := SignedTimeSubject(time.Unix(0, 0), layer); err == nil {
+		t.Error("the epoch has a signed-time subject")
 	}
 }

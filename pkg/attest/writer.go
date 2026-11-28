@@ -10,7 +10,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 	"unicode"
+
+	"github.com/lennylabs/podium/pkg/sign"
 )
 
 // In-toto statement constants of the §7.3.5 statement format.
@@ -58,6 +61,23 @@ const minSubjects = 2
 // ErrMaxSubjects reports a bound on the subjects of one file below
 // minSubjects.
 var ErrMaxSubjects = errors.New("attest: a file holds at least 2 subjects, the layer subject and one artifact")
+
+// ErrMaxSubjectsSignedTime reports a bound below 3 on the subjects of one
+// file that also lists the signed-time subject.
+var ErrMaxSubjectsSignedTime = errors.New("attest: a file with --signed-time holds at least 3 subjects, the layer subject, the signed-time subject, and one artifact")
+
+// SignedTimeSubject returns the §4.7.11 signed-time subject of a run at t
+// for the layer whose layer subject is layer: .podium/signed-at/<seconds>
+// with the layer digest.
+//
+// Spec: §4.7.11 (Key-based signers), §7.3.5
+func SignedTimeSubject(t time.Time, layer Subject) (Subject, error) {
+	name, err := sign.SignedTimeSubjectName(t)
+	if err != nil {
+		return Subject{}, err
+	}
+	return Subject{Name: name, Digest: layer.Digest}, nil
+}
 
 // Format is a §7.3.5 output format of `podium attest`.
 type Format string
@@ -219,19 +239,38 @@ func SubjectFiles(layer Subject, artifacts []Subject, maxSubjects int) ([][]Subj
 	if maxSubjects < minSubjects {
 		return nil, fmt.Errorf("%w: got %d", ErrMaxSubjects, maxSubjects)
 	}
+	return subjectFiles([]Subject{layer}, artifacts, maxSubjects), nil
+}
+
+// SignedSubjectFiles divides the subjects of one layer as SubjectFiles does,
+// with the signed-time subject signedAt after the layer subject of each
+// file, where it counts toward maxSubjects (`podium attest --signed-time`).
+//
+// Spec: §7.3.5, §4.7.11 (Key-based signers)
+func SignedSubjectFiles(layer, signedAt Subject, artifacts []Subject, maxSubjects int) ([][]Subject, error) {
+	if maxSubjects < minSubjects+1 {
+		return nil, fmt.Errorf("%w: got %d", ErrMaxSubjectsSignedTime, maxSubjects)
+	}
+	return subjectFiles([]Subject{layer, signedAt}, artifacts, maxSubjects), nil
+}
+
+// subjectFiles writes head at the start of each file and the artifacts in
+// ascending byte-wise order of canonical ID after it, at most maxSubjects
+// subjects to a file, which the callers keep above len(head).
+func subjectFiles(head, artifacts []Subject, maxSubjects int) [][]Subject {
 	sorted := append([]Subject(nil), artifacts...)
 	sort.Slice(sorted, func(i, j int) bool {
 		a, _ := ParseSubjectName(sorted[i].Name)
 		b, _ := ParseSubjectName(sorted[j].Name)
 		return a < b
 	})
-	per := maxSubjects - 1
+	per := maxSubjects - len(head)
 	files := make([][]Subject, 0, len(sorted)/per+1)
 	for start := 0; start == 0 || start < len(sorted); start += per {
 		end := min(start+per, len(sorted))
-		files = append(files, append([]Subject{layer}, sorted[start:end]...))
+		files = append(files, append(append([]Subject(nil), head...), sorted[start:end]...))
 	}
-	return files, nil
+	return files
 }
 
 // WriteChecksums writes subjects in the format of the sha256sum tool: one

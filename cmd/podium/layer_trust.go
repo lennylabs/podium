@@ -21,6 +21,9 @@ type trustFlags struct {
 	mode      *string
 	layerRoot *string
 	signers   stringSliceFlag
+	// keys are the files --trust-public-key names, each holding the PEM
+	// block of a key-based signer.
+	keys stringSliceFlag
 	// members maps each binding flag to the signer member it sets.
 	members map[string]*string
 	// bools maps each boolean signer flag to its member.
@@ -84,6 +87,7 @@ func addTrustFlags(fs *flag.FlagSet, update bool) *trustFlags {
 		bools:     map[string]*bool{},
 	}
 	fs.Var(&f.signers, "trust-signer", "trusted signer as <issuer>=<identity> (repeatable)")
+	fs.Var(&f.keys, "trust-public-key", "file holding the PEM public key of a key-based signer, such as cosign.pub (repeatable)")
 	fs.Var(&f.types, "trust-require-type", "artifact type that a failed attestation drops under warn (repeatable)")
 	for _, d := range trustSignerStringFlags {
 		f.members[d[0]] = fs.String(d[0], "", d[2])
@@ -100,7 +104,8 @@ func addTrustFlags(fs *flag.FlagSet, update bool) *trustFlags {
 
 // body returns the trust policy members of a request body for the flags in
 // set. The binding flags apply to every --trust-signer and are refused
-// without one, because a requirement with no signer accepts nothing.
+// without one, because a requirement with no signer accepts nothing; a
+// key-based signer that --trust-public-key adds takes none of them.
 // --trust-requirements-file sends the file's requirements and is refused
 // beside a signer or binding flag, which would build another policy.
 //
@@ -125,19 +130,19 @@ func (f *trustFlags) body(set map[string]bool) (map[string]any, error) {
 	if set["trust-requirements-file"] {
 		return f.fileMember(out, binding)
 	}
-	if len(f.signers) == 0 {
-		if len(binding) > 0 {
-			return nil, fmt.Errorf("%s apply to a --trust-signer; name one", strings.Join(binding, ", "))
-		}
+	if len(f.signers) == 0 && len(binding) > 0 {
+		return nil, fmt.Errorf("%s apply to a --trust-signer; name one", strings.Join(binding, ", "))
+	}
+	if !f.namesSigners() {
 		if f.clear != nil && *f.clear {
 			out["trust_requirements"] = []any{}
 		}
 		return out, nil
 	}
 	if f.clear != nil && *f.clear {
-		return nil, errors.New("--clear-trust-requirements cannot be combined with --trust-signer")
+		return nil, errors.New("--clear-trust-requirements cannot be combined with --trust-signer or --trust-public-key")
 	}
-	signers := make([]map[string]any, 0, len(f.signers))
+	signers := make([]map[string]any, 0, len(f.signers)+len(f.keys))
 	for _, raw := range f.signers {
 		issuer, identity, ok := strings.Cut(raw, "=")
 		if !ok || issuer == "" || identity == "" {
@@ -156,7 +161,35 @@ func (f *trustFlags) body(set map[string]bool) (map[string]any, error) {
 		}
 		signers = append(signers, s)
 	}
-	out["trust_requirements"] = []any{map[string]any{"signers": signers}}
+	keys, err := f.keySigners()
+	if err != nil {
+		return nil, err
+	}
+	out["trust_requirements"] = []any{map[string]any{"signers": append(signers, keys...)}}
+	return out, nil
+}
+
+// namesSigners reports whether the flags name a signer of the requirement
+// they build: a --trust-signer or a --trust-public-key.
+func (f *trustFlags) namesSigners() bool {
+	return len(f.signers) > 0 || len(f.keys) > 0
+}
+
+// keySigners reads each --trust-public-key file and returns a key-based
+// signer with its text as public_key. The text is sent as it is, and the
+// registry applies the §4.7.11 key rules to it. A file the command cannot
+// read is a trustInputError.
+//
+// Spec: §7.3.1 (Layer CLI), §4.7.11 (Key-based signers)
+func (f *trustFlags) keySigners() ([]map[string]any, error) {
+	out := make([]map[string]any, 0, len(f.keys))
+	for _, file := range f.keys {
+		raw, err := os.ReadFile(file)
+		if err != nil {
+			return nil, trustInputError{fmt.Errorf("read the --trust-public-key file: %w", err)}
+		}
+		out = append(out, map[string]any{"public_key": string(raw)})
+	}
 	return out, nil
 }
 
@@ -183,8 +216,8 @@ func (f *trustFlags) typesMember(set map[string]bool, out map[string]any) error 
 // Spec: §7.3.1 (Layer CLI), §4.7.11 (Requirements file)
 func (f *trustFlags) fileMember(out map[string]any, binding []string) (map[string]any, error) {
 	switch {
-	case len(f.signers) > 0 || len(binding) > 0:
-		return nil, errors.New("--trust-requirements-file cannot be combined with --trust-signer or a binding flag, which build another policy")
+	case f.namesSigners() || len(binding) > 0:
+		return nil, errors.New("--trust-requirements-file cannot be combined with --trust-signer, --trust-public-key, or a binding flag, which build another policy")
 	case f.clear != nil && *f.clear:
 		return nil, errors.New("--clear-trust-requirements cannot be combined with --trust-requirements-file")
 	}
@@ -212,7 +245,7 @@ func (f *trustFlags) fileMember(out map[string]any, binding []string) (map[strin
 //
 // Spec: §7.3.1 (Layer CLI, Patch semantics on the update body)
 func (f *trustFlags) checkSingleRequirement(registry, id string) (json.RawMessage, error) {
-	if len(f.signers) == 0 {
+	if !f.namesSigners() {
 		return nil, nil
 	}
 	out, status := doJSON(registry+"/v1/layers", "GET", nil)
@@ -230,7 +263,7 @@ func (f *trustFlags) checkSingleRequirement(registry, id string) (json.RawMessag
 		return nil, fmt.Errorf("decode the trust_requirements of layer %s: %w", id, err)
 	}
 	if n := len(l.TrustRequirements); n > 1 {
-		return nil, fmt.Errorf("layer %s stores %d trust requirements, and --trust-signer would replace them with one; "+
+		return nil, fmt.Errorf("layer %s stores %d trust requirements, and --trust-signer or --trust-public-key would replace them with one; "+
 			"edit the file `podium layer show %s --requirements` writes and send it with --trust-requirements-file", id, n, id)
 	}
 	expected, err := json.Marshal(l.TrustRequirements)

@@ -63,8 +63,10 @@ const (
 // attestation directory, given the bundles the run imported and the layer's
 // current subjects. A bundle is removed when none of its subjects matches a
 // current subject, or when the imported bundles with its predicate type and
-// its certificate issuer and identity together list every subject of it that
-// matches. The rule compares against the imported bundles together, because
+// its signer together list every subject of it that matches. The signer of a
+// certificate-signed bundle is its certificate issuer and identity, and the
+// signer of a key-signed bundle is the key its caller verified it under,
+// which BundleSummary.Key holds. The rule compares against the imported bundles together, because
 // adding one artifact changes how a large layer's subjects divide across
 // statements. The signer is read without verification and carries no
 // Sigstore instance, so bundles of two instances with one issuer and
@@ -78,13 +80,13 @@ func Prune(existing sign.BundleSummary, imported []sign.BundleSummary, cur Curre
 	if len(matching) == 0 {
 		return PruneNoCurrentSubject
 	}
-	if existing.Issuer == "" || existing.Identity == "" {
+	signer, ok := pruneSigner(existing)
+	if !ok {
 		return PruneKeep
 	}
 	var group []sign.AttestationStatement
 	for _, b := range imported {
-		if b.Statement.PredicateType == existing.Statement.PredicateType &&
-			b.Issuer == existing.Issuer && b.Identity == existing.Identity {
+		if s, ok := pruneSigner(b); ok && s == signer && b.Statement.PredicateType == existing.Statement.PredicateType {
 			group = append(group, b.Statement)
 		}
 	}
@@ -94,6 +96,17 @@ func Prune(existing sign.BundleSummary, imported []sign.BundleSummary, cur Curre
 		}
 	}
 	return PruneSuperseded
+}
+
+// pruneSigner returns the signer a bundle groups under: the certificate's
+// issuer and identity, or for a key-signed bundle the identifier of the key
+// its signature verified under. A bundle with no such signer groups with no
+// other bundle.
+func pruneSigner(b sign.BundleSummary) ([3]string, bool) {
+	if b.KeySigned {
+		return [3]string{"key", "", b.Key}, b.Key != ""
+	}
+	return [3]string{"certificate", b.Issuer, b.Identity}, b.Issuer != "" && b.Identity != ""
 }
 
 // anyLists reports whether a statement of group lists name with hex.
