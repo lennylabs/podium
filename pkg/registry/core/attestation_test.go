@@ -108,6 +108,17 @@ func TestAttestationServing_ReadFailures(t *testing.T) {
 			t.Errorf("%s: load = %v", f, err)
 		}
 	}
+	// A revalidation whose members cannot be read is marked, so it carries no
+	// entity tag and is never answered 304; the full load reports the failure.
+	st.fail = map[string]bool{"links": true}
+	marked := false
+	_, err = reg.LoadArtifact(ctx, id, "a/x", core.LoadArtifactOptions{Revalidate: func(r *core.LoadArtifactResult) bool {
+		marked = r.ProvenanceUnavailable
+		return false
+	}})
+	if !marked || !errors.Is(err, core.ErrUnavailable) {
+		t.Errorf("revalidation with unreadable links: marked %v, %v", marked, err)
+	}
 	for f, want := range map[string]error{"links": core.ErrUnavailable, "bundle": core.ErrUnavailable, "bundleGone": core.ErrNotFound, "manifests": core.ErrUnavailable} {
 		st.fail = map[string]bool{f: true}
 		if _, err := reg.LoadAttestation(ctx, id, digest); !errors.Is(err, want) {

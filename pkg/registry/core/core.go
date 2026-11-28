@@ -1561,6 +1561,10 @@ type LoadArtifactResult struct {
 	// Spec: §7.2 (Attestation members)
 	Attestations       []AttestationReference
 	AttestationOutcome *ServedOutcome
+	// ProvenanceUnavailable marks a revalidation result whose attestation
+	// members could not be read, which has no entity tag, so it is never
+	// answered with 304.
+	ProvenanceUnavailable bool
 }
 
 // LoadArtifactOptions captures §5 arguments. Empty Version means
@@ -1874,7 +1878,7 @@ func (r *Registry) revalidationResult(ctx context.Context, rec store.ManifestRec
 	if rec.Deprecated {
 		rec.ReplacedBy = r.admittedReplacedBy(ctx, rec)
 	}
-	return withDeprecationWarning(&LoadArtifactResult{
+	res := withDeprecationWarning(&LoadArtifactResult{
 		ID:          rec.ArtifactID,
 		Version:     rec.Version,
 		ContentHash: rec.ContentHash,
@@ -1884,6 +1888,13 @@ func (r *Registry) revalidationResult(ctx context.Context, rec store.ManifestRec
 		// Spec: §4.7.10 — a revalidation answers the same delivery record.
 		ArtifactRevision: version.FormatArtifactRevision(rec.IngestedAt),
 	})
+	// Spec: §7.2 — the entity tag covers the attestation members, so a
+	// revalidation reads them as a full load does. A read failure leaves the
+	// result with no validator, and the full load reports the failure.
+	if err := r.attachProvenance(ctx, res, rec); err != nil {
+		res.ProvenanceUnavailable = true
+	}
+	return res
 }
 
 // parsedArtifact decodes a record's stored frontmatter into a

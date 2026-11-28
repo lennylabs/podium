@@ -269,3 +269,113 @@ func TestAttestServing_InvalidPolicyServesFailed(t *testing.T) {
 		t.Errorf("outcome after the repair %+v", o)
 	}
 }
+
+// revalidate sends a load of finance/pay with If-None-Match etag and
+// returns the status, the entity tag, and the served members.
+func (f *servingFixture) revalidate(t *testing.T, method, etag string) (int, string, provenance) {
+	t.Helper()
+	req, err := http.NewRequest(method, f.ts.URL+"/v1/load_artifact?id=finance/pay", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set(asUserHeader, "alice")
+	if etag != "" {
+		req.Header.Set("If-None-Match", etag)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(resp.Body)
+	var p provenance
+	if resp.StatusCode == http.StatusOK && method == http.MethodGet {
+		if err := json.Unmarshal(raw, &p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return resp.StatusCode, resp.Header.Get("ETag"), p
+}
+
+// Spec: §7.2 (Attestation members, entity tag) — the entity tag of an
+// attested version covers its attestation members: an unchanged state is
+// answered 304 on a GET and carries the same tag on a HEAD; the
+// content-hash tag alone is answered in full; and the served failed outcome
+// of an invalid policy, a link downgraded by a policy change, and a new link
+// each answer a revalidation with 200 and the new members.
+func TestAttestServing_RevalidationCoversTheMembers(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	f := newServingFixture(t, store.NewMemory())
+	status, etag, first := f.revalidate(t, http.MethodGet, "")
+	rec, err := f.st.GetManifest(ctx, "default", "finance/pay", "1.0.0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status != http.StatusOK || !strings.HasPrefix(etag, `"`+rec.ContentHash+"+") || first.AttestationOutcome == nil {
+		t.Fatalf("first load %d %s", status, etag)
+	}
+	if status, _, _ := f.revalidate(t, http.MethodGet, etag); status != http.StatusNotModified {
+		t.Errorf("unchanged state = %d, want 304", status)
+	}
+	if status, head, _ := f.revalidate(t, http.MethodHead, ""); status != http.StatusOK || head != etag {
+		t.Errorf("HEAD = %d %s, want %s", status, head, etag)
+	}
+	if status, _, _ := f.revalidate(t, http.MethodGet, `"`+rec.ContentHash+`"`); status != http.StatusOK {
+		t.Errorf("content-hash tag = %d, want 200", status)
+	}
+
+	// The served failed outcome of an invalid policy, and its repair.
+	lc, err := f.st.GetLayerConfig(ctx, "default", "team")
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid := lc
+	invalid := lc
+	invalid.TrustRequirements = []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: sh.DefaultSAN, Instance: "staging"}}}}
+	if err := f.st.PutLayerConfig(ctx, invalid); err != nil {
+		t.Fatal(err)
+	}
+	status, failedTag, p := f.revalidate(t, http.MethodGet, etag)
+	if status != http.StatusOK || failedTag == etag || p.AttestationOutcome == nil || p.AttestationOutcome.Outcome != "failed" {
+		t.Errorf("invalid policy = %d %s %+v", status, failedTag, p.AttestationOutcome)
+	}
+	if status, _, _ := f.revalidate(t, http.MethodGet, failedTag); status != http.StatusNotModified {
+		t.Errorf("unchanged invalid policy = %d, want 304", status)
+	}
+	if err := f.st.PutLayerConfig(ctx, valid); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, _ := f.revalidate(t, http.MethodGet, etag); status != http.StatusNotModified {
+		t.Errorf("repaired policy = %d, want 304 on the first tag", status)
+	}
+
+	// A link downgraded by a policy change.
+	changed := valid
+	changed.TrustRequirements = []store.TrustRequirement{{PredicateType: asPredicateType,
+		Signers: []store.TrustSigner{{Issuer: sh.DefaultIssuer, Identity: "carol@acme.com", Instance: "github"}}}}
+	if err := f.st.PutLayerConfig(ctx, changed); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.cfg.Reevaluate(ctx, f.st, changed, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	status, downTag, p := f.revalidate(t, http.MethodGet, etag)
+	if status != http.StatusOK || len(p.Attestations) != 1 || p.Attestations[0].Verdict != "unverified" || p.AttestationOutcome.Outcome != "failed" {
+		t.Errorf("downgrade = %d %+v %+v", status, p.Attestations, p.AttestationOutcome)
+	}
+
+	// A new link.
+	at := time.Date(2026, 11, 27, 10, 0, 0, 0, time.UTC)
+	if err := f.st.WriteAttestations(ctx, "default", "", "", store.AttestationWrites{
+		Bundles: []store.StoredAttestation{{Digest: "sha256:" + strings.Repeat("e", 64), Bundle: []byte("x"), AttestedAt: at, StoredAt: at}},
+		Versions: []store.VersionAttestations{{ArtifactID: "finance/pay", Version: "1.0.0", Links: []store.AttestationLink{{
+			PredicateType: "https://example.com/scan/v1", Instance: "github", SignerIssuer: sh.DefaultIssuer, SignerIdentity: "scanner@acme.com",
+			Digest: "sha256:" + strings.Repeat("e", 64), Verdict: store.VerdictUnverified, LinkedAt: at}}}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if status, _, p := f.revalidate(t, http.MethodGet, downTag); status != http.StatusOK || len(p.Attestations) != 2 {
+		t.Errorf("new link = %d %+v", status, p.Attestations)
+	}
+}

@@ -6,7 +6,9 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -1296,8 +1298,33 @@ func (s *Server) handleLoadArtifact(w http.ResponseWriter, r *http.Request) {
 // 304. A change to the validator lands in both decisions at once.
 //
 // Spec: §7.2, §13.4.
+//
+// Spec: §7.2 — the entity tag covers the attestation members: a response that
+// carries either appends a fingerprint of both to the content hash, so a
+// changed link or served outcome is answered in full.
 func validatorFor(res *core.LoadArtifactResult) string {
-	return contentHashETag(res.ContentHash)
+	if res.ProvenanceUnavailable {
+		return ""
+	}
+	etag := contentHashETag(res.ContentHash)
+	if etag == "" || (len(res.Attestations) == 0 && res.AttestationOutcome == nil) {
+		return etag
+	}
+	return strings.TrimSuffix(etag, `"`) + "+" + attestationFingerprint(res) + `"`
+}
+
+// attestationFingerprint is the first 32 hexadecimal digits of the SHA-256
+// digest of the JSON encoding of the attestation members as the response
+// serves them.
+//
+// Spec: §7.2
+func attestationFingerprint(res *core.LoadArtifactResult) string {
+	b, _ := json.Marshal(struct {
+		Attestations       []core.AttestationReference `json:"attestations,omitempty"`
+		AttestationOutcome *core.ServedOutcome         `json:"attestation_outcome,omitempty"`
+	}{res.Attestations, res.AttestationOutcome})
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:16])
 }
 
 // contentHashETag formats a resolved content hash as a strong HTTP ETag
