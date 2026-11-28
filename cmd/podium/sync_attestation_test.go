@@ -269,7 +269,6 @@ func reportAttestationConfigErrorTo(t *testing.T, err error) bool {
 // Spec: §4.7.9 — the attestation report of podium verify: an undecodable
 // record under each mode, and a result with its digest and signers.
 func TestVerifyAttestationReports(t *testing.T) {
-	t.Parallel()
 	for mode, want := range map[attest.Mode]int{attest.ModeRequire: 1, attest.ModeWarn: 0, attest.ModeNone: 0} {
 		var buf bytes.Buffer
 		if got := reportUndecodable(&buf, mode, errors.New("bad")); got != want || !strings.Contains(buf.String(), "mode "+string(mode)) {
