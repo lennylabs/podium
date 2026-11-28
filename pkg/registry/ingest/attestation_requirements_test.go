@@ -381,3 +381,31 @@ func TestAttestation_ScanStatementWithFindingsMeetsTheRequirement(t *testing.T) 
 		t.Fatalf("cycle: %+v, %v", res, err)
 	}
 }
+
+// Spec: §4.7.11 (Artifact step) — an artifact of a listed type that a
+// failed layer step withholds under warn stays in the set the cycle's lint
+// reads, so an agent whose prose references it by its canonical ID is
+// stored; the same reference fails lint once the hook leaves the snapshot.
+func TestAttestation_WithheldRequiredTypeStillResolvesReferences(t *testing.T) {
+	f := newAttestFixture(t, "warn")
+	referencing := func(version string) string {
+		return strings.Replace(strings.Replace(agentArtifact("Pay an invoice"), "1.0.0", version, 1), "\n\n", "\n\nSee [the guard](finance/guard).\n\n", 1)
+	}
+	f.write(map[string]string{"finance/guard/ARTIFACT.md": hookArtifact("Guard the books"), "finance/pay/ARTIFACT.md": referencing("1.0.0")})
+	f.setRequirements("warn", []string{"hook"}, buildReq())
+	res, err := f.cycle()
+	if err != nil {
+		t.Fatalf("cycle: %v", err)
+	}
+	want(t, "rejected", rejected(res), "finance/guard=ingest.attestation_missing/-")
+	if len(res.LintFailures) != 0 || !slices.Contains(f.stored(), "finance/pay") || slices.Contains(f.stored(), "finance/guard") {
+		t.Fatalf("lint failures %v, stored %v", res.LintFailures, f.stored())
+	}
+	if err := os.RemoveAll(filepath.Join(f.dir, "finance", "guard")); err != nil {
+		t.Fatal(err)
+	}
+	f.write(map[string]string{"finance/pay/ARTIFACT.md": referencing("1.1.0")})
+	if res, _ = f.cycle(); len(res.LintFailures) != 1 || res.LintFailures[0].ArtifactID != "finance/pay" {
+		t.Fatalf("an unresolved reference: %+v", res.LintFailures)
+	}
+}
