@@ -367,14 +367,8 @@ func (s *TUFAttestationRoot) rootUnder(maxAge time.Duration, setting string) (*A
 	return r, nil
 }
 
-// stale reports whether a root with root time at is past the maximum age.
-// An unknown root time exceeds every limit.
-func (s *TUFAttestationRoot) stale(at time.Time) bool {
-	return s.staleUnder(at, s.cfg.MaxAge)
-}
-
 // staleUnder reports whether a root with root time at is past maxAge; 0
-// removes the limit.
+// removes the limit. An unknown root time exceeds every limit.
 func (s *TUFAttestationRoot) staleUnder(at time.Time, maxAge time.Duration) bool {
 	if maxAge == 0 {
 		return false

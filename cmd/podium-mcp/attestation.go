@@ -27,13 +27,19 @@ func (s *mcpServer) newAttestationChecker() *attest.Checker {
 	if s.cfg.cacheDir != "" {
 		cache = attest.DirCache{Dir: filepath.Join(s.cfg.cacheDir, "attestations"), MaxBytes: a.maxBytes}
 	}
+	// The bundle fetch uses the transport of the registry client, so it
+	// carries the same tracing, bounded by the default bundle deadline.
+	client := &http.Client{Timeout: attest.DefaultBundleFetchTimeout}
+	if s.http != nil {
+		client.Transport = s.http.Transport
+	}
 	return &attest.Checker{
 		Policy:   a.policy,
 		MaxBytes: a.maxBytes,
 		Bundles: attest.CachedBundles{
 			Cache: cache,
 			Source: attest.HTTPBundleSource{
-				BaseURL: s.cfg.registry, Client: s.http, MaxBytes: a.maxBytes,
+				BaseURL: s.cfg.registry, Client: client, MaxBytes: a.maxBytes,
 				Prepare: s.prepareBundleRequest,
 			},
 			OfflineOnly: s.cfg.cacheMode == "offline-only",

@@ -443,10 +443,10 @@ func publicGoodInstance(src sign.AttestationRootSource) sign.AttestationInstance
 func strictestOverlay(values []string) string {
 	out := ""
 	for _, v := range values {
-		switch {
-		case v == "deny":
+		switch v {
+		case "deny":
 			return "deny"
-		case v == "allow":
+		case "allow":
 			out = "allow"
 		}
 	}

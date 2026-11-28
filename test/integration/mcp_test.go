@@ -407,29 +407,3 @@ func mcpSeamArgs(t testing.TB) []string {
 	home := cmdharness.IsolatedHome(t)
 	return []string{"--test-account-home", home, "--test-machine-config-dir", filepath.Join(home, ".no-machine-config")}
 }
-
-func repoRoot(t testing.TB) string {
-	t.Helper()
-	dir, _ := exec.Command("pwd").Output()
-	d := strings.TrimSpace(string(dir))
-	for d != "/" {
-		if _, err := exec.Command("test", "-f", d+"/go.mod").CombinedOutput(); err == nil {
-			return d
-		}
-		d = parentOf(d)
-	}
-	t.Fatalf("repo root not found")
-	return ""
-}
-
-func parentOf(p string) string {
-	for i := len(p) - 1; i >= 0; i-- {
-		if p[i] == '/' {
-			if i == 0 {
-				return "/"
-			}
-			return p[:i]
-		}
-	}
-	return p
-}

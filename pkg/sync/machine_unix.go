@@ -128,7 +128,7 @@ func checkPathDir(dir string, opts MachineFileOptions) error {
 		return err
 	}
 	st, _ := fi.Sys().(*syscall.Stat_t)
-	if othersWrite(fi.Mode(), st.Gid) && !(opts.AllowSticky && fi.Mode()&fs.ModeSticky != 0) {
+	if othersWrite(fi.Mode(), st.Gid) && (!opts.AllowSticky || fi.Mode()&fs.ModeSticky == 0) {
 		return unsafeFile(dir, "another user can write the directory (mode %s)", fi.Mode().Perm())
 	}
 	return nil
