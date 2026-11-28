@@ -1588,10 +1588,6 @@ func pgUpsertLayer(ctx context.Context, ex execContexter, cfg LayerConfig, assig
 	if err != nil {
 		return err
 	}
-	requireTypes, err := requireTypesColumn(cfg.TrustRequireTypes)
-	if err != nil {
-		return err
-	}
 	pending, err := pendingColumn(cfg.VisibilityPending)
 	if err != nil {
 		return err
@@ -1614,7 +1610,7 @@ func pgUpsertLayer(ctx context.Context, ex execContexter, cfg LayerConfig, assig
 		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC(), nullTimePG(cfg.DeletedAt), nullTimePG(cfg.LastIngestedAt),
-		userinfo, cfg.TrustMode, trustReqs, requireTypes, cfg.TrustLayerRoot, cfg.VisibilitySource, pending)
+		userinfo, cfg.TrustMode, trustReqs, requireTypesColumn(cfg.TrustRequireTypes), cfg.TrustLayerRoot, cfg.VisibilitySource, pending)
 	return err
 }
 

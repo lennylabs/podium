@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -237,6 +238,13 @@ func TestLayerCmd_RequirementsFileAndRequireTypes(t *testing.T) {
 	}
 	if rc := layerUpdate([]string{"--registry", base, "--id", "absent", "--trust-signer", "i=alice@acme.com"}); rc != 1 {
 		t.Errorf("signer update of a layer the read does not return: rc = %d, want 1", rc)
+	}
+	odd := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"layers":[{"id":"finance","trust_requirements":"several"}]}`))
+	}))
+	t.Cleanup(odd.Close)
+	if rc := layerUpdate([]string{"--registry", odd.URL, "--id", "finance", "--trust-signer", "i=alice@acme.com"}); rc != 1 {
+		t.Errorf("signer update over a layer object that does not decode: rc = %d, want 1", rc)
 	}
 	if got := stored(); len(got.TrustRequirements) != 2 {
 		t.Fatalf("a refused update changed the policy: %+v", got.TrustRequirements)

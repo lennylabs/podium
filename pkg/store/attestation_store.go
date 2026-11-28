@@ -286,11 +286,8 @@ func (w AttestationWrites) empty() bool {
 
 // policyColumns returns the stored form of p for the comparison.
 func policyColumns(p TrustPolicy) (mode, reqs, types, root string, err error) {
-	if reqs, err = trustRequirementsColumn(p.Requirements); err != nil {
-		return "", "", "", "", err
-	}
-	types, err = requireTypesColumn(p.RequireTypes)
-	return p.Mode, reqs, types, p.LayerRoot, err
+	reqs, err = trustRequirementsColumn(p.Requirements)
+	return p.Mode, reqs, requireTypesColumn(p.RequireTypes), p.LayerRoot, err
 }
 
 // RootRecord is the root record of one Sigstore instance: the digest and the

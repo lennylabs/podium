@@ -39,12 +39,12 @@ func TestTrustPolicy_DecodeRefusesUnknownMembers(t *testing.T) {
 // not decode fails the read.
 func TestRequireTypesColumn(t *testing.T) {
 	t.Parallel()
-	if col, err := requireTypesColumn([]string{}); err != nil || col != "" {
-		t.Fatalf("empty column = %q, %v", col, err)
+	if col := requireTypesColumn([]string{}); col != "" {
+		t.Fatalf("empty column = %q", col)
 	}
-	col, err := requireTypesColumn([]string{"hook", "mcp-server"})
-	if err != nil || col != `["hook","mcp-server"]` {
-		t.Fatalf("column = %q, %v", col, err)
+	col := requireTypesColumn([]string{"hook", "mcp-server"})
+	if col != `["hook","mcp-server"]` {
+		t.Fatalf("column = %q", col)
 	}
 	if back, err := parseRequireTypes(col); err != nil || len(back) != 2 || back[1] != "mcp-server" {
 		t.Fatalf("round trip = %q, %v", back, err)

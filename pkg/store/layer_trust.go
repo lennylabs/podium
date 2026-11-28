@@ -104,16 +104,14 @@ func cloneRequireTypes(types []string) []string {
 }
 
 // requireTypesColumn returns the trust_require_types column the SQL stores
-// write: the JSON array, or the empty string for no type.
-func requireTypesColumn(types []string) (string, error) {
+// write: the JSON array, or the empty string for no type. A list of strings
+// always encodes, so the column has no encoding failure.
+func requireTypesColumn(types []string) string {
 	if len(types) == 0 {
-		return "", nil
+		return ""
 	}
-	b, err := json.Marshal(types)
-	if err != nil {
-		return "", fmt.Errorf("store: encode trust require types: %w", err)
-	}
-	return string(b), nil
+	b, _ := json.Marshal(types)
+	return string(b)
 }
 
 // parseRequireTypes reads the trust_require_types column back. The empty

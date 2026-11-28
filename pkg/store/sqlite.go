@@ -1124,10 +1124,6 @@ func sqliteUpsertLayer(ctx context.Context, ex execContexter, cfg LayerConfig, a
 	if err != nil {
 		return err
 	}
-	requireTypes, err := requireTypesColumn(cfg.TrustRequireTypes)
-	if err != nil {
-		return err
-	}
 	pending, err := pendingColumn(cfg.VisibilityPending)
 	if err != nil {
 		return err
@@ -1154,7 +1150,7 @@ func sqliteUpsertLayer(ctx context.Context, ex execContexter, cfg LayerConfig, a
 		groups, users,
 		cfg.WebhookSecret, cfg.LastIngestedRef, cfg.ForcePushPolicy, cfg.GitProvider,
 		createdAt.UTC().Format(time.RFC3339Nano), nullTimeText(cfg.DeletedAt), nullTimeText(cfg.LastIngestedAt),
-		userinfo, cfg.TrustMode, trustReqs, requireTypes, cfg.TrustLayerRoot, cfg.VisibilitySource, pending)
+		userinfo, cfg.TrustMode, trustReqs, requireTypesColumn(cfg.TrustRequireTypes), cfg.TrustLayerRoot, cfg.VisibilitySource, pending)
 	return err
 }
 

@@ -163,6 +163,9 @@ func decodeTrustPatch(body []byte) (trustPatch, error) {
 	}
 	if v, ok := found["trust_require_types"]; ok {
 		var types []string
+		// The handlers decode the body into the request struct first, which
+		// refuses a value that is not an array of strings; the check stays
+		// for a caller that decodes the patch alone.
 		if err := json.Unmarshal(v, &types); err != nil {
 			return trustPatch{}, fmt.Errorf("layer request: trust_require_types: %w", err)
 		}
@@ -219,10 +222,11 @@ func (p trustPatch) applyTo(cfg store.LayerConfig) store.LayerConfig {
 	if p.reqs != nil {
 		cfg.TrustRequirements = layer.DeriveSourceBinding(cfg.SourceType, cfg.Repo, nilIfNoRequirement(*p.reqs))
 	}
-	if p.types != nil && len(*p.types) > 0 {
-		cfg.TrustRequireTypes = *p.types
-	} else if p.types != nil {
+	if p.types != nil {
 		cfg.TrustRequireTypes = nil
+		if len(*p.types) > 0 {
+			cfg.TrustRequireTypes = *p.types
+		}
 	}
 	return cfg
 }

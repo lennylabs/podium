@@ -199,7 +199,7 @@ func TestCheckTrustPolicy_Rules(t *testing.T) {
 		{"removed type", types("warn", "command"), `"command" is not an artifact type`},
 		{"type twice", types("warn", "hook", "hook"), `lists "hook" twice`},
 		{"types under none", types("none", "hook"), "trust_mode is none"},
-		{"types without requirement", policy("warn"), "trust_mode warn needs a requirement"},
+		{"types without requirement", store.LayerConfig{TrustRequireTypes: []string{"hook"}}, "trust_require_types needs a requirement"},
 		{"require without requirement", policy("require"), "trust_mode require needs a requirement"},
 		{"warn without requirement", policy("warn"), "trust_mode warn needs a requirement"},
 		{"no signer", ok(func(c *store.LayerConfig) { c.TrustRequirements[0].Signers = nil }), "trust_requirements[0] names no signer"},
