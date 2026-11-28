@@ -243,8 +243,9 @@ func checkTenantFloor(t Tenant) error {
 }
 
 // sameMutableTenant reports whether a and b hold the same mutable record:
-// quota, the scope-preview gate, the active state, and the trust floor in
-// its stored form.
+// quota, the scope-preview gate, the active state, and the trust floor. Both
+// are decoded values, and the floors are compared through the canonical
+// encoding floorColumns writes, so an empty list and a nil one are equal.
 func sameMutableTenant(a, b Tenant) bool {
 	am, at, as := floorColumns(a.TrustFloor)
 	bm, bt, bs := floorColumns(b.TrustFloor)

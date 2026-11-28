@@ -326,32 +326,25 @@ func (s *SQLite) UpdateTenantIf(ctx context.Context, t Tenant, expect Tenant) er
 }
 
 // updateTenant writes t's mutable record, conditional on expect's when it
-// is not nil. A conditional write that changes no row is ErrTenantNotFound
-// for an absent tenant and ErrTenantChanged otherwise.
+// is not nil. The condition compares decoded values, so a floor column that
+// decodes to the record the caller read matches whatever its stored text
+// (such as "[]" or spaced JSON from a hand edit): a no-op update takes the
+// write lock on the row, the row is read and decoded under it, and the
+// write follows in the same transaction. An absent tenant is
+// ErrTenantNotFound and a changed record ErrTenantChanged.
 func (s *SQLite) updateTenant(ctx context.Context, t Tenant, expect *Tenant) error {
 	if err := checkTenantFloor(t); err != nil {
 		return err
 	}
-	fm, ft, fs := floorColumns(t.TrustFloor)
-	query := `
-		UPDATE tenants SET
-			storage_quota = ?, search_qps_quota = ?, materialize_rate_quota = ?,
-			audit_volume_quota = ?, max_user_layers = ?, expose_scope_preview = ?, active = ?,
-			trust_floor_mode = ?, trust_floor_require_types = ?, trust_floor_signers = ?
-		WHERE id = ?`
-	args := []any{t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
-		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active,
-		fm, ft, fs, t.ID}
-	if expect != nil {
-		em, et, es := floorColumns(expect.TrustFloor)
-		query += ` AND storage_quota = ? AND search_qps_quota = ? AND materialize_rate_quota = ?
-			AND audit_volume_quota = ? AND max_user_layers = ? AND expose_scope_preview IS ? AND active = ?
-			AND trust_floor_mode = ? AND trust_floor_require_types = ? AND trust_floor_signers = ?`
-		args = append(args, expect.Quota.StorageBytes, expect.Quota.SearchQPS, expect.Quota.MaterializeRate,
-			expect.Quota.AuditVolumePerDay, expect.Quota.MaxUserLayers, nullBoolFromPtr(expect.ExposeScopePreview), expect.Active,
-			em, et, es)
+	if expect == nil {
+		return sqliteWriteTenant(ctx, s.db, t)
 	}
-	res, err := s.db.ExecContext(ctx, query, args...)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `UPDATE tenants SET id = id WHERE id = ?`, t.ID)
 	if err != nil {
 		return err
 	}
@@ -359,16 +352,48 @@ func (s *SQLite) updateTenant(ctx context.Context, t Tenant, expect *Tenant) err
 	if err != nil {
 		return err
 	}
-	if n > 0 {
-		return nil
-	}
-	if expect == nil {
+	if n == 0 {
 		return ErrTenantNotFound
 	}
-	if _, err := s.GetTenant(ctx, t.ID); err != nil {
+	held, err := scanTenant(tx.QueryRowContext(ctx, `SELECT `+tenantColumns+` FROM tenants WHERE id = ?`, t.ID))
+	if err != nil {
 		return err
 	}
-	return ErrTenantChanged
+	if !sameMutableTenant(held, *expect) {
+		return ErrTenantChanged
+	}
+	if err := sqliteWriteTenant(ctx, tx, t); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// sqliteWriteTenant writes t's mutable record through x, and answers
+// ErrTenantNotFound when no row holds t's ID.
+func sqliteWriteTenant(ctx context.Context, x interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}, t Tenant) error {
+	fm, ft, fs := floorColumns(t.TrustFloor)
+	res, err := x.ExecContext(ctx, `
+		UPDATE tenants SET
+			storage_quota = ?, search_qps_quota = ?, materialize_rate_quota = ?,
+			audit_volume_quota = ?, max_user_layers = ?, expose_scope_preview = ?, active = ?,
+			trust_floor_mode = ?, trust_floor_require_types = ?, trust_floor_signers = ?
+		WHERE id = ?`,
+		t.Quota.StorageBytes, t.Quota.SearchQPS, t.Quota.MaterializeRate,
+		t.Quota.AuditVolumePerDay, t.Quota.MaxUserLayers, nullBoolFromPtr(t.ExposeScopePreview), t.Active,
+		fm, ft, fs, t.ID)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrTenantNotFound
+	}
+	return nil
 }
 
 // DeactivateTenant sets a tenant's active flag false without deleting its
