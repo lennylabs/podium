@@ -81,6 +81,9 @@ func ReadMachineConfig(opts MachineFileOptions) (*MachineFile, error) {
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	if err := CheckKnownKeys(data); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &MachineFile{Path: path, Config: cfg}, nil
 }
 

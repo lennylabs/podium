@@ -84,3 +84,27 @@ func TestResolvePath(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §4.7.11 (Known keys), §7.5.2 — a key outside the schema at the top
+// level or under defaults is refused and named, so a misplaced or
+// misspelled protective block is not dropped; every schema key passes.
+func TestCheckKnownKeys(t *testing.T) {
+	t.Parallel()
+	for body, key := range map[string]string{
+		"attestation:\n  policy: require\n":                 `"attestation"`,
+		"defaults:\n  attestations:\n    policy: require\n": `"defaults.attestations"`,
+		"default:\n  attestation:\n    policy: require\n":   `"default"`,
+	} {
+		if err := CheckKnownKeys([]byte(body)); err == nil || !strings.Contains(err.Error(), key) {
+			t.Errorf("%q: err = %v, want %s named", body, err, key)
+		}
+	}
+	all := "defaults:\n  registry: x\n  harness: none\n  target: t\n  profile: p\n  identity: i\n  verify_signatures: always\n" +
+		"  on_unparseable: keep\n  min_server_version: 0.1.0\n  attestation: {policy: none}\nlisting_budgets: {}\nprofiles: {}\ntargets: []\n"
+	for _, body := range []string{all, "", "defaults: [\n", "- a\n", "defaults: x\n", "d: &a {x: 1}\ndefaults: *a\n"} {
+		err := CheckKnownKeys([]byte(body))
+		if (body == "d: &a {x: 1}\ndefaults: *a\n") != (err != nil) {
+			t.Errorf("%q: err = %v", body, err)
+		}
+	}
+}

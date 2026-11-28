@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sigstore/sigstore-go/pkg/tuf"
+
 	"github.com/lennylabs/podium/internal/clock"
 	sh "github.com/lennylabs/podium/internal/testharness/sigstoreharness"
 	"github.com/lennylabs/podium/internal/testharness/tufharness"
@@ -153,7 +155,7 @@ func TestTUFRoot_RefreshReplacesEmbeddedAndPersists(t *testing.T) {
 	if err := verifiesUnder(t, src, f.served); err != nil {
 		t.Fatalf("bundle under the refreshed root: %v", err)
 	}
-	copyRaw, err := os.ReadFile(filepath.Join(f.dir, "trusted_root.json"))
+	copyRaw, err := readRootCopy(f.dir)
 	if err != nil || digestOf(t, copyRaw) != st.Digest {
 		t.Fatalf("copy on disk: %v, want the refreshed root", err)
 	}
@@ -198,7 +200,7 @@ func TestTUFRoot_FailedRefreshKeepsLastVerifiedCopy(t *testing.T) {
 	if err := verifiesUnder(t, src, f.served); err != nil {
 		t.Fatalf("bundle under the kept root: %v", err)
 	}
-	copyRaw, _ := os.ReadFile(filepath.Join(f.dir, "trusted_root.json"))
+	copyRaw, _ := readRootCopy(f.dir)
 	if digestOf(t, copyRaw) != want.Digest {
 		t.Fatal("a failed refresh replaced the copy on disk")
 	}
@@ -493,38 +495,111 @@ func TestTUFRoot_HalfAgeWarning(t *testing.T) {
 	}
 }
 
-// Spec: §4.7.11 — a copy on disk that does not load, or whose refresh time
-// is missing, is ignored and logged, and the embedded copy serves.
-func TestTUFRoot_IgnoresBadDiskCopy(t *testing.T) {
+// readRootCopy returns the trusted_root.json bytes of the copy in dir.
+func readRootCopy(dir string) ([]byte, error) {
+	raw, err := os.ReadFile(filepath.Join(dir, "root_copy.json"))
+	if err != nil {
+		return nil, err
+	}
+	var c struct {
+		TrustedRoot []byte `json:"trusted_root"`
+	}
+	err = json.Unmarshal(raw, &c)
+	return c.TrustedRoot, err
+}
+
+// writeRootCopy writes a copy of root refreshed at at into dir.
+func writeRootCopy(t *testing.T, dir string, root []byte, at time.Time) {
+	t.Helper()
+	b, err := json.Marshal(map[string]any{"refreshed_at": at, "trusted_root": root})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "root_copy.json"), b, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Spec: §4.7.11 (Trusted root refresh), §13.12 — a copy on disk is used
+// only when the cached TUF metadata verifies it: a copy that does not
+// parse, a planted root that the cached targets do not list, a copy beside
+// tampered or missing metadata, and a copy in the earlier two-file layout
+// are each ignored, in read-write and read-only mode, and the embedded root
+// serves.
+func TestTUFRoot_IgnoresUnverifiedDiskCopy(t *testing.T) {
 	t.Parallel()
-	for name, write := range map[string]func(dir string, root []byte){
-		"unparseable root": func(dir string, _ []byte) {
-			_ = os.WriteFile(filepath.Join(dir, "trusted_root.json"), []byte("{"), 0o600)
-			_ = os.WriteFile(filepath.Join(dir, "refreshed_at"), []byte("2026-11-27T00:00:00Z\n"), 0o600)
+	for name, spoil := range map[string]func(t *testing.T, f *tufFixture){
+		"copy that does not parse": func(t *testing.T, f *tufFixture) {
+			_ = os.WriteFile(filepath.Join(f.dir, "root_copy.json"), []byte("{"), 0o600)
 		},
-		"no refresh time": func(dir string, root []byte) {
-			_ = os.WriteFile(filepath.Join(dir, "trusted_root.json"), root, 0o600)
+		"planted root": func(t *testing.T, f *tufFixture) {
+			writeRootCopy(t, f.dir, pgRootJSON(sh.New(t)), f.clk.Now())
 		},
-		"bad refresh time": func(dir string, root []byte) {
-			_ = os.WriteFile(filepath.Join(dir, "trusted_root.json"), root, 0o600)
-			_ = os.WriteFile(filepath.Join(dir, "refreshed_at"), []byte("yesterday"), 0o600)
-		},
-	} {
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			f := newTUFFixture(t)
-			if err := os.MkdirAll(f.dir, 0o700); err != nil {
+		"tampered cached targets": func(t *testing.T, f *tufFixture) {
+			p := filepath.Join(f.dir, tuf.URLToPath(f.repo.URL()), "targets.json")
+			raw, _ := os.ReadFile(p)
+			var m map[string]any
+			if err := json.Unmarshal(raw, &m); err != nil {
 				t.Fatal(err)
 			}
-			write(f.dir, pgRootJSON(f.served))
-			src := f.source(t, f.config(time.Time{}))
-			if st := src.Status(); st.Origin != sign.RootEmbedded {
-				t.Fatalf("origin = %s, want embedded", st.Origin)
-			}
-			if !f.logs.contains("ignoring the public-good root copy") {
-				t.Errorf("logs = %q, want the ignored copy", f.logs.lines)
-			}
-		})
+			m["signed"].(map[string]any)["expires"] = "2099-01-01T00:00:00Z"
+			raw, _ = json.Marshal(m)
+			_ = os.WriteFile(p, raw, 0o600)
+		},
+		"no cached metadata": func(t *testing.T, f *tufFixture) {
+			_ = os.RemoveAll(filepath.Join(f.dir, tuf.URLToPath(f.repo.URL())))
+		},
+		"two-file layout": func(t *testing.T, f *tufFixture) {
+			root, _ := readRootCopy(f.dir)
+			_ = os.Remove(filepath.Join(f.dir, "root_copy.json"))
+			_ = os.WriteFile(filepath.Join(f.dir, "trusted_root.json"), root, 0o600)
+			_ = os.WriteFile(filepath.Join(f.dir, "refreshed_at"), []byte(f.clk.Now().Format(time.RFC3339Nano)), 0o600)
+		},
+	} {
+		for _, ro := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s read-only=%v", name, ro), func(t *testing.T) {
+				t.Parallel()
+				f := newTUFFixture(t)
+				if err := f.source(t, f.config(time.Time{})).Refresh(context.Background()); err != nil {
+					t.Fatalf("Refresh: %v", err)
+				}
+				spoil(t, f)
+				cfg := f.config(time.Time{})
+				cfg.ReadOnly = ro
+				src := f.source(t, cfg)
+				if st := src.Status(); st.Origin != sign.RootEmbedded {
+					t.Fatalf("origin = %s, want embedded", st.Origin)
+				}
+				if err := verifiesUnder(t, src, f.served); err == nil {
+					t.Fatal("a bundle under the unverified copy verified")
+				}
+				if name != "two-file layout" && !f.logs.contains("ignoring the public-good root copy") {
+					t.Errorf("logs = %q, want the ignored copy", f.logs.lines)
+				}
+			})
+		}
+	}
+}
+
+// Spec: §4.7.11 (Trusted root refresh) — the root time of a verified copy is
+// the earlier of its recorded time and the expiry of the cached timestamp,
+// so a recorded time in the future does not make the copy count as fresh.
+func TestTUFRoot_CopyTimeIsCappedBySignedMetadata(t *testing.T) {
+	t.Parallel()
+	f := newTUFFixture(t)
+	if err := f.source(t, f.config(time.Time{})).Refresh(context.Background()); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	root, err := readRootCopy(f.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	future := f.clk.Now().Add(10 * 365 * 24 * time.Hour)
+	writeRootCopy(t, f.dir, root, future)
+	src := f.source(t, f.config(time.Time{}))
+	st := src.Status()
+	if st.Origin != sign.RootFromDisk || !st.Time.Before(future) || st.Time.IsZero() {
+		t.Fatalf("status = %+v, want the disk copy with a time capped below %v", st, future)
 	}
 }
 
@@ -649,7 +724,7 @@ func TestTUFRoot_CopyWriteFailureKeepsRootInMemory(t *testing.T) {
 	if !f.logs.contains("keeping the refreshed public-good root in memory") {
 		t.Errorf("logs = %q, want the in-memory notice", f.logs.lines)
 	}
-	copyRaw, _ := os.ReadFile(filepath.Join(f.dir, "trusted_root.json"))
+	copyRaw, _ := readRootCopy(f.dir)
 	if digestOf(t, copyRaw) != first {
 		t.Fatal("the copy on disk changed")
 	}

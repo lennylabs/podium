@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	sh "github.com/lennylabs/podium/internal/testharness/sigstoreharness"
 	"github.com/lennylabs/podium/pkg/attest"
@@ -285,5 +286,96 @@ func TestBridgeCodeMeta_AttestationCodes(t *testing.T) {
 		if hint == "" || retryable != (code == attest.CodeAttestationRootStale) {
 			t.Errorf("%s: retryable %v, hint %q", code, retryable, hint)
 		}
+	}
+}
+
+// Spec: §4.7.11 (Known keys) — in the user's own sync.yaml and the machine
+// file, a protective block written at the top level, as
+// defaults.attestations, or under default refuses the start and names the
+// key and the file, rather than being dropped.
+func TestConsumerAttestation_MisplacedBlockRefusesStart(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]string{
+		"top level": "attestation:\n  policy: require\n",
+		"plural":    "defaults:\n  attestations:\n    policy: require\n",
+		"default":   "default:\n  attestation:\n    policy: require\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			e := newConsumerEnv(t)
+			e.writeUserSync(t, body)
+			_, err := e.load()
+			wantPolicyRefusal(t, err, filepath.Join(e.home, ".podium", "sync.yaml"))
+			m := newConsumerEnv(t)
+			writeFiles(t, m.machineDir, map[string]string{"sync.yaml": body})
+			_, err = m.load()
+			wantPolicyRefusal(t, err, "unknown key")
+		})
+	}
+}
+
+// Spec: §4.7.11 (Keys) — a workspace sync.yaml that does not parse refuses
+// the start only in the working directory and when the user owns it; an
+// ancestor's file, such as /tmp/.podium/sync.yaml above a directory under
+// /tmp, is ignored and reported as workspace_file in every load result. The
+// refusal names the file once.
+func TestConsumerAttestation_UnparseableWorkspaceFile(t *testing.T) {
+	t.Parallel()
+	e := newConsumerEnv(t)
+	shared := t.TempDir()
+	writeFiles(t, shared, map[string]string{".podium/sync.yaml": "defaults: [\n"})
+	e.cwd = filepath.Join(shared, "alice-scratch", "sub")
+	writeFiles(t, e.cwd, map[string]string{"x": ""})
+	a := e.mustLoad(t)
+	if len(a.notices) != 1 || !strings.Contains(a.notices[0], "constraint workspace_file") {
+		t.Fatalf("notices = %v", a.notices)
+	}
+	if !strings.Contains(e.stderr.String(), "ignoring the workspace file") {
+		t.Errorf("stderr = %q", e.stderr.String())
+	}
+
+	w := newConsumerEnv(t)
+	writeFiles(t, w.cwd, map[string]string{".podium/sync.local.yaml": "defaults: [\n"})
+	_, err := w.load()
+	path := filepath.Join(w.cwd, ".podium", "sync.local.yaml")
+	wantPolicyRefusal(t, err, path)
+	if n := strings.Count(err.Error(), path); n != 1 {
+		t.Errorf("the refusal names the file %d times: %v", n, err)
+	}
+	// A parsing file of an ancestor with a bad attestation block still
+	// refuses the start.
+	b := newConsumerEnv(t)
+	anc := t.TempDir()
+	writeFiles(t, anc, map[string]string{".podium/sync.yaml": "defaults:\n  attestation:\n    polcy: require\n"})
+	b.cwd = filepath.Join(anc, "sub")
+	writeFiles(t, b.cwd, map[string]string{"x": ""})
+	_, err = b.load()
+	wantPolicyRefusal(t, err, "polcy")
+}
+
+// Spec: §6.2, §4.7.11 (Repository-source roots) — the bundle deadline is
+// operator-tunable through PODIUM_ATTESTATION_FETCH_TIMEOUT, and the root
+// refresh interval keeps the registry's floor.
+func TestConsumerAttestation_FetchTimeoutAndRefreshFloor(t *testing.T) {
+	t.Parallel()
+	e := newConsumerEnv(t)
+	e.env[envFetchTimeout] = " 5s "
+	a := e.mustLoad(t)
+	s := newTestServer(t, &config{attestation: a})
+	src := s.newAttestationChecker().Bundles.(attest.CachedBundles).Source.(attest.HTTPBundleSource)
+	if src.Client.Timeout != 5*time.Second {
+		t.Errorf("fetch timeout = %s", src.Client.Timeout)
+	}
+	if d := newTestServer(t, &config{}).newAttestationChecker().Bundles.(attest.CachedBundles).Source.(attest.HTTPBundleSource); d.Client.Timeout != attest.DefaultBundleFetchTimeout {
+		t.Errorf("default fetch timeout = %s", d.Client.Timeout)
+	}
+	for _, env := range []map[string]string{
+		{envFetchTimeout: "0s"}, {envFetchTimeout: "soon"},
+		{envRootRefresh: "30s"}, {envRootRefresh: "2m", envRootRefreshTimeout: "5m"},
+	} {
+		e := newConsumerEnv(t)
+		e.env = env
+		_, err := e.load()
+		wantPolicyRefusal(t, err, "PODIUM_")
 	}
 }

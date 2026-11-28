@@ -390,3 +390,19 @@ func TestAttestMCP_StartsTheRootRefresh(t *testing.T) {
 		t.Fatal("the refresh sent no request to the mirror")
 	}
 }
+
+// Spec: §4.7.11 (User home), §6.1.1 — a resources/read result that fails
+// before the attestation check, such as an unreachable registry, carries
+// the notices of the process as a load result does.
+func TestAttestMCP_ResourceReadErrorsCarryNotices(t *testing.T) {
+	t.Parallel()
+	e := newConsumerEnv(t)
+	e.home, e.homeErr = "", errors.New("no entry for uid")
+	s := newTestServer(t, &config{registry: "http://127.0.0.1:1", harness: "none", cacheMode: "always-revalidate", verifyPolicy: "never", attestation: e.mustLoad(t)})
+	for _, raw := range []string{`{"uri":"podium://artifact/x"}`, `{"uri":"other://x"}`, `{`} {
+		m := envelope(t, s.handleResourcesRead(json.RawMessage(raw)))
+		if w, _ := m["attestation_warning"].(string); !strings.Contains(w, "constraint user_home") {
+			t.Errorf("%s: result = %v", raw, m)
+		}
+	}
+}

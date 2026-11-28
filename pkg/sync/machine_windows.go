@@ -153,7 +153,10 @@ func checkHandle(h windows.Handle, folder bool) error {
 }
 
 // checkACEs refuses an allow ACE that grants one of the bad rights, after
-// generic rights are mapped, to an untrusted SID.
+// generic rights are mapped, to an untrusted SID. An inherit-only ACE, which
+// grants nothing on the object itself, is refused as well: the check reads
+// every allow ACE as a grant, which fails closed on a DACL that an installer
+// wrote with such an entry (§4.7.11 Check on Windows).
 func checkACEs(dacl *windows.ACL, bad uint32) error {
 	trustedInstaller, err := windows.StringToSid(trustedInstallerSID)
 	if err != nil {

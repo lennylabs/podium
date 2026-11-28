@@ -26,6 +26,7 @@ const (
 	envRootMaxAge            = "PODIUM_SIGSTORE_ROOT_MAX_AGE"
 	envRootRefresh           = "PODIUM_SIGSTORE_ROOT_REFRESH"
 	envRootRefreshTimeout    = "PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT"
+	envFetchTimeout          = "PODIUM_ATTESTATION_FETCH_TIMEOUT"
 )
 
 // rootCopyDir is the directory of the root copy of user-source rules under
@@ -39,6 +40,9 @@ const (
 	constraintUserHome    = "user_home"
 	constraintMachineFile = "machine_file"
 	constraintOverlay     = "overlay"
+	// constraintWorkspaceFile reports a workspace sync.yaml that does not
+	// parse and that the start does not refuse for.
+	constraintWorkspaceFile = "workspace_file"
 )
 
 // consumerAttestation is the MCP server's resolved §4.7.11 consumer trust
@@ -56,6 +60,9 @@ type consumerAttestation struct {
 	refreshers []*sign.TUFAttestationRoot
 	// maxBytes is PODIUM_ATTESTATION_MAX_BYTES.
 	maxBytes int64
+	// fetchTimeout is PODIUM_ATTESTATION_FETCH_TIMEOUT, the deadline of one
+	// bundle fetch; zero is attest.DefaultBundleFetchTimeout.
+	fetchTimeout time.Duration
 }
 
 // attestationInputs are the settings and system paths the policy is built
@@ -129,6 +136,9 @@ func loadConsumerAttestation(in attestationInputs) (*consumerAttestation, error)
 		return nil, policyRefusal("%v", err)
 	}
 	b.out.maxBytes = limits.MaxBytes
+	if b.out.fetchTimeout, err = readFetchTimeout(in.getenv); err != nil {
+		return nil, err
+	}
 	b.settings, err = readRepoRootSettings(in.getenv)
 	if err != nil {
 		return nil, err
@@ -157,6 +167,23 @@ func loadConsumerAttestation(in attestationInputs) (*consumerAttestation, error)
 // start.
 func policyRefusal(format string, args ...any) error {
 	return fmt.Errorf("%s: %s", attest.CodePolicyUnavailable, fmt.Sprintf(format, args...))
+}
+
+// readFetchTimeout reads PODIUM_ATTESTATION_FETCH_TIMEOUT: a duration above
+// zero, and the default when unset or blank. The registry client of the MCP
+// server has no deadline of its own, so the bundle fetch takes this one.
+//
+// Spec: §6.2, §4.7.11 (Attestation check, step 8)
+func readFetchTimeout(getenv func(string) string) (time.Duration, error) {
+	raw := strings.TrimSpace(getenv(envFetchTimeout))
+	if raw == "" {
+		return attest.DefaultBundleFetchTimeout, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d <= 0 {
+		return 0, policyRefusal("%s must be a duration above zero, such as 30s, got %q", envFetchTimeout, raw)
+	}
+	return d, nil
 }
 
 // readRepoRootSettings reads the public-good root settings of the
@@ -188,6 +215,12 @@ func readRepoRootSettings(getenv func(string) string) (repoRootSettings, error) 
 		*d.dst = v
 		s.set = true
 	}
+	// The registry's floor: a refresh more often than once a minute, or
+	// more often than its own deadline, would send request bursts to the
+	// TUF repository or overlap refreshes.
+	if s.refresh < sign.MinRootRefresh || s.refresh < s.timeout {
+		return s, policyRefusal("%s must be at least %s and at least %s, got %s", envRootRefresh, sign.MinRootRefresh, envRootRefreshTimeout, s.refresh)
+	}
 	return s, nil
 }
 
@@ -213,7 +246,10 @@ func (b *policyBuilder) repositorySources() error {
 		path := filepath.Join(ws, ".podium", name)
 		cfg, err := synccfg.ReadConfigFile(path)
 		if err != nil {
-			return policyRefusal("%s: %v", path, err)
+			if err := b.unreadableWorkspaceFile(ws, path, err); err != nil {
+				return err
+			}
+			continue
 		}
 		if cfg == nil {
 			continue
@@ -234,6 +270,51 @@ func (b *policyBuilder) repositorySources() error {
 	return nil
 }
 
+// unreadableWorkspaceFile handles a workspace sync.yaml that cannot be read
+// or parsed. The start is refused only when the workspace is the working
+// directory and the user of the process owns the file. A file of an
+// ancestor workspace, such as /tmp/.podium/sync.yaml above a directory under
+// /tmp, and a file another user owns, can be placed by another local user;
+// they hold only repository-source rules, which no user rule depends on, so
+// they are ignored with a notice rather than stopping every start below
+// them.
+//
+// Spec: §4.7.11 (User sources of the MCP server, Keys)
+func (b *policyBuilder) unreadableWorkspaceFile(ws, path string, err error) error {
+	if sameDir(ws, b.in.cwd) && ownedByProcessUser(path) {
+		return policyRefusal("%v", err)
+	}
+	b.in.stderr("WARN: ignoring the workspace file %s, which does not parse and is not this user's file in the working directory: %v\n", path, err)
+	if !slices.Contains(b.out.notices, noticeText(constraintWorkspaceFile)) {
+		b.out.notices = append(b.out.notices, noticeText(constraintWorkspaceFile))
+	}
+	return nil
+}
+
+// readUserSync reads a user-source sync.yaml. A file that does not parse,
+// and a key outside the schema at the top level or under defaults, refuse
+// the start, because the protective policy it may hold is unknown. A
+// missing file is nil.
+//
+// Spec: §4.7.11 (User sources of the MCP server, Known keys)
+func readUserSync(path string) (*synccfg.SyncConfig, error) {
+	cfg, err := synccfg.ReadConfigFile(path)
+	if err != nil {
+		return nil, policyRefusal("%v", err)
+	}
+	if cfg == nil {
+		return nil, nil
+	}
+	raw, err := os.ReadFile(path)
+	if err == nil {
+		err = synccfg.CheckKnownKeys(raw)
+	}
+	if err != nil {
+		return nil, policyRefusal("%s: %v", path, err)
+	}
+	return cfg, nil
+}
+
 // userSources adds the user's own sync.yaml under the account home and the
 // machine file, and the notices of a failed lookup and of a machine file
 // that fails its check.
@@ -244,9 +325,9 @@ func (b *policyBuilder) userSources() error {
 		b.out.notices = append(b.out.notices, noticeText(constraintUserHome))
 	} else {
 		path := filepath.Join(b.in.home, ".podium", "sync.yaml")
-		cfg, err := synccfg.ReadConfigFile(path)
+		cfg, err := readUserSync(path)
 		if err != nil {
-			return policyRefusal("%s: %v", path, err)
+			return err
 		}
 		if cfg != nil {
 			ov, err := b.addUserFile(path, cfg)

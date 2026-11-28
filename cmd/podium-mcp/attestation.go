@@ -28,8 +28,12 @@ func (s *mcpServer) newAttestationChecker() *attest.Checker {
 		cache = attest.DirCache{Dir: filepath.Join(s.cfg.cacheDir, "attestations"), MaxBytes: a.maxBytes}
 	}
 	// The bundle fetch uses the transport of the registry client, so it
-	// carries the same tracing, bounded by the default bundle deadline.
-	client := &http.Client{Timeout: attest.DefaultBundleFetchTimeout}
+	// carries the same tracing, bounded by PODIUM_ATTESTATION_FETCH_TIMEOUT.
+	timeout := a.fetchTimeout
+	if timeout <= 0 {
+		timeout = attest.DefaultBundleFetchTimeout
+	}
+	client := &http.Client{Timeout: timeout}
 	if s.http != nil {
 		client.Transport = s.http.Transport
 	}

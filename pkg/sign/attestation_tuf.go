@@ -2,6 +2,7 @@ package sign
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strings"
+	"runtime"
 	"sync"
 	"time"
 
@@ -61,14 +62,13 @@ const MinRootRefresh = time.Minute
 const firstRetryDelay = time.Minute
 
 // The file names of the public-good root directory. trustedRootTarget is
-// the TUF target the Sigstore repository publishes; rootCopyFile and
-// rootTimeFile hold the last verified copy and the time of its refresh,
-// apart from the TUF cache, because the TUF timestamp role expires within
-// days and a copy kept only as a TUF target would not load once it had.
+// the TUF target the Sigstore repository publishes; rootCopyFile holds the
+// last verified copy and the time of its refresh in one file, apart from
+// the TUF cache, because the TUF timestamp role expires within days and the
+// TUF client refuses a target under expired metadata.
 const (
 	trustedRootTarget = "trusted_root.json"
-	rootCopyFile      = "trusted_root.json"
-	rootTimeFile      = "refreshed_at"
+	rootCopyFile      = "root_copy.json"
 )
 
 // ErrAttestationRootStale signals a public-good root past its maximum age.
@@ -311,39 +311,47 @@ func (s *TUFAttestationRoot) prepareDir() bool {
 	return true
 }
 
-// loadDiskCopy reads the last verified copy and its refresh time. An absent
-// copy is silent; a copy that does not load is logged and ignored.
+// rootCopy is the content of rootCopyFile: the trusted_root.json bytes the
+// TUF client returned and the time of that refresh.
+type rootCopy struct {
+	RefreshedAt time.Time `json:"refreshed_at"`
+	TrustedRoot []byte    `json:"trusted_root"`
+}
+
+// loadDiskCopy reads the last verified copy and its refresh time. The copy
+// is used only when the cached TUF metadata in Dir verifies it, and its
+// root time is capped by the expiry of the cached timestamp, so a copy or a
+// time that another writer placed in the directory is not trusted on its
+// own. An absent copy is silent; a copy that does not load or verify is
+// logged and ignored, which leaves the embedded root in use.
+//
+// Spec: §4.7.11 (Trusted root refresh)
 func (s *TUFAttestationRoot) loadDiskCopy() (*AttestationRoot, time.Time, bool) {
 	raw, err := os.ReadFile(filepath.Join(s.cfg.Dir, rootCopyFile))
 	if errors.Is(err, os.ErrNotExist) {
 		return nil, time.Time{}, false
 	}
+	var c rootCopy
 	var r *AttestationRoot
-	var at time.Time
+	var expires time.Time
 	if err == nil {
-		r, err = parsePublicGoodRoot(raw)
+		err = json.Unmarshal(raw, &c)
 	}
 	if err == nil {
-		at, err = readRootTime(filepath.Join(s.cfg.Dir, rootTimeFile))
+		r, err = parsePublicGoodRoot(c.TrustedRoot)
+	}
+	if err == nil {
+		expires, err = verifyCachedTarget(filepath.Join(s.cfg.Dir, tuf.URLToPath(s.cfg.MirrorURL)), s.cfg.TUFRoot, c.TrustedRoot)
 	}
 	if err != nil {
 		s.cfg.Logf("attestation: ignoring the public-good root copy in %s: %v", s.cfg.Dir, err)
 		return nil, time.Time{}, false
 	}
+	at := c.RefreshedAt
+	if at.IsZero() || expires.Before(at) {
+		at = expires
+	}
 	return r, at, true
-}
-
-// readRootTime reads the RFC 3339 refresh time of the copy.
-func readRootTime(path string) (time.Time, error) {
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		return time.Time{}, fmt.Errorf("read %s: %w", rootTimeFile, err)
-	}
-	t, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(raw)))
-	if err != nil {
-		return time.Time{}, fmt.Errorf("parse %s: %w", rootTimeFile, err)
-	}
-	return t, nil
 }
 
 // AttestationRoot returns the root in use, or ErrAttestationRootStale when
@@ -465,10 +473,20 @@ func (s *TUFAttestationRoot) Refresh(ctx context.Context) error {
 func (s *TUFAttestationRoot) fetch(ctx context.Context, persist bool) ([]byte, error) {
 	dir := s.cfg.Dir
 	if s.cfg.Memory {
-		dir = filepath.Join(os.DevNull, "podium-tuf")
+		dir = impossibleDir
 	}
 	return fetchTUFTarget(ctx, s.cfg.MirrorURL, s.cfg.TUFRoot, dir, persist, s.cfg.HTTPClient)
 }
+
+// impossibleDir is an absolute path that names no directory on any
+// platform: a path below the null device. On Windows os.DevNull is the
+// relative name NUL, so the device namespace path is used instead.
+var impossibleDir = func() string {
+	if runtime.GOOS == "windows" {
+		return `\\.\NUL\podium-tuf`
+	}
+	return filepath.Join(os.DevNull, "podium-tuf")
+}()
 
 // isFileError reports whether err comes from a file operation, which a
 // write of the TUF cache returns, rather than from the network or from
@@ -525,14 +543,15 @@ func FetchPublicGoodRoot(ctx context.Context, mirror string, tufRoot []byte, cli
 	return raw, nil
 }
 
-// writeCopy replaces the copy and then its time, each by a rename. A crash
-// between the two leaves the new root with the earlier time, which only
-// overstates its age.
+// writeCopy replaces the copy, the root and its time together, by one
+// rename, so a reader never finds the root of one refresh beside the time of
+// another.
 func (s *TUFAttestationRoot) writeCopy(raw []byte, at time.Time) error {
-	if err := writeFileAtomic(s.cfg.Dir, rootCopyFile, raw); err != nil {
+	b, err := json.Marshal(rootCopy{RefreshedAt: at.UTC(), TrustedRoot: raw})
+	if err != nil {
 		return err
 	}
-	return writeFileAtomic(s.cfg.Dir, rootTimeFile, []byte(at.UTC().Format(time.RFC3339Nano)+"\n"))
+	return writeFileAtomic(s.cfg.Dir, rootCopyFile, b)
 }
 
 // writeFileAtomic writes data to dir/name through a temporary file and a

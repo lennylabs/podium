@@ -300,11 +300,20 @@ jobs:
             -X github.com/lennylabs/podium/internal/buildinfo.Commit=${COMMIT:0:7} \
             -X github.com/lennylabs/podium/internal/buildinfo.Date=${DATE} \
             -X github.com/lennylabs/podium/internal/buildinfo.ReleaseDate=${DATE}"
+          # The static Linux binaries look users up with the pure-Go reader
+          # of /etc/passwd (osusergo). A static glibc getpwuid_r loads NSS
+          # modules of the build's glibc at run time, which fails or behaves
+          # differently on musl and other glibc versions; podium-mcp locates
+          # the account home by that lookup (spec §4.7.11 User home).
+          TAGS=''
+          if [ "${GOOS}" = 'linux' ]; then
+            TAGS='osusergo'
+          fi
           mkdir -p dist
           for cmd in podium podium-server podium-mcp; do
             out="dist/${cmd}-${GOOS}-${GOARCH}${{ matrix.suffix }}"
             echo "building ${out}"
-            go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
+            go build -trimpath -tags "${TAGS}" -ldflags "${LDFLAGS}" -o "${out}" ./cmd/${cmd}
           done
           ls -la dist/
       - name: Refuse a podium-mcp test build
