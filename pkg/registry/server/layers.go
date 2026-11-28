@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"slices"
 	"sort"
 	"strings"
@@ -717,6 +718,8 @@ func layerConfigEqual(a, b store.LayerConfig) bool {
 		a.Organization == b.Organization &&
 		slices.Equal(a.Groups, b.Groups) &&
 		slices.Equal(a.Users, b.Users) &&
+		a.VisibilitySource == b.VisibilitySource &&
+		reflect.DeepEqual(a.VisibilityPending, b.VisibilityPending) &&
 		a.WebhookSecret == b.WebhookSecret &&
 		a.GitProvider == b.GitProvider &&
 		a.LastIngestedRef == b.LastIngestedRef &&
@@ -1745,6 +1748,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		cfg.Owner = patch.Owner
 	}
 	cfg = vis.applyTo(cfg)
+	cfg = declareUpdatedVisibility(before, cfg)
 	cfg = trustP.applyTo(cfg)
 	// spec: §7.3.1 — a patch that stores nothing writes no record and records
 	// no §8.1 event, so a body restating what the layer holds is answered 200

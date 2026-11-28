@@ -67,6 +67,12 @@ func TestWakesWatchers_EveryField(t *testing.T) {
 		{"Organization", func(c *store.LayerConfig) { c.Organization = true }, true},
 		{"Groups", func(c *store.LayerConfig) { c.Groups = nil }, true},
 		{"Users", func(c *store.LayerConfig) { c.Users = []string{"alice", "bob"} }, true},
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer) — the
+		// source and the pending visibility change what the next start or
+		// cycle applies, not what a re-resolve reads now; the visibility a
+		// cycle applies records its own event.
+		{"VisibilitySource", func(c *store.LayerConfig) { c.VisibilitySource = store.VisibilitySourceDefault }, false},
+		{"VisibilityPending", func(c *store.LayerConfig) { c.VisibilityPending = &store.LayerVisibility{Public: true} }, false},
 		{"WebhookSecret", func(c *store.LayerConfig) { c.WebhookSecret = "rotated" }, false},
 		{"GitProvider", func(c *store.LayerConfig) { c.GitProvider = "gitlab" }, false},
 		{"LastIngestedRef", func(c *store.LayerConfig) { c.LastIngestedRef = "def456" }, false},

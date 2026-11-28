@@ -78,6 +78,10 @@ type Registry struct {
 	attestationPolicy AttestationPolicyCheck
 	tenantID          string
 	layers            []layer.Layer
+	// fallback is the per-tenant layer list of a read that cannot read the
+	// layer rows, set by WithLayerRows on a store that keeps them. Nil keeps
+	// the boot-time layers as the fallback of every read.
+	fallback *layerFallback
 	// projection caches the name and when_to_use a stored row's bytes
 	// resolve to, for the rows a SQL store returns without them.
 	projection *projectionFieldCache
@@ -423,15 +427,30 @@ func (r *Registry) effectiveLayerComposition(ctx context.Context, id layer.Ident
 // view; a static slice fixed at construction never sees them. The
 // boot-time slice is the fallback when the store carries no layer configs (the
 // standalone filesystem path does not persist them and bypasses visibility in
-// public mode anyway).
+// public mode anyway), unless WithLayerRows declared that the store keeps
+// them.
 //
 // spec: §4.6 — "Resolution of layers 1 and 2 happens at the registry on every
 // load_domain, search_domains, search_artifacts, and load_artifact call."
+//
+// On a store that keeps layer rows (WithLayerRows), a read that succeeds is
+// authoritative, an empty one included, and replaces the tenant's fallback
+// list, and a read that fails returns that list (§4.6 Fallback list).
 func (r *Registry) resolveLayers(ctx context.Context) []layer.Layer {
-	out, err := r.layerConfigs(ctx, r.TenantFor(ctx))
-	if err != nil || len(out) == 0 {
-		return r.layers
+	tenant := r.TenantFor(ctx)
+	if r.fallback == nil {
+		out, err := r.layerConfigs(ctx, tenant)
+		if err != nil || len(out) == 0 {
+			return r.layers
+		}
+		return out
 	}
+	seq := r.fallback.begin()
+	out, err := r.layerConfigs(ctx, tenant)
+	if err != nil {
+		return r.fallback.load(tenant)
+	}
+	r.fallback.replace(tenant, seq, out)
 	return out
 }
 
@@ -2109,7 +2128,7 @@ func (r *Registry) visibleManifests(ctx context.Context, id layer.Identity) ([]s
 	// spec: §4.6 — resolve the caller's layer list (admin + runtime-registered)
 	// per request rather than from a static boot-time slice.
 	resolved := r.resolveLayers(ctx)
-	if id.IsPublic || len(resolved) == 0 {
+	if id.IsPublic || r.unfiltered(resolved) {
 		return applyReadScope(all, scopes), nil
 	}
 	visible := layer.EffectiveLayersWith(resolved, id, r.resolveGroup)

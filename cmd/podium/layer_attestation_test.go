@@ -49,6 +49,15 @@ func TestWriteAttestationNotes(t *testing.T) {
 		`{"id":"L","attestation_status":"ingest.source_unreachable","attestation_details":{"constraint":"fetch_deadline"}}`: {
 			"Raise PODIUM_GIT_FETCH_TIMEOUT",
 		},
+		`{"id":"L","attestation_status":"ingest.attestation_mismatch","attestation_details":{"constraint":"layer_digest"}}`: {
+			"a changed .layer-config that admits fewer callers has taken effect",
+		},
+		// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Pending change)
+		`{"id":"L","groups":["acme-finance"],"visibility_source":"declared","visibility_pending":{"public":true,"organization":false,"groups":null,"users":["a\u202eb"]}}`: {
+			`visibility in force: {"groups":["acme-finance"],"organization":false,"public":false,"users":null}`,
+			`visibility pending: {"public":true,"organization":false,"groups":null,"users":["a\u202eb"]}`,
+			"A wider visibility takes effect when a cycle passes the layer step, or through `podium layer update` once .layer-config holds it.",
+		},
 	}
 	for raw, wants := range cases {
 		var out bytes.Buffer
@@ -63,6 +72,7 @@ func TestWriteAttestationNotes(t *testing.T) {
 	writeAttestationNotes(&out, json.RawMessage(`{"id":"L","attestation_status":"ok"}`))
 	writeAttestationNotes(&out, json.RawMessage(`not json`))
 	writeAttestationNotes(&out, json.RawMessage(`{"id":"L","attestation_status":"ingest.unknown"}`))
+	writeAttestationNotes(&out, json.RawMessage(`{"id":"L","visibility_source":"declared","visibility_pending":null}`))
 	if out.Len() != 0 {
 		t.Errorf("output %q, want none", out.String())
 	}

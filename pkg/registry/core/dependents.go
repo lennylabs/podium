@@ -148,7 +148,7 @@ func (r *Registry) PreviewScope(ctx context.Context, id layer.Identity) (*ScopeP
 	// so the order is deterministic and an empty-but-visible layer is not
 	// dropped.
 	resolved := r.resolveLayers(ctx)
-	if len(resolved) > 0 {
+	if !r.unfiltered(resolved) {
 		for _, l := range layer.EffectiveLayersWith(resolved, id, r.resolveGroup) {
 			preview.Layers = append(preview.Layers, l.ID)
 		}
