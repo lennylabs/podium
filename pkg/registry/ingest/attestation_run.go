@@ -36,6 +36,9 @@ func (a *AttestationCycle) run(ctx context.Context, st store.Store, files fs.FS,
 	if err := a.readVisibility(files); err != nil {
 		return nil, false, err
 	}
+	if err := a.readStoredTypes(ctx, st); err != nil {
+		return nil, false, err
+	}
 	res, failure, err := a.layerStep(ctx, files, all)
 	if err != nil {
 		if _, rerr := a.RecordSourceFailure(ctx, st, err, onWrite); rerr != nil {
@@ -96,9 +99,11 @@ func (a *AttestationCycle) failedLayerStep(ctx context.Context, st store.Store, 
 }
 
 // requiredType reports whether trust_require_types lists the type of rec,
-// read from its parsed manifest and from the resolved field the package
-// digest frames, so a record whose two readings differ is held to the
-// listed type.
+// read from its parsed manifest, from the resolved field the package digest
+// frames, and from each live stored version of its ID in the layer. A
+// record whose readings differ is held to the listed type, so a snapshot
+// that declares another type for a stored hook's ID does not take it out of
+// per-type enforcement.
 //
 // Spec: §4.7.11 (Layer trust policy)
 func (a *AttestationCycle) requiredType(rec *filesystem.ArtifactRecord) bool {
@@ -106,7 +111,34 @@ func (a *AttestationCycle) requiredType(rec *filesystem.ArtifactRecord) bool {
 	if rec.Artifact != nil && slices.Contains(types, string(rec.Artifact.Type)) {
 		return true
 	}
-	return slices.Contains(types, string(rec.Fields.Type))
+	if slices.Contains(types, string(rec.Fields.Type)) {
+		return true
+	}
+	return slices.ContainsFunc(a.storedTypes[rec.ID], func(t string) bool { return slices.Contains(types, t) })
+}
+
+// readStoredTypes reads, for a policy that lists types, the type of each
+// live stored version of the layer by ID, which requiredType reads. A read
+// that fails fails the cycle before its record write.
+//
+// Spec: §4.7.11 (Layer trust policy)
+func (a *AttestationCycle) readStoredTypes(ctx context.Context, st store.Store) error {
+	if len(a.layer.TrustRequireTypes) == 0 {
+		return nil
+	}
+	rows, err := listManifestRows(ctx, st, a.layer.TenantID)
+	if err != nil {
+		return err
+	}
+	a.storedTypes = map[string][]string{}
+	for id, versions := range rows {
+		for _, row := range versions {
+			if row.Layer == a.layer.ID && row.DeletedAt == nil && !retired(row) {
+				a.storedTypes[id] = append(a.storedTypes[id], row.Type)
+			}
+		}
+	}
+	return nil
 }
 
 // artifactStep applies the §4.7.11 artifact step to each artifact the

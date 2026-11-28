@@ -3,6 +3,7 @@ package ingest_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -407,5 +408,43 @@ func TestAttestation_WithheldRequiredTypeStillResolvesReferences(t *testing.T) {
 	f.write(map[string]string{"finance/pay/ARTIFACT.md": referencing("1.1.0")})
 	if res, _ = f.cycle(); len(res.LintFailures) != 1 || res.LintFailures[0].ArtifactID != "finance/pay" {
 		t.Fatalf("an unresolved reference: %+v", res.LintFailures)
+	}
+}
+
+// Spec: §4.7.11 (Layer trust policy, Layer step) — a listed type applies
+// when a live stored version of the ID has it: under warn an unsigned state
+// that declares a stored hook an agent at a higher version is withheld
+// after the failed layer step, and the hook keeps serving; a signed state
+// that does the same and fails an additional requirement is dropped as a
+// hook would be. A failed read of the stored versions fails the cycle
+// before its record write.
+func TestAttestation_TypeChangeKeepsPerTypeEnforcement(t *testing.T) {
+	f := newAttestFixture(t, "warn")
+	f.write(map[string]string{"finance/guard/ARTIFACT.md": hookArtifact("Guard the books")})
+	f.setRequirements("warn", []string{"hook"}, buildReq(), scanReq(false))
+	f.place(f.sign(f.subjects(), time.Minute), f.signScan(f.artifactSubjects(), 2*time.Minute))
+	f.mustCycle()
+	asAgent := strings.Replace(agentArtifact("Guard the books"), "1.0.0", "1.1.0", 1)
+	f.write(map[string]string{"finance/guard/ARTIFACT.md": asAgent})
+	res, err := f.cycle()
+	if err != nil {
+		t.Fatalf("unsigned cycle: %v", err)
+	}
+	want(t, "unsigned rejected", rejected(res), "finance/guard=ingest.attestation_mismatch/-")
+	if _, err := f.st.GetManifest(context.Background(), "tenant-1", "finance/guard", "1.1.0"); err == nil || f.outcome("finance/guard") != "verified" {
+		t.Fatalf("the agent displaced the hook: %v, hook %s", err, f.outcome("finance/guard"))
+	}
+	// Signed by the covering signer, with no scan subject for the agent.
+	f.place(f.sign(f.subjects(), 3*time.Minute), f.signScan(f.artifactSubjects("finance/guard"), 4*time.Minute))
+	if res, err = f.cycle(); err != nil {
+		t.Fatalf("signed cycle: %v", err)
+	}
+	want(t, "signed rejected", rejected(res), "finance/guard=ingest.attestation_missing/1")
+	if _, err := f.st.GetManifest(context.Background(), "tenant-1", "finance/guard", "1.1.0"); err == nil {
+		t.Fatal("the signed agent that failed the scan requirement was stored")
+	}
+	f.st = &faultyStore{Store: f.st, fail: map[string]error{"ListManifestsIncludingDeleted": errors.New("store down")}}
+	if _, err := f.cycle(); err == nil || errors.Is(err, ingest.ErrAttestationRefused) {
+		t.Fatalf("a failed read of the stored versions: %v", err)
 	}
 }
