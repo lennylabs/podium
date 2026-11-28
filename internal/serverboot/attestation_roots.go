@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 
@@ -25,9 +24,6 @@ const (
 	sigstoreInstancesKey     = "sigstore.instances"
 	publicGoodRootDirSegment = "sigstore"
 )
-
-// instanceName is the §13.12 instance name rule.
-var instanceName = regexp.MustCompile(`\A[a-z0-9][a-z0-9._-]{0,63}\z`)
 
 // yamlSigstore mirrors the §13.12 `sigstore:` block of registry.yaml.
 type yamlSigstore struct {
@@ -241,7 +237,7 @@ func resolveInstance(i int, e yamlSigstoreInstance, configDir string, seen map[s
 		return fileInstance{}, fmt.Errorf("config.invalid: %s has no name", where)
 	case name == sign.PublicGoodInstance:
 		return fileInstance{}, fmt.Errorf("config.invalid: %s: the public-good instance is built in; set %s to give it a trusted root file", where, attestationRootFileEnv)
-	case !instanceName.MatchString(name):
+	case !sign.ValidInstanceName(name):
 		return fileInstance{}, fmt.Errorf("config.invalid: %s: instance name %q must be 1 to 64 characters from a-z, 0-9, '.', '_', and '-', beginning with a letter or a digit", where, name)
 	case seen[name]:
 		return fileInstance{}, fmt.Errorf("config.invalid: %s: instance %q is defined twice", where, name)
