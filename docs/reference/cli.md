@@ -507,14 +507,14 @@ podium sync [--registry <url-or-path>] [--target <path>] [--harness <name>]
 | `--check` | Validate the merged `sync.yaml` and report warnings: unresolved profiles, malformed globs, target/profile collisions, and invalid `listing_budgets` entries. With `--config`, validate every target in the named file and materialize none. |
 | `--json` | Structured envelope output, for piping to `jq`. |
 
-The lock file is written to `<target>/.podium/sync.lock`. Each entry records one materialized file: the artifact's `id`, `version`, `content_hash`, `layer`, and `type`, the `materialized_path`, and, for a path shared with the operator, `merge` (`json` for a JSON config merge, `inject` for a marker-based inject). An entry for a file sync writes whole also records `file_hash`, the `sha256:<hex>` digest of the file's bytes. The next sync deletes an out-of-scope file only when its bytes still match `file_hash`, and names a file it leaves in place on standard error. A `kind: marketplace` target fails instead of keeping such a file. See [Removal of out-of-scope files](../consuming/selective-materialization#removal-of-out-of-scope-files).
+The lock file is written to `<target>/.podium/sync.lock`, at version 2. Each entry records one materialized file: the artifact's `id`, `version`, `content_hash`, `layer`, and `type`, the `materialized_path`, and, for a path shared with the operator, `merge` (`json` for a JSON config merge, `inject` for a marker-based inject). An artifact whose author attestation check accepted a bundle also records `package_digest` and `attestations`, and a version 1 lock is read as before. See [Author attestation in `podium sync`](../consuming/verifying-deliveries#author-attestation-in-podium-sync). An entry for a file sync writes whole also records `file_hash`, the `sha256:<hex>` digest of the file's bytes. The next sync deletes an out-of-scope file only when its bytes still match `file_hash`, and names a file it leaves in place on standard error. A `kind: marketplace` target fails instead of keeping such a file. See [Removal of out-of-scope files](../consuming/selective-materialization#removal-of-out-of-scope-files).
 
 #### Exit status
 
 | Status | Cause |
 |:--|:--|
-| `1` | The run dropped an artifact (see [Dropped artifacts](#dropped-artifacts)), the listing estimate exceeded its budget or an entry exceeded `max_entry_chars` under `check: error` (see [Listing budget](#listing-budget)), a delivery check failed on a one-shot sync, a `--config` target failed, or a `sync.yaml` scope failed to load, including on a `listing_budgets` value of the wrong YAML type. Under `--watch`, the command exits 1 on interrupt when any cycle it reported failed, dropped an artifact, or reported a listing excess or an entry that exceeded `max_entry_chars` under `check: error`. |
-| `2` | `--on-unparseable`, `PODIUM_SYNC_ON_UNPARSEABLE`, or `defaults.on_unparseable` holds a value other than `keep` or `remove`, the signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
+| `1` | The run refused a record under the author attestation check, the request binding, or the well-formed rule (see [Author attestation in `podium sync`](../consuming/verifying-deliveries#author-attestation-in-podium-sync)), the run dropped an artifact (see [Dropped artifacts](#dropped-artifacts)), the listing estimate exceeded its budget or an entry exceeded `max_entry_chars` under `check: error` (see [Listing budget](#listing-budget)), a delivery check failed on a one-shot sync, a `--config` target failed, or a `sync.yaml` scope failed to load, including on a `listing_budgets` value of the wrong YAML type. Under `--watch`, the command exits 1 on interrupt when any cycle it reported failed, dropped an artifact, or reported a listing excess or an entry that exceeded `max_entry_chars` under `check: error`. |
+| `2` | The consumer trust policy did not load (`config.attestation_policy_unavailable`), `--on-unparseable`, `PODIUM_SYNC_ON_UNPARSEABLE`, or `defaults.on_unparseable` holds a value other than `keep` or `remove`, the signature policy or the verification key set did not resolve (see [Delivery verification](#delivery-verification)), or the `listing_budgets` entry for the run's harness is invalid. The entry check covers `--preview`, and a run that sets no harness runs the `none` adapter, so a `listing_budgets.none` entry exits 2 on it. |
 
 A drop and a listing report under `check: error` each add a cause for exit status 1 and leave the command's other exit statuses unchanged.
 
@@ -1781,8 +1781,11 @@ podium verify --content-hash sha256:<hex> --signature <envelope> [--provider <na
 
 | Exit code | Meaning |
 |:--|:--|
-| `0` | The signature is valid. |
-| `1` | Mismatch or other error. |
+| `0` | The signature is valid, and in the `<artifact>` form the request binding passed and the author attestation check did not refuse the record. |
+| `1` | Mismatch or other error, an ID that breaks the well-formed rule, a failed request binding, or a refusal of the attestation check under `require`. |
+| `2` | Usage error, or a consumer trust policy that does not load (`config.attestation_policy_unavailable`). |
+
+The `<artifact>` form also reports the request binding and the author attestation check on standard output, under the consumer trust policy that `podium sync` loads. See [`podium verify`](../consuming/verifying-deliveries#podium-verify).
 
 #### Registry-managed verification
 

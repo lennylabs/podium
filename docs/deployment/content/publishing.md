@@ -272,6 +272,38 @@ On dispatch, the workflow runs `podium sync --config <path>`.
 
 ---
 
+## Author attestation
+
+A render checks author attestations under the consumer trust policy of the
+`podium sync` process, as a workspace sync does (spec §7.8,
+[Author attestation in `podium sync`](../../consuming/verifying-deliveries#author-attestation-in-podium-sync)).
+
+- Every record the render loads meets the well-formed rule and the request
+  binding, and every record that a plugin selects meets the attestation check
+  of its policy rule. A record that no plugin selects is not checked.
+- A refused record fails the target before the render writes a file. The
+  `publish` commands do not run, the remote keeps the tree of the last run that
+  passed, and `podium sync` names the record and its code on standard error and
+  exits 1. A render cannot skip a record as a workspace sync does, because the
+  record would lose its published files at reconciliation.
+- Under `warn` the render writes the failure on standard error and renders the
+  record. The harnesses that import the repository do not see the warning.
+- The rendered tree carries no bundle or provenance file, and the render's lock
+  records no attestation member.
+
+Name the policy in the job's environment, with `PODIUM_ATTESTATION_POLICY_FILE`
+and `PODIUM_ATTESTATION_POLICY=require`, from a CI secret or a file outside the
+repository. The environment is a user source, so a `sync.yaml` committed to the
+marketplace repository can add requirements and cannot lower the mode. Keep no
+`none` rule for the IDs that the plugins select: under a `none` rule a registry
+can place any artifact in the published tree.
+
+Plugin names are path segments of the published tree. `podium sync` refuses
+with `config.invalid`, and exit status 2, a name that is empty, holds `/`, `\`,
+or a control character, is `.` or `..`, begins with `.`, or is not a portable
+name, such as `con` or `a.`, and a name that two plugins of one target share
+without regard to letter case.
+
 ## Configuration reference
 
 A marketplace target is one entry under `targets:` in `sync.yaml`, alongside any `kind: workspace` targets. The `kind:` field selects the output format: `workspace` (the default) materializes the project-files layout, and `marketplace` renders the git-repo distribution layout. The full `sync.yaml` schema is in [Configure your harness](../../consuming/configure-your-harness) and [Reference → CLI](../../reference/cli#podium-sync).

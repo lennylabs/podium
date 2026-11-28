@@ -8,8 +8,9 @@ description: "The checks the registry and each consumer run on a delivered artif
 
 This page describes the checks an artifact passes between the registry's store
 and the consumer, and the settings that control them. Most of the page covers the
-Podium MCP server, `podium-mcp`, and a section covers server-source
-`podium sync`. It is for developers and platform engineers who configure a
+Podium MCP server, `podium-mcp`, and two sections cover `podium sync`: the
+delivery checks of a server-source sync, and the author attestation check of
+every sync. It is for developers and platform engineers who configure a
 consumer. [Configure your harness](configure-your-harness#set-up-the-mcp-server)
 covers the rest of the MCP server setup.
 
@@ -284,3 +285,171 @@ A new session loads the current `latest`. The host starts one by passing a new
 `session_id`, and a load that passes none gets a new session when `podium-mcp`
 restarts. [`materialize.stale_resolution` details](../reference/error-codes#materializestale_resolution-details)
 lists the error's fields.
+
+## Author attestation in `podium sync`
+
+`podium sync` and `podium verify` check the author attestations of the
+records they load under a consumer trust policy (spec §4.7.11, §7.5). The
+registry verifies the attestations of a layer at ingest. The consumer check
+holds the registry to the signers that the consumer itself trusts, and it runs
+on the consumer's machine with its own trusted roots.
+
+### Policy sources
+
+The policy combines every source that sets one. No source replaces another.
+
+| Source | Kind | Settings |
+|:--|:--|:--|
+| The environment of the process | User source | `PODIUM_ATTESTATION_POLICY` (a default mode) and `PODIUM_ATTESTATION_POLICY_FILE` (a policy file, relative to the working directory) |
+| `~/.podium/sync.yaml` | User source | The `defaults.attestation` block |
+| The workspace `.podium/sync.yaml` and `.podium/sync.local.yaml` | Repository source | The `defaults.attestation` block |
+
+A default mode that a user source sets is a floor on every rule of a file that
+a workspace file names, so a committed `sync.yaml` adds requirements and lowers
+no mode. A workspace file cannot meet a `require` that the user sources set
+with its own signers.
+
+```yaml
+# ~/.podium/sync.yaml
+defaults:
+  attestation:
+    policy: require              # none | warn | require
+    policy_file: acme-policy.json # relative to this file's directory
+    trusted_root_file: github-root.json
+    root_max_age: 2160h
+    overlay: deny                # allow | deny
+    layer_roots:
+      team-agents: agents        # filesystem-source layer ID: signed root
+    pin_signers: true
+```
+
+- `trusted_root_file`, `root_max_age`, and `overlay` take effect from
+  `~/.podium/sync.yaml` alone. A workspace file that sets one of them is named
+  on standard error, and the key is ignored.
+- `pin_signers` takes effect when any file sets it to `true`. `layer_roots`
+  merges by layer ID, and the higher-precedence file wins for one ID.
+- A block that is not a mapping, a key of another name, and a value of another
+  type refuse the run with `config.attestation_policy_unavailable` and exit
+  status 2. So does a policy file that does not load, and
+  `podium sync --check` loads the policy as well.
+- The `public-good` root settings of the environment
+  (`PODIUM_ATTESTATION_TRUSTED_ROOT_FILE`, `PODIUM_SIGSTORE_ROOT_MAX_AGE`, and
+  `PODIUM_SIGSTORE_ROOT_REFRESH_TIMEOUT`) apply to every rule. Without them, a
+  rule that names `public-good` verifies under the root the run refreshes
+  through TUF into `~/.podium/sigstore/public-good/`, and the rules of the
+  policy file of `~/.podium/sync.yaml` use its `trusted_root_file` and
+  `root_max_age` when it sets them.
+
+A policy file is JSON: a `version` of `1`, optional `instances` with their
+trusted root files, and `rules`, each with `ids` patterns, a `mode`, and
+`requirements` in the form of a layer trust policy. Spec §4.7.11 *Consumer
+trust policy* states the format.
+
+```json
+{
+  "version": 1,
+  "instances": [
+    {"name": "github", "trusted_root_file": "github-root.json", "transparency_log": "none"}
+  ],
+  "rules": [
+    {"ids": ["personal/**"], "mode": "none"},
+    {
+      "ids": ["**"],
+      "mode": "require",
+      "requirements": [
+        {
+          "signers": [
+            {
+              "issuer": "https://token.actions.githubusercontent.com",
+              "identity": "https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main",
+              "source_repository_owner": "https://github.com/acme",
+              "source_repository_ref": "refs/heads/main",
+              "instance": "github"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+### What a run checks
+
+- **Every record.** The ID of each sync-manifest entry and each resource path
+  of a record meet the well-formed rule, and a server-source record answers the
+  ID the sync requested. A failure is `materialize.request_mismatch` under every
+  mode.
+- **Selected records under `warn` or `require`.** The attestation check runs on
+  each record that the run's scope selects. Against a server registry it
+  fetches the referenced bundles from `GET /v1/attestations/{digest}`.
+- **A filesystem registry.** The sync computes each package digest from the
+  files it reads, reads the layer's `.podium/attestations/` directory once under
+  `PODIUM_ATTESTATION_MAX_BYTES` and `PODIUM_ATTESTATION_MAX_BUNDLES`, and
+  requires a bundle from a signer of the artifact's own rule that lists the
+  layer subject with the layer digest. A layer signed under a root, as
+  `podium attest --root` signs it, needs a `layer_roots` entry, and otherwise
+  each artifact is refused with `materialize.attestation_mismatch` and the
+  constraint `layer_digest`.
+
+### Refused records
+
+A workspace sync writes nothing of a refused record, keeps the files and the
+lock entries that an earlier run wrote for its ID, writes every other record,
+and exits with status 1. The record is reported on standard error:
+
+```text
+rejected: finance/close/books (materialize.attestation_untrusted): materialize.attestation_untrusted (signer): no bundle is accepted for a signer of the requirement; the previous sync output was kept
+```
+
+Under `warn` the record is written, and the failure is a warning on standard
+error. A failure of the delivery check keeps its earlier outcome and fails the
+target before it writes.
+
+The workspace overlay is not checked. An overlay artifact for an ID that the
+user sources resolve to `require` is not applied, and the sync writes the
+registry's record of that ID under the check, unless `~/.podium/sync.yaml`
+sets `overlay: allow`.
+
+### The lock file
+
+The lock file records version 2. For an artifact whose check accepted a
+bundle, each lock entry records the package digest that the sync computed and
+the bundles that met a requirement, with the signer that the sync verified.
+Nothing is copied from the attestation members of a registry response.
+
+```yaml
+artifacts:
+  - id: finance/ap/pay-invoice
+    materialized_path: finance/ap/pay-invoice/ARTIFACT.md
+    package_digest: sha256:9f8e…
+    attestations:
+      - digest: sha256:5a6b…
+        predicate_type: https://slsa.dev/provenance/v1
+        signer:
+          instance: github
+          issuer: https://token.actions.githubusercontent.com
+          identity: https://github.com/acme/.github/.github/workflows/podium-attest.yml@refs/heads/main
+```
+
+A run names each artifact whose signers differ from those of its prior lock
+entries on standard error, `--dry-run` included. With `pin_signers: true`, such
+a change refuses the record with `materialize.attestation_untrusted` and the
+constraint `pinned_signer`. To accept a new signer, remove the artifact's
+entries from the lock, or run one sync without `pin_signers`.
+
+### `podium verify`
+
+`podium verify <artifact>` reports the request binding and the attestation
+check on standard output, apart from the delivery signature result on
+standard error. It loads the policy that `podium sync` loads, and it exits with
+status 1 when the binding or the delivery signature fails or the check refuses
+the record under `require`.
+
+```text
+request binding: ok
+attestation: mode require
+attestation: ok
+package_digest: sha256:9f8e…
+requirement 1: bundle sha256:5a6b… signer instance="github" issuer="https://token.actions.githubusercontent.com" identity="…" attested_time=2026-11-20T10:00:00Z
+```
