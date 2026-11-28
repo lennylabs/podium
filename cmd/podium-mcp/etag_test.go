@@ -99,7 +99,7 @@ func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 			w.Header().Set("X-Podium-Content-Hash", freshHash)
 			w.WriteHeader(http.StatusOK)
 		case http.MethodGet:
-			w.Header().Set("ETag", `"`+freshHash+`+feed"`)
+			w.Header().Set("ETag", `"`+freshHash+`+0123456789abcdef0123456789abcdef"`)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(respBody))
 		}
@@ -134,7 +134,7 @@ func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 		t.Errorf("manifest_body = %v, want fresh-body: %v", m["manifest_body"], m)
 	}
 	// Spec: §7.2 — the fresh record keeps the entity tag of its response.
-	if got := cache.validator(freshHash, "team/x"); got != `"`+freshHash+`+feed"` {
+	if got := cache.validator(freshHash, "team/x"); got != `"`+freshHash+`+0123456789abcdef0123456789abcdef"` {
 		t.Errorf("stored tag = %q", got)
 	}
 }

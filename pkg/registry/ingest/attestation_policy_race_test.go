@@ -2,11 +2,13 @@ package ingest_test
 
 import (
 	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	sh "github.com/lennylabs/podium/internal/testharness/sigstoreharness"
+	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 )
@@ -228,5 +230,38 @@ func TestAttestationPolicyRace_RestoredVersionDropsItsOldLinks(t *testing.T) {
 		if strings.HasPrefix(l, "finance/pay ") {
 			t.Errorf("the restored version kept %s", l)
 		}
+	}
+}
+
+// Spec: §4.7.11 (Verified links) — the policy a cycle's write compares is
+// the stored form of the policy the claim read, so an unchanged policy reads
+// as unchanged on SQLite for identities that the JSON encoder escapes or
+// replaces.
+func TestAttestationPolicyRace_UnchangedPolicyRoundTripsOnSQLite(t *testing.T) {
+	ctx := context.Background()
+	for name, ident := range map[string]string{"ascii": "alice@acme.com", "html": "<a&b>@acme.com", "invalid utf8": "al\xffice@acme.com", "line separator": "a b"} {
+		t.Run(name, func(t *testing.T) {
+			st, err := store.OpenSQLite(filepath.Join(t.TempDir(), "p.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = st.Close() })
+			if err := st.CreateTenant(ctx, store.Tenant{ID: "tenant-1", Name: "tenant-1"}); err != nil {
+				t.Fatal(err)
+			}
+			lc := store.LayerConfig{TenantID: "tenant-1", ID: "team", SourceType: "local", LocalPath: t.TempDir(), TrustMode: "require",
+				TrustRequirements: []store.TrustRequirement{{Signers: []store.TrustSigner{{Issuer: "https://i", Identity: ident, Instance: "github"}}}}}
+			if err := st.PutLayerConfig(ctx, lc); err != nil {
+				t.Fatal(err)
+			}
+			claim, _, claimed, err := ingest.ClaimLayer(ctx, st, "tenant-1", "team")
+			if err != nil {
+				t.Fatal(err)
+			}
+			p := store.PolicyOf(claimed)
+			if _, err := st.WriteAttestations(ctx, "tenant-1", "team", claim, store.AttestationWrites{Policy: &p}); err != nil {
+				t.Errorf("an unchanged policy %q: %v", ident, err)
+			}
+		})
 	}
 }

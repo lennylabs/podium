@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -197,33 +198,88 @@ func TestTrustPolicyChangeHook(t *testing.T) {
 	trustPolicyChangeHook(errListLinks{st}, &ingest.AttestationConfig{}, nil, nil, nil)(ctx, lc, "alice")
 }
 
+// errListTenants fails the tenant list.
+type errListTenants struct{ store.Store }
+
+func (errListTenants) ListTenants(context.Context) ([]store.Tenant, error) {
+	return nil, errors.New("store down")
+}
+
 // Spec: §4.7.11 (Re-evaluation) — the hook requests an ingest cycle of the
-// changed layer, which runs outside the request and logs a failure; the
-// start re-evaluates the stored layers of each tenant and logs a failure.
-func TestTrustPolicyChangeReingestAndStart(t *testing.T) {
+// changed layer through the queue, which keeps at most one request of a
+// layer waiting behind the running one, logs a failure only while the run
+// context lives, and lets a shutdown wait for the cycles in flight.
+func TestReingestQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var ran []string
+	q := newReingestQueue(ctx, func(_ context.Context, lc store.LayerConfig) error {
+		mu.Lock()
+		ran = append(ran, lc.ID+"@"+lc.TrustMode)
+		first := len(ran) == 1
+		mu.Unlock()
+		if first {
+			<-release
+		}
+		return errors.New("source down")
+	})
+	st := store.NewMemory()
+	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, nil, nil, q.request)(ctx, store.LayerConfig{TenantID: "t", ID: "L", TrustMode: "none"}, "alice")
+	for _, mode := range []string{"warn", "require", "none"} {
+		q.request(store.LayerConfig{TenantID: "t", ID: "L", TrustMode: mode})
+	}
+	close(release)
+	if !q.wait(5 * time.Second) {
+		t.Fatal("the queue did not drain")
+	}
+	mu.Lock()
+	got := strings.Join(ran, ",")
+	mu.Unlock()
+	if got != "L@none,L@none" {
+		t.Errorf("cycles %s, want the first and the last request", got)
+	}
+	// A cycle cancelled by the shutdown logs nothing, and wait gives up at
+	// its deadline.
+	block := make(chan struct{})
+	q2 := newReingestQueue(ctx, func(ctx context.Context, _ store.LayerConfig) error {
+		<-block
+		return ctx.Err()
+	})
+	q2.request(store.LayerConfig{TenantID: "t", ID: "M"})
+	if q2.wait(10 * time.Millisecond) {
+		t.Error("wait returned before the cycle ended")
+	}
+	cancel()
+	close(block)
+	if !q2.wait(5 * time.Second) {
+		t.Error("the cancelled queue did not drain")
+	}
+}
+
+// Spec: §4.7.11 (Re-evaluation), §13.10 — the start re-evaluates the stored
+// layers of each tenant, and a start that cannot read the tenants of a
+// multi-tenant registry, or cannot complete the re-evaluation, fails.
+func TestReevaluateAtStart(t *testing.T) {
 	ctx := context.Background()
 	st := store.NewMemory()
 	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
 		t.Fatal(err)
 	}
-	ran := make(chan string, 2)
-	reingest := backgroundReingest(ctx, func(_ context.Context, lc store.LayerConfig) error {
-		ran <- lc.ID
-		return errors.New("source down")
-	})
-	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, nil, nil, reingest)(ctx, store.LayerConfig{TenantID: "t", ID: "L", TrustMode: "none"}, "alice")
-	select {
-	case id := <-ran:
-		if id != "L" {
-			t.Errorf("reingest of %s", id)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the hook requested no ingest cycle")
-	}
 	if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x", TrustMode: "none"}); err != nil {
 		t.Fatal(err)
 	}
-	sink := &recordingSink{}
-	reevaluateAtStart(ctx, st, []string{"t"}, &ingest.AttestationConfig{}, sink, nil)
-	reevaluateAtStart(ctx, errListLinks{st}, []string{"t"}, &ingest.AttestationConfig{}, nil, nil)
+	att := &ingest.AttestationConfig{}
+	if err := reevaluateAtStart(ctx, st, false, "t", att, &recordingSink{}, nil); err != nil {
+		t.Errorf("single tenant: %v", err)
+	}
+	if err := reevaluateAtStart(ctx, st, true, "", att, nil, nil); err != nil {
+		t.Errorf("multi-tenant: %v", err)
+	}
+	if err := reevaluateAtStart(ctx, errListTenants{st}, true, "", att, nil, nil); err == nil || !strings.Contains(err.Error(), "read the tenants") {
+		t.Errorf("unreadable tenants: %v", err)
+	}
+	if err := reevaluateAtStart(ctx, errListLinks{st}, false, "t", att, nil, nil); err == nil || !strings.Contains(err.Error(), "tenant t") {
+		t.Errorf("unreadable links: %v", err)
+	}
 }

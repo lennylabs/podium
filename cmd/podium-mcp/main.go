@@ -1519,6 +1519,12 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		}
 	}
 	body, etag, notModified, err := s.fetchJSONConditional("/v1/load_artifact", args, s.cache.validator(condHash, id))
+	// Spec: §7.2 — a 304 whose entity tag names another content hash does not
+	// confirm the cached record, so it is a miss answered with a full load.
+	if err == nil && notModified && etag != "" && !tagNamesHash(etag, condHash) {
+		notModified = false
+		body, etag, _, err = s.fetchJSONConditional("/v1/load_artifact", args, "")
+	}
 	if err == nil && notModified {
 		// Revalidated: restart the `latest` TTL window once the cached
 		// record passes verification.
@@ -2819,7 +2825,7 @@ func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNon
 		// §12: the registry confirmed the cached content hash is current.
 		_, _ = io.Copy(io.Discard, resp.Body)
 		s.recordSuccess(time.Now())
-		return nil, "", true, nil
+		return nil, resp.Header.Get("ETag"), true, nil
 	}
 	body, err = io.ReadAll(resp.Body)
 	if err != nil {
@@ -3146,11 +3152,36 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 		"deprecated":          boolFile(d.Deprecated),
 		"replaced_by":         d.ReplacedBy,
 		"deprecation_warning": d.DeprecationWarning,
-		"etag":                d.ETag,
 	} {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
 			return err
 		}
+	}
+	// The entity tag is written through a temporary file and a rename, so a
+	// reader never sees a partial tag.
+	return writeFileAtomic(filepath.Join(dir, "etag"), []byte(d.ETag))
+}
+
+// writeFileAtomic writes data to path through a temporary file in the same
+// directory and a rename.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		return err
 	}
 	return nil
 }
@@ -3168,17 +3199,49 @@ func boolFile(b bool) string {
 // record under hash: the entity tag the registry returned with it, or the
 // content-hash entity tag for a record cached before the cache kept the tag.
 // The registry's tag of a version that carries attestation members covers
-// them, so only the stored tag can be answered 304 for such a version.
+// them, so only the stored tag can be answered 304 for such a version. A
+// kept tag is sent only in a form the registry writes for hash: a planted
+// `*` would be answered 304 whatever the registry now resolves, and a tag
+// with a line break would fail the request.
 //
 // Spec: §7.2
 func (c *contentCache) validator(hash, id string) string {
 	if c.dir != "" && hash != "" {
 		b, err := os.ReadFile(filepath.Join(c.dir, sanitizeHash(hash), "delivery", deliverySegment(id), "etag"))
-		if err == nil && len(b) > 0 {
+		if err == nil && tagNamesHash(string(b), hash) {
 			return string(b)
 		}
 	}
 	return contentHashETag(hash)
+}
+
+// tagNamesHash reports whether tag is the entity tag the registry writes for
+// a version with content hash hash: "<hash>", or "<hash>+" followed by 32
+// lowercase hexadecimal digits.
+//
+// Spec: §7.2
+func tagNamesHash(tag, hash string) bool {
+	plain := contentHashETag(hash)
+	if plain == "" {
+		return false
+	}
+	if tag == plain {
+		return true
+	}
+	prefix := strings.TrimSuffix(plain, `"`) + "+"
+	if !strings.HasPrefix(tag, prefix) || !strings.HasSuffix(tag, `"`) {
+		return false
+	}
+	fp := tag[len(prefix) : len(tag)-1]
+	if len(fp) != 32 {
+		return false
+	}
+	for _, c := range fp {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // hasDeprecationWarning reports whether the cached record of id under hash
