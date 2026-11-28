@@ -90,7 +90,7 @@ func resolveAttestation(f AttestationFunc) (*Attestation, error) {
 		return &Attestation{}, nil
 	}
 	for _, id := range slices.Sorted(maps.Keys(att.LayerRoots)) {
-		if _, err := attest.LayerSubjectName(att.LayerRoots[id]); err != nil {
+		if _, err := attest.CheckLayerRoot(att.LayerRoots[id]); err != nil {
 			return nil, &AttestationConfigError{Err: fmt.Errorf("%s: defaults.attestation.layer_roots: layer %q: %w",
 				attest.CodePolicyUnavailable, id, err)}
 		}
@@ -157,8 +157,8 @@ func (l *fsLayer) attestation(att *Attestation) *attest.LocalLayer {
 		return l.local
 	}
 	local := &attest.LocalLayer{}
-	// resolveAttestation refused a root with no subject name, so the name
-	// is always set.
+	// resolveAttestation refused a root that CheckLayerRoot refuses, so the
+	// name is always set.
 	local.SubjectName, _ = attest.LayerSubjectName(att.LayerRoots[l.layer.ID])
 	if in, err := filesystem.LayerDigestInput(l.records, l.fsys); err == nil {
 		local.Digest = attest.LayerDigest(in)

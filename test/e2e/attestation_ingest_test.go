@@ -42,11 +42,18 @@ func attestedLayerServer(t *testing.T) (*serverProc, string, *sh.Harness) {
 // harness clock.
 func signE2ELayer(t *testing.T, h *sh.Harness, dir string, offset time.Duration) {
 	t.Helper()
+	signE2ELayerNamed(t, h, dir, ".podium/layer", offset)
+}
+
+// signE2ELayerNamed is signE2ELayer with the layer subject named layerName,
+// as a layer signed under a root lists it.
+func signE2ELayerNamed(t *testing.T, h *sh.Harness, dir, layerName string, offset time.Duration) {
+	t.Helper()
 	content, err := filesystem.LayerContent(filesystem.Layer{ID: "finance", Path: dir})
 	if err != nil {
 		t.Fatal(err)
 	}
-	subjects := []sh.Subject{{Name: ".podium/layer", SHA256: strings.TrimPrefix(attest.LayerDigest(content), "sha256:")}}
+	subjects := []sh.Subject{{Name: layerName, SHA256: strings.TrimPrefix(attest.LayerDigest(content), "sha256:")}}
 	for _, s := range content.Subjects {
 		subjects = append(subjects, sh.Subject{Name: s.Name, SHA256: strings.TrimPrefix(s.Digest, "sha256:")})
 	}

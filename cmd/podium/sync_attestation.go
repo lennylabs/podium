@@ -132,7 +132,7 @@ func loadSyncAttestation(in syncAttestationInputs) (*sync.Attestation, error) {
 		// A root file the environment names refuses the invocation when it
 		// cannot be read, whether or not a rule names public-good.
 		if _, err := b.environmentRoot(); err != nil {
-			return nil, err
+			return nil, policyUnavailable("%s: %v", attestRootFileEnv, err)
 		}
 	}
 	return att, nil
