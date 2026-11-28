@@ -1611,6 +1611,13 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
 		return
 	}
+	// spec: §7.3.1 (Patch semantics on the update body) — an update that
+	// names the requirements it expects to replace applies only while the
+	// layer stores them, so a raced replacement drops no requirement.
+	if status, msg, details := expectedRequirementsError(body, cfg); msg != "" {
+		writeErrorDetails(w, status, "registry.invalid_argument", msg, details)
+		return
+	}
 	usernameSent, err := carriesRepoUsername(body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "registry.invalid_argument", err.Error())
@@ -1757,7 +1764,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// with the unchanged layer object and leaves the audit stream reporting
 	// only changes that happened.
 	if layerConfigEqual(before, cfg) {
-		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)})
+		writeJSON(w, http.StatusOK, LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.responseWarnings(cfg)})
 		return
 	}
 	// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that
@@ -1778,7 +1785,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// records the visibility written against the visibility it replaced.
 	e.emitLayerEvent(r, prior, stored, "update", trustEventFields(before, cfg))
 	e.afterTrustWrite(r, before, true, cfg)
-	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
+	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.responseWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
@@ -2129,7 +2136,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register", trustEventFields(prior, cfg))
 	e.afterTrustWrite(r, prior, exists, cfg)
 
-	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
+	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.responseWarnings(cfg)}
 	if cfg.SourceType == "git" {
 		resp.WebhookURL = e.webhookURL(cfg.TenantID, cfg.ID)
 		resp.WebhookSecret = cfg.WebhookSecret

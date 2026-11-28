@@ -205,32 +205,39 @@ func (f *trustFlags) fileMember(out map[string]any, binding []string) (map[strin
 // update when the layer stores more than one requirement, because the
 // replacement would drop the additional requirements, or when the read
 // fails or does not return the layer. A layer with several requirements is
-// updated with --trust-requirements-file.
+// updated with --trust-requirements-file. It returns the requirements it
+// read, which the update sends as expected_trust_requirements so a
+// requirement another writer adds between the read and the update makes the
+// registry refuse it; nil when the flags send no requirement.
 //
-// Spec: §7.3.1 (Layer CLI)
-func (f *trustFlags) checkSingleRequirement(registry, id string) error {
+// Spec: §7.3.1 (Layer CLI, Patch semantics on the update body)
+func (f *trustFlags) checkSingleRequirement(registry, id string) (json.RawMessage, error) {
 	if len(f.signers) == 0 {
-		return nil
+		return nil, nil
 	}
 	out, status := doJSON(registry+"/v1/layers", "GET", nil)
 	if status >= 400 {
-		return fmt.Errorf("read layer %s before replacing its requirements: HTTP %d", id, status)
+		return nil, fmt.Errorf("read layer %s before replacing its requirements: HTTP %d", id, status)
 	}
 	raw, err := findLayerObject(out, id)
 	if err != nil {
-		return fmt.Errorf("read layer %s before replacing its requirements: %w", id, err)
+		return nil, fmt.Errorf("read layer %s before replacing its requirements: %w", id, err)
 	}
 	var l struct {
 		TrustRequirements []json.RawMessage `json:"trust_requirements"`
 	}
 	if err := json.Unmarshal(raw, &l); err != nil {
-		return fmt.Errorf("decode the trust_requirements of layer %s: %w", id, err)
+		return nil, fmt.Errorf("decode the trust_requirements of layer %s: %w", id, err)
 	}
 	if n := len(l.TrustRequirements); n > 1 {
-		return fmt.Errorf("layer %s stores %d trust requirements, and --trust-signer would replace them with one; "+
+		return nil, fmt.Errorf("layer %s stores %d trust requirements, and --trust-signer would replace them with one; "+
 			"edit the file `podium layer show %s --requirements` writes and send it with --trust-requirements-file", id, n, id)
 	}
-	return nil
+	expected, err := json.Marshal(l.TrustRequirements)
+	if err != nil {
+		return nil, fmt.Errorf("encode the trust_requirements of layer %s: %w", id, err)
+	}
+	return expected, nil
 }
 
 // layerShow prints the layer object with the given ID from the layer read,

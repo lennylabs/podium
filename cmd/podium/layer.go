@@ -187,9 +187,13 @@ func layerUpdate(args []string) int {
 		fmt.Fprintln(os.Stderr, "error: at least one mutable field must be provided")
 		return 2
 	}
-	if err := trust.checkSingleRequirement(*registry, *id); err != nil {
+	expected, err := trust.checkSingleRequirement(*registry, *id)
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
+	}
+	if expected != nil {
+		body["expected_trust_requirements"] = expected
 	}
 	out, status := doJSON(*registry+"/v1/layers/update?id="+*id, "PUT", body)
 	if status >= 400 {
