@@ -225,7 +225,7 @@ func withoutVar(env []string, key string) []string {
 func startMCP(t *testing.T, env []string, unset ...string) *mcpProc {
 	t.Helper()
 	home := cmdharness.IsolatedHome(t)
-	cmd := exec.Command(cmdharness.Bin(t, "podium-mcp"))
+	cmd := exec.Command(cmdharness.Bin(t, "podium-mcp"), mcpSeamArgs(t)...)
 	cmd.Dir = home
 	full := mergeEnv(withIsolatedHome(env, home)...)
 	for _, key := range unset {
@@ -411,7 +411,7 @@ func TestAuditSink_MCPFlushesOnErrorExit(t *testing.T) {
 		"params": map[string]any{"name": "search_artifacts", "arguments": map[string]any{"query": "q-error"}}})
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, cmdharness.Bin(t, "podium-mcp"))
+	cmd := exec.CommandContext(ctx, cmdharness.Bin(t, "podium-mcp"), mcpSeamArgs(t)...)
 	cmd.Dir = home
 	cmd.Env = mergeEnv(withIsolatedHome(mcpEnv(t, "PODIUM_AUDIT_SINK="+rcv.URL()), home)...)
 	cmd.Stdin = bytes.NewReader(append(req, '\n'))

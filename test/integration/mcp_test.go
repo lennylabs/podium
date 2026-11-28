@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"encoding/json"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/internal/testharness/cmdharness"
 	"github.com/lennylabs/podium/internal/testharness/registryharness"
 )
 
@@ -44,7 +46,7 @@ func TestPodiumMCP_InitializeReturnsCapabilities(t *testing.T) {
 	h := registryharness.New(t)
 
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1},
@@ -73,7 +75,7 @@ func TestPodiumMCP_ToolsListReturnsMetaTools(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/list", ID: 1},
@@ -102,7 +104,7 @@ func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
 	t.Parallel()
 	bin := buildMCP(t)
 	dir := t.TempDir()
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	// An absolute filesystem path is a §7.5.2 filesystem source.
 	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+dir)
 	// No stdin is consumed: the bridge must reject the config before serving.
@@ -131,7 +133,7 @@ func TestPodiumMCP_RejectsFilesystemRegistry(t *testing.T) {
 func TestPodiumMCP_RejectsUnknownHarness(t *testing.T) {
 	t.Parallel()
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY=http://127.0.0.1:1", // server source so only the harness is at fault
@@ -169,7 +171,7 @@ func TestPodiumMCP_ToolsListDescriptionsSchemasAndInstructions(t *testing.T) {
 	t.Parallel()
 	h := registryharness.New(t)
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1, Params: map[string]any{"protocolVersion": "2024-11-05"}},
@@ -256,7 +258,7 @@ func TestPodiumMCP_ToolsCallProxiesSearchArtifacts(t *testing.T) {
 		},
 	)
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL)
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "tools/call", ID: 1, Params: map[string]any{
@@ -326,7 +328,7 @@ func TestPodiumMCP_ResourcesMirror(t *testing.T) {
 		},
 	)
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env, "PODIUM_VERIFY_SIGNATURES=never", "PODIUM_REGISTRY="+h.URL, "PODIUM_CACHE_DIR="+t.TempDir())
 	cmd.Stdin = bytes.NewReader(newlineDelimitedRequests([]rpcCall{
 		{Method: "initialize", ID: 1, Params: map[string]any{"protocolVersion": "2024-11-05"}},
@@ -388,16 +390,22 @@ func TestPodiumMCP_ResourcesMirror(t *testing.T) {
 	}
 }
 
+// buildMCP returns the podium-mcp binary the command harness builds with
+// the podiumtest tag, which defines the hidden flags mcpSeamArgs passes.
 func buildMCP(t testing.TB) string {
 	t.Helper()
-	tmp := t.TempDir()
-	bin := tmp + "/podium-mcp"
-	cmd := exec.Command("go", "build", "-o", bin, "./cmd/podium-mcp")
-	cmd.Dir = repoRoot(t)
-	if buf, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("build podium-mcp: %v\n%s", err, buf)
-	}
-	return bin
+	return cmdharness.Bin(t, "podium-mcp")
+}
+
+// mcpSeamArgs are the hidden flags of a podiumtest build that replace the
+// account home and the machine file directory with directories of the
+// test, so a podium-mcp process reads no ~/.podium/sync.yaml of the
+// developer or the CI runner and no /etc/podium/sync.yaml (§4.7.11 Test
+// seam). The account home is the isolated HOME of the test.
+func mcpSeamArgs(t testing.TB) []string {
+	t.Helper()
+	home := cmdharness.IsolatedHome(t)
+	return []string{"--test-account-home", home, "--test-machine-config-dir", filepath.Join(home, ".no-machine-config")}
 }
 
 func repoRoot(t testing.TB) string {

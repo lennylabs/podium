@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/sign"
+	"github.com/lennylabs/podium/pkg/version"
 )
 
 // vectorFile is the cross-language §4.7.10 vector file the Go suite under
@@ -84,7 +85,11 @@ func TestDeliveryVectors_MCP(t *testing.T) {
 			dest := t.TempDir()
 			s := newTestServer(t, &config{harness: "none", materializeRoot: dest, verifyPolicy: sign.PolicyAlways, verifier: verifier})
 			s.http = &http.Client{Transport: objects}
-			out := s.deliverFreshLoad(body, "", map[string]any{"id": "acme/vector", "version": "1.0.0", "destination": dest}, time.Now())
+			// The request names the vector's own ID and version, so the
+			// §4.7.11 request binding passes and the case tests the
+			// §4.7.10 procedure alone.
+			id, ver := vectorRequest(body)
+			out := s.deliverFreshLoad(body, "", map[string]any{"id": id, "version": ver, "destination": dest}, time.Now())
 			got := errorMessageText(out)
 			if tc.Outcome == "ok" {
 				if got != "" {
@@ -113,4 +118,18 @@ func decodeVectorBytes(t *testing.T, s string) []byte {
 		t.Fatalf("decode vector bytes: %v", err)
 	}
 	return b
+}
+
+// vectorRequest returns the id and version members of a vector body, the
+// request the body answers. A body that does not decode yields an ID that
+// the request binding refuses, which no ok case carries.
+func vectorRequest(body []byte) (string, string) {
+	m, err := version.DecodeJSONObject(body)
+	if err != nil {
+		return "acme/vector", ""
+	}
+	var id, ver string
+	_ = json.Unmarshal(m["id"], &id)
+	_ = json.Unmarshal(m["version"], &ver)
+	return id, ver
 }

@@ -146,7 +146,7 @@ func TestLoadConfig_MissingRegistryErrors(t *testing.T) {
 	// cannot resolve a registry from a real ~/.podium/sync.yaml.
 	hermetic(t)
 	t.Setenv("PODIUM_REGISTRY", "")
-	_, err := loadConfig()
+	_, err := loadConfig(testPaths(t))
 	if err == nil {
 		t.Fatalf("missing PODIUM_REGISTRY: no error")
 	}
@@ -162,7 +162,7 @@ func TestLoadConfig_BadCacheModeErrors(t *testing.T) {
 	t.Setenv("PODIUM_REGISTRY", "http://127.0.0.1:1")
 	t.Setenv("PODIUM_CACHE_MODE", "bogus")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
-	if _, err := loadConfig(); err == nil {
+	if _, err := loadConfig(testPaths(t)); err == nil {
 		t.Errorf("bad cache mode: no error")
 	}
 }
@@ -172,7 +172,7 @@ func TestLoadConfig_Defaults(t *testing.T) {
 	t.Setenv("PODIUM_CACHE_MODE", "")
 	t.Setenv("PODIUM_HARNESS", "")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(testPaths(t))
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}
@@ -189,7 +189,7 @@ func TestLoadConfig_TokenEnvIndirection(t *testing.T) {
 	t.Setenv("PODIUM_SESSION_TOKEN_ENV", "MY_HOST_TOKEN")
 	t.Setenv("MY_HOST_TOKEN", "from-named-env")
 	t.Setenv("PODIUM_VERIFY_SIGNATURES", "never")
-	cfg, err := loadConfig()
+	cfg, err := loadConfig(testPaths(t))
 	if err != nil {
 		t.Fatalf("loadConfig: %v", err)
 	}

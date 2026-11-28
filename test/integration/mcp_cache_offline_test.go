@@ -24,7 +24,7 @@ func loadArtifactOver(t *testing.T, registry, cacheDir string, extraEnv ...strin
 // in-process state such as the bridge's session ID does not carry over.
 func loadArtifactWith(t *testing.T, bin, registry, cacheDir string, args map[string]any, extraEnv ...string) map[string]any {
 	t.Helper()
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+registry,

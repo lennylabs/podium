@@ -57,7 +57,7 @@ func TestPodiumMCP_ContentHashMismatchRejected(t *testing.T) {
 
 	target := t.TempDir()
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+reg.URL,
@@ -221,7 +221,7 @@ func TestPodiumMCP_SynthesizedSkillDeliveryHashVerifies(t *testing.T) {
 func runMCPLoad(t *testing.T, regURL, target, id string) mcpResult {
 	t.Helper()
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+regURL,
@@ -297,7 +297,7 @@ func TestPodiumMCP_LargeResourceFetchSendsToken(t *testing.T) {
 	}
 	target := t.TempDir()
 	bin := buildMCP(t)
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin, mcpSeamArgs(t)...)
 	cmd.Env = append(cmd.Env,
 		"PODIUM_VERIFY_SIGNATURES=never",
 		"PODIUM_REGISTRY="+reg.URL,

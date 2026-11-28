@@ -84,10 +84,13 @@ func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 	t.Parallel()
 	const cachedFM = "---\ntype: agent\nversion: 1.0.0\n---\n"
 	cachedHash := "sha256:" + version.CanonicalContentHash([]byte(cachedFM), nil, nil)
-	const freshFM = "---\ntype: agent\nversion: 2.0.0\n---\n"
+	// The fresh record answers the same pin: the registry re-ingested the
+	// version with another document (§4.7.11 binds the served version to
+	// the pin).
+	const freshFM = "---\ntype: agent\nversion: 1.0.0\ndescription: fresh\n---\n"
 	freshHash := "sha256:" + version.CanonicalContentHash([]byte(freshFM), nil, nil)
 	respBody := loadArtifactJSON(t, map[string]any{
-		"id": "team/x", "type": "agent", "version": "2.0.0",
+		"id": "team/x", "type": "agent", "version": "1.0.0",
 		"content_hash": freshHash, "manifest_body": "fresh-body", "frontmatter": freshFM,
 	})
 
