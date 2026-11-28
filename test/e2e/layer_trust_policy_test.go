@@ -117,6 +117,10 @@ func TestLayerTrust_StartRefusals(t *testing.T) {
 		{"declared misspelled signer key", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com, instance_name: github}]\n", "", `holds the key "instance_name"`},
 		{"declared misspelled layer key", "      trust-mode: require\n", "", `the key "trust-mode" (line 7) is not a trust policy member`},
 		{"invalid default", "", "enforce", `PODIUM_LAYER_TRUST_DEFAULT must be none, warn, or require, got "enforce"`},
+		{"declared several unmarked", "      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n        - signers: [{issuer: i, identity: scanner@acme.com}]\n", "",
+			"declared layer finance: layer trust policy: trust_requirements holds 2 requirements and 0 of them set covers_layer"},
+		{"declared unknown type", "      trust_mode: warn\n      trust_requirements:\n        - signers: [{issuer: i, identity: alice@acme.com}]\n      trust_require_types: [hooks]\n", "",
+			`trust_require_types[0] "hooks" is not an artifact type this registry knows`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -177,4 +181,49 @@ func TestLayerTrust_StartWarningAndDeclaredPolicy(t *testing.T) {
 	cliContains(t, res.Stderr, "resolves to require through PODIUM_LAYER_TRUST_DEFAULT", "default refusal")
 	res = runPodium(t, "", env, "layer", "register", "--id", "scratch", "--local", root, "--trust", "none")
 	cliWantExit(t, res, 0, "registration with an explicit none")
+}
+
+// Spec: §7.3.1 (Layer CLI), §4.7.11 (Layer trust policy) — a policy of
+// several requirements written with `podium layer show --requirements` and
+// sent back with --trust-requirements-file round-trips through the binary
+// with its covering and optional markers and the listed types; an update
+// with --trust-signer over several requirements exits 1 and changes nothing.
+// A declared policy of several requirements is seeded at the start.
+func TestLayerTrust_CLISeveralRequirements(t *testing.T) {
+	t.Parallel()
+	home := t.TempDir()
+	cfgPath := writeTrustRegistryYAML(t, home, "      trust_mode: warn\n      trust_require_types: [hook]\n      trust_requirements:\n"+
+		"        - signers: [{issuer: i, identity: alice@acme.com}]\n          covers_layer: true\n"+
+		"        - signers: [{issuer: i, identity: scanner@acme.com}]\n          predicate_type: https://acme.com/scan/v1\n          optional: true\n")
+	srv := startServerArgs(t, []string{"HOME=" + home, "PODIUM_CONFIG_FILE=" + cfgPath, "PODIUM_INGEST_OFFLINE=true"}, "serve", "--standalone")
+	obj := shownLayer(t, srv.BaseURL, "finance")
+	if reqs, _ := obj["trust_requirements"].([]any); len(reqs) != 2 || mustJSON(obj["trust_require_types"]) != `["hook"]` ||
+		!strings.Contains(mustJSON(reqs[1]), `"optional":true`) {
+		t.Fatalf("declared policy = %v %v", obj["trust_requirements"], obj["trust_require_types"])
+	}
+	env := brEnv(srv.BaseURL)
+	res := runPodium(t, "", env, "layer", "show", "finance", "--requirements")
+	cliWantExit(t, res, 0, "show --requirements")
+	file := filepath.Join(t.TempDir(), "requirements.json")
+	if err := os.WriteFile(file, []byte(res.Stdout), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	res = runPodium(t, "", env, "layer", "register", "--id", "copy", "--local", t.TempDir(), "--trust", "warn",
+		"--trust-requirements-file", file, "--trust-require-type", "hook", "--trust-require-type", "mcp-server")
+	cliWantExit(t, res, 0, "register from a requirements file")
+	obj = shownLayer(t, srv.BaseURL, "copy")
+	if reqs, _ := obj["trust_requirements"].([]any); len(reqs) != 2 || mustJSON(obj["trust_require_types"]) != `["hook","mcp-server"]` ||
+		!strings.Contains(mustJSON(reqs[0]), `"covers_layer":true`) {
+		t.Fatalf("registered policy = %v %v", obj["trust_requirements"], obj["trust_require_types"])
+	}
+	res = runPodium(t, "", env, "layer", "update", "--id", "copy", "--trust-signer", "i=bob@acme.com")
+	cliWantExit(t, res, 1, "a signer update over several requirements")
+	cliContains(t, res.Stderr, "stores 2 trust requirements", "several requirements refusal")
+	res = runPodium(t, "", env, "layer", "update", "--id", "copy", "--clear-trust-require-types")
+	cliWantExit(t, res, 0, "clear the listed types")
+	if obj = shownLayer(t, srv.BaseURL, "copy"); obj["trust_require_types"] != nil || len(obj["trust_requirements"].([]any)) != 2 {
+		t.Errorf("after the updates: %v %v", obj["trust_requirements"], obj["trust_require_types"])
+	}
+	res = runPodium(t, "", env, "layer", "register", "--id", "bad", "--local", t.TempDir(), "--trust-requirements-file", file, "--trust-any-ref")
+	cliWantExit(t, res, 2, "a requirements file beside a binding flag")
 }
