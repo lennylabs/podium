@@ -120,9 +120,6 @@ func loadSyncAttestation(in syncAttestationInputs) (*sync.Attestation, error) {
 		return nil, err
 	}
 	for _, blk := range blocks {
-		for id, root := range blk.LayerRoots {
-			att.LayerRoots[id] = root
-		}
 		att.PinSigners = att.PinSigners || blk.PinSigners
 	}
 	if att.Policy, err = attest.NewPolicy(b.sources...); err != nil {
@@ -173,7 +170,12 @@ func (b *syncPolicyBuilder) files(att *sync.Attestation) ([]*sync.AttestationBlo
 			if err := b.addBlock(blk, attest.UserSource, b.userRoot(blk)); err != nil {
 				return nil, err
 			}
+			// Spec: §7.5 (Author attestation) — overlay and layer_roots
+			// take effect from the user's file alone.
 			att.Overlay = blk.Overlay
+			for id, root := range blk.LayerRoots {
+				att.LayerRoots[id] = root
+			}
 			blocks = append(blocks, blk)
 		}
 	}
@@ -205,12 +207,14 @@ func (b *syncPolicyBuilder) files(att *sync.Attestation) ([]*sync.AttestationBlo
 }
 
 // ignoreUserOnlyKeys names on standard error the keys that take effect from
-// the user's sync.yaml alone, which a workspace file sets.
+// the user's sync.yaml alone, which a workspace file sets. layer_roots is
+// one of them: a repository that maps a layer to another root would make
+// the signed content of that root meet a user's require.
 func (b *syncPolicyBuilder) ignoreUserOnlyKeys(blk *sync.AttestationBlock) {
 	for _, k := range []struct {
 		name string
 		set  bool
-	}{{"trusted_root_file", blk.TrustedRootFile != ""}, {"root_max_age", blk.RootMaxAgeSet}, {"overlay", blk.Overlay != ""}} {
+	}{{"trusted_root_file", blk.TrustedRootFile != ""}, {"root_max_age", blk.RootMaxAgeSet}, {"overlay", blk.Overlay != ""}, {"layer_roots", len(blk.LayerRoots) > 0}} {
 		if k.set {
 			_, _ = fmt.Fprintf(b.in.stderr, "warning: %s: defaults.attestation.%s takes effect from ~/.podium/sync.yaml alone and is ignored here\n", blk.Path, k.name)
 		}

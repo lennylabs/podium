@@ -18,7 +18,9 @@ import (
 // under the consumer trust policy that podium sync loads, reporting the
 // result on w apart from the delivery signature result. It returns the exit
 // status of this part: 0 when the binding passes and the check does not
-// refuse the record, a failure under warn included, and 1 otherwise.
+// refuse the record, a failure under warn included, and 1 otherwise. A
+// response the §4.7.10 decoding refuses cannot be bound to the request, so
+// it returns 1 under every mode.
 //
 // Spec: §4.7.9, §4.7.11 (Request binding, Attestation check), §7.5 (Author
 // attestation)
@@ -27,18 +29,15 @@ func verifyAttestation(w io.Writer, att *sync.Attestation, registry, artifact st
 	defer cancel()
 	token := readCLIToken(registry)
 	served, err := sync.DecodeServed(ctx, doJSONClient, token, body)
-	res := attest.Result{}
-	if att.Policy != nil {
-		res.Resolution = att.Policy.Resolve(artifact)
-	}
-	mode := res.Resolution.Mode
-	if mode == "" {
-		mode = attest.ModeNone
-	}
 	if err != nil {
-		// The record does not decode, so neither the binding nor the check
-		// can read it; the delivery part keeps its own result.
-		return reportUndecodable(w, mode, err)
+		// The record does not decode, so the binding cannot run; the
+		// delivery part keeps its own result.
+		_, _ = fmt.Fprintf(w, "request binding: refused: the response does not decode: %v\n", err)
+		return 1
+	}
+	mode := attest.ModeNone
+	if att.Policy != nil {
+		mode = att.Policy.Resolve(artifact).Mode
 	}
 	if err := sync.BindServed(artifact, served.Record); err != nil {
 		_, _ = fmt.Fprintf(w, "request binding: refused: %v\n", err)
@@ -54,29 +53,12 @@ func verifyAttestation(w io.Writer, att *sync.Attestation, registry, artifact st
 			r.Header.Set(audit.ClientHeader, cliClientHeader())
 		},
 	})
-	res, err = checker.Verify(ctx, attest.Delivery{Request: attest.Request{ID: artifact}, Served: served})
+	res, err := checker.Verify(ctx, attest.Delivery{Request: attest.Request{ID: artifact}, Served: served})
 	if err != nil {
 		_, _ = fmt.Fprintf(w, "attestation: mode %s\nattestation: refused: %v\n", mode, err)
 		return 1
 	}
 	reportAttestationResult(w, mode, res)
-	return 0
-}
-
-// reportUndecodable reports a record that the §4.7.10 decoding refuses: a
-// refusal of the check under require, a warning under warn, and no check
-// under none.
-func reportUndecodable(w io.Writer, mode attest.Mode, err error) int {
-	_, _ = fmt.Fprintf(w, "attestation: mode %s\n", mode)
-	switch mode {
-	case attest.ModeRequire:
-		_, _ = fmt.Fprintf(w, "attestation: refused: %v\n", err)
-		return 1
-	case attest.ModeWarn:
-		_, _ = fmt.Fprintf(w, "attestation: warning: %v\n", err)
-	default:
-		_, _ = fmt.Fprintln(w, "attestation: not checked: the ID resolves to none")
-	}
 	return 0
 }
 

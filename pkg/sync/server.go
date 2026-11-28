@@ -107,7 +107,28 @@ func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryC
 		}
 		out = append(out, rec)
 	}
+	refuseRepeatedIDs(out)
 	return out, nil
+}
+
+// refuseRepeatedIDs refuses every record of an ID that the sync manifest
+// lists more than once. An effective view lists each ID once, so a repeat
+// is a registry assertion no record can answer; refusing every copy keeps
+// one copy from passing the check while another is written or rendered.
+//
+// Spec: §7.5 (Author attestation)
+func refuseRepeatedIDs(records []materialRecord) {
+	seen := make(map[string]int, len(records))
+	for _, rec := range records {
+		seen[rec.ID]++
+	}
+	for i := range records {
+		if seen[records[i].ID] > 1 {
+			records[i].refusal = attest.NewFailure(attest.CodeRequestMismatch, attest.ConstraintDuplicateID,
+				"the sync manifest lists the ID more than once")
+			records[i].check = nil
+		}
+	}
 }
 
 // serverFetcher holds what every load_artifact request of one server-source

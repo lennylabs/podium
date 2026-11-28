@@ -55,9 +55,9 @@ func syncInputs(env map[string]string, home, ws string, stderr *bytes.Buffer) sy
 // combines the environment and the user's sync.yaml (user sources) with the
 // workspace files (repository sources): a workspace rule takes the user
 // default as a floor, the user-only keys of a workspace file are named on
-// standard error and ignored, layer_roots merge by layer ID with the
-// workspace winning, pin_signers is set by any file, and the overlay comes
-// from the user's file.
+// standard error and ignored, layer_roots among them, so the user's root of
+// a layer stands, pin_signers is set by any file, and the overlay comes from
+// the user's file.
 func TestLoadSyncAttestation_Sources(t *testing.T) {
 	h := sh.New(t)
 	home, ws := t.TempDir(), t.TempDir()
@@ -80,10 +80,10 @@ func TestLoadSyncAttestation_Sources(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load: %v (env file %s)", err, envFile)
 	}
-	if att.Overlay != sync.OverlayAllow || !att.PinSigners || att.LayerRoots["team"] != "b" || att.LayerRoots["other"] != "o" {
+	if att.Overlay != sync.OverlayAllow || !att.PinSigners || att.LayerRoots["team"] != "a" || att.LayerRoots["other"] != "o" {
 		t.Fatalf("attestation = %+v", att)
 	}
-	for _, key := range []string{"trusted_root_file", "root_max_age", "overlay"} {
+	for _, key := range []string{"trusted_root_file", "root_max_age", "overlay", "layer_roots"} {
 		if !strings.Contains(stderr.String(), "defaults.attestation."+key+" takes effect from ~/.podium/sync.yaml alone") {
 			t.Errorf("stderr = %q, want %s named", stderr.String(), key)
 		}
@@ -266,15 +266,9 @@ func reportAttestationConfigErrorTo(t *testing.T, err error) bool {
 	return ok
 }
 
-// Spec: §4.7.9 — the attestation report of podium verify: an undecodable
-// record under each mode, and a result with its digest and signers.
+// Spec: §4.7.9 — the attestation report of podium verify: a result with its
+// digest and signers, a warning, and an ID under none.
 func TestVerifyAttestationReports(t *testing.T) {
-	for mode, want := range map[attest.Mode]int{attest.ModeRequire: 1, attest.ModeWarn: 0, attest.ModeNone: 0} {
-		var buf bytes.Buffer
-		if got := reportUndecodable(&buf, mode, errors.New("bad")); got != want || !strings.Contains(buf.String(), "mode "+string(mode)) {
-			t.Errorf("%s = %d, %q", mode, got, buf.String())
-		}
-	}
 	var buf bytes.Buffer
 	reportAttestationResult(&buf, attest.ModeRequire, attest.Result{Checked: true, PackageDigest: "sha256:1",
 		Accepted: []attest.AcceptedBundle{{Digest: "sha256:2", Instance: "github", Issuer: "i", Identity: "x", AttestedTime: time.Unix(0, 0)}, {Digest: "sha256:3"}}})
@@ -293,5 +287,24 @@ func TestVerifyAttestationReports(t *testing.T) {
 	reportAttestationResult(&buf, attest.ModeNone, attest.Result{})
 	if !strings.Contains(buf.String(), "not checked") {
 		t.Fatalf("none report = %q", buf.String())
+	}
+}
+
+// Spec: §4.7.9 — a response that the §4.7.10 decoding refuses cannot be bound
+// to the request, so the attestation part of podium verify fails under every
+// mode, none included, and a policy that does not load exits 2 before the
+// well-formed rule.
+func TestVerifyAttestation_UndecodableFailsUnderNone(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var buf bytes.Buffer
+	if got := verifyAttestation(&buf, &sync.Attestation{}, "http://127.0.0.1:1", "finance/pay", []byte("not json")); got != 1 ||
+		!strings.Contains(buf.String(), "request binding: refused") {
+		t.Fatalf("verifyAttestation = %d, %q", got, buf.String())
+	}
+	t.Setenv(attestPolicyEnv, "strict")
+	var code int
+	withStderr(t, func() { code = verifyCmd([]string{"--registry", "http://127.0.0.1:1", "GIT~1"}) })
+	if code != 2 {
+		t.Fatalf("verify with a broken policy and an ill-formed ID = %d, want 2", code)
 	}
 }

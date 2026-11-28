@@ -31,7 +31,8 @@ type Attestation struct {
 	// takes the §13.12 default.
 	Limits attest.Limits
 	// LayerRoots maps a filesystem-source layer ID to the root its content
-	// was signed under, from defaults.attestation.layer_roots (§13.11.3).
+	// was signed under, from defaults.attestation.layer_roots of the user's
+	// sync.yaml (§7.5, §13.11.3).
 	LayerRoots map[string]string
 	// PinSigners refuses an artifact whose signers differ from those its
 	// prior lock entries record (§7.5.3).
@@ -209,16 +210,22 @@ func refusalDrop(id string, err error) layer.Drop {
 func checkSelected(ctx context.Context, records []materialRecord, prior *LockFile, att *Attestation, res *Result) ([]materialRecord, map[string]bool) {
 	refused := map[string]bool{}
 	priorSigners := lockSigners(prior)
-	kept := make([]materialRecord, 0, len(records))
+	checked := make([]materialRecord, 0, len(records))
 	for _, rec := range records {
 		if err := checkRecord(ctx, &rec, priorSigners, att, res); err != nil {
-			res.Dropped = append(res.Dropped, refusalDrop(rec.ID, err))
+			// An ID is reported once, with the refusal of its first refused
+			// record.
+			if !refused[rec.ID] {
+				res.Dropped = append(res.Dropped, refusalDrop(rec.ID, err))
+			}
 			refused[rec.ID] = true
 			continue
 		}
-		kept = append(kept, rec)
+		checked = append(checked, rec)
 	}
-	return kept, refused
+	// A record whose ID another record refused is not written either, so an
+	// ID is never both written and refused in one run.
+	return withoutIDs(checked, refused), refused
 }
 
 // checkRecord checks one selected record and fills its lock members. It

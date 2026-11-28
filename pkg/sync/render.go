@@ -164,18 +164,17 @@ func Render(ctx context.Context, opts RenderOptions) (*RenderResult, error) {
 //
 // Spec: §7.8 (Author attestation)
 func checkAssigned(ctx context.Context, all []materialRecord, assignments []assigned) ([]string, error) {
-	byID := make(map[string]materialRecord, len(all))
-	for _, rec := range all {
-		byID[rec.ID] = rec
+	selected := make(map[string]bool, len(assignments))
+	for _, a := range assignments {
+		selected[a.record.ID] = true
 	}
 	var warnings []string
-	checked := map[string]bool{}
-	for _, a := range assignments {
-		rec := byID[a.record.ID]
-		if checked[rec.ID] || rec.check == nil {
+	// Every record of a selected ID is checked, each copy apart, because
+	// every copy is rendered; fetchView already refuses a repeated ID.
+	for _, rec := range all {
+		if !selected[rec.ID] || rec.check == nil {
 			continue
 		}
-		checked[rec.ID] = true
 		r, err := rec.check(ctx)
 		if err != nil {
 			return nil, &RecordRefusedError{ID: rec.ID, Err: err}

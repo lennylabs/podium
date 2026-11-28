@@ -211,6 +211,10 @@ func ValidateOutput(out ResolvedOutput) error {
 // refused with config.invalid, and so is a name that two plugins share. A
 // portable name holds no code point that HFS+ ignores and no trailing dot or
 // space, so two names are compared without regard to letter case alone.
+// Two names that differ only in Unicode composition (NFC against NFD) pass
+// this comparison; the D11 folded form, NFC(casefold(NFD(x))) over the
+// pinned Unicode table that the output ownership step (2a-4) adds, replaces
+// strings.EqualFold here.
 //
 // Spec: §7.8 (Plugin names)
 func ValidatePluginNames(id string, plugins []PluginFilter) error {

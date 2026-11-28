@@ -692,7 +692,7 @@ func withoutIDs(records []materialRecord, ids map[string]bool) []materialRecord 
 
 // applyOverlay resolves the §6.4 workspace overlay and merges its records on
 // top of base at the source-neutral materialRecord level. An overlay record
-// replaces the same-ID base record (or appends when no base record matches),
+// replaces every same-ID base record (or is added when no base record matches),
 // per the §6.4 overlay exception, and the overlay applies no ingest rule.
 // ErrNoOverlay (the directory is absent) leaves base unchanged.
 //
@@ -709,12 +709,8 @@ func applyOverlay(base []materialRecord, overlayPath string, att *Attestation) (
 		return base, nil, nil
 	}
 	var warnings []string
-	idx := map[string]int{}
-	for i, rec := range base {
-		idx[rec.ID] = i
-	}
-	out := make([]materialRecord, len(base))
-	copy(out, base)
+	var applied []materialRecord
+	replaced := map[string]bool{}
 	for _, rec := range overlayRecords {
 		if err := wellFormedPackage(rec.ID, rec.Resources); err != nil {
 			warnings = append(warnings, fmt.Sprintf("overlay package %s skipped: %v", attest.ReportString(rec.ID), err))
@@ -735,14 +731,13 @@ func applyOverlay(base []materialRecord, overlayPath string, att *Attestation) (
 			SkillBytes:    rec.SkillBytes,
 			Resources:     rec.Resources,
 		}
-		if i, ok := idx[rec.ID]; ok {
-			out[i] = mr
-			continue
-		}
-		idx[rec.ID] = len(out)
-		out = append(out, mr)
+		replaced[rec.ID] = true
+		applied = append(applied, mr)
 	}
-	return out, warnings, nil
+	// Spec: §7.5 (Author attestation) — the overlay replaces every record of
+	// an ID it applies to, so no refused copy of a repeated ID stays beside
+	// the overlay record.
+	return append(withoutIDs(base, replaced), applied...), warnings, nil
 }
 
 // filesystemRecords reads the filesystem registry and converts the result to

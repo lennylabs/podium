@@ -106,17 +106,17 @@ func verifyCmd(args []string) int {
 			fmt.Fprintln(os.Stderr, "error: --registry is required to resolve <artifact>")
 			return 2
 		}
-		// Spec: §4.7.9, §4.7.11 — the requested ID meets the well-formed
-		// rule before it is sent, and the consumer trust policy loads
-		// before the request.
-		if err := attest.CheckRequestedID(artifact); err != nil {
-			fmt.Fprintf(os.Stderr, "verify failed: %v\n", err)
-			return 1
-		}
+		// Spec: §4.7.9, §4.7.11 — the consumer trust policy loads first, so
+		// a policy that does not load exits 2 whatever the argument, and
+		// the requested ID meets the well-formed rule before it is sent.
 		att, err := newSyncAttestation(workingDir())()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 2
+		}
+		if err := attest.CheckRequestedID(artifact); err != nil {
+			fmt.Fprintf(os.Stderr, "verify failed: %v\n", err)
+			return 1
 		}
 		served, body, code := resolveArtifactSignature(*registry, artifact)
 		if code != 0 {

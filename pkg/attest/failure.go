@@ -43,6 +43,7 @@ const (
 	ConstraintUnreadable      = "unreadable"
 	ConstraintPinnedSigner    = "pinned_signer"
 	ConstraintOverlay         = "overlay"
+	ConstraintDuplicateID     = "duplicate_id"
 )
 
 // Failure is a refusal or a warning of the consumer procedure (§4.7.11): a
