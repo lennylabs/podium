@@ -68,10 +68,16 @@ func (k AttestationPublicKey) ID() string { return k.id }
 // Spec: §4.7.11 (Key-based signers)
 func ParseAttestationPublicKey(text string) (AttestationPublicKey, error) {
 	trimmed := strings.Trim(text, " \t\r\n")
-	// pem.Decode skips any text before the first block, so the value must
-	// open with the block itself.
+	// pem.Decode skips any text before the first block it can decode,
+	// including a malformed block or a lone BEGIN line, and would return a
+	// later block. The value therefore opens with the block's BEGIN line and
+	// holds one BEGIN line and one END line, so the block decoded is the
+	// only text there is.
 	if !strings.HasPrefix(trimmed, "-----BEGIN ") {
 		return AttestationPublicKey{}, keyRefusal("the value does not open with a PEM block")
+	}
+	if strings.Count(trimmed, "-----BEGIN") != 1 || strings.Count(trimmed, "-----END") != 1 {
+		return AttestationPublicKey{}, keyRefusal("the value holds text or a second block beside the PEM block")
 	}
 	block, rest := pem.Decode([]byte(trimmed))
 	switch {

@@ -224,6 +224,13 @@ func TestParseAttestationPublicKey(t *testing.T) {
 		"broken base64":        "-----BEGIN PUBLIC KEY-----\n!!!\n-----END PUBLIC KEY-----\n",
 		"compressed point":     string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: compressed})),
 		"trailing DER garbage": string(pem.EncodeToMemory(&pem.Block{Type: "PUBLIC KEY", Bytes: append(append([]byte{}, block.Bytes...), 0)})),
+		// pem.Decode passes over each of these and returns the key block
+		// after it, which would trust a key the reader of the value did not
+		// see first.
+		"malformed block before": "-----BEGIN PUBLIC KEY-----\nthis is not base64 !!!\n" + good,
+		"unterminated before":    "-----BEGIN JUNK-----\nhello world\n" + good,
+		"lone BEGIN line before": "-----BEGIN attacker text\n" + good,
+		"broken copy before":     strings.Replace(good, "\n", "\n!", 1) + good,
 	} {
 		t.Run(name, func(t *testing.T) {
 			_, err := sign.ParseAttestationPublicKey(text)
@@ -354,5 +361,40 @@ func TestVerifyKeySigned_CosignBundle(t *testing.T) {
 	}
 	if _, err := sign.VerifyKeySignedAttestation(read("bundle.sigstore.json"), mustKey(t, sign.AttestationSigner{PublicKey: sh.PublicKeyPEM(t, sh.NewSigningKey(t).Public())})); err == nil {
 		t.Fatal("the cosign bundle verified under another key")
+	}
+}
+
+// TestStatement_DuplicateMembers refuses, with the reason payload, a
+// statement with an object that names one member twice, at the top level,
+// in a subject, and in a digest, compared after the escapes of the names are
+// decoded, for a key-based signer and a certificate signer alike. Repeated
+// names in separate objects are no duplicate.
+//
+// Spec: §4.7.11 (Bundle format, Refusal reasons)
+func TestStatement_DuplicateMembers(t *testing.T) {
+	t.Parallel()
+	h := sh.New(t)
+	key, s := keySigner(t)
+	k := mustKey(t, s)
+	d := `{"sha256":"` + digestA + `"}`
+	head := `{"_type":"https://in-toto.io/Statement/v1","predicateType":"` + slsaProvenance + `",`
+	signedTime := `{"name":".podium/signed-at/1768478400","digest":` + d + `}`
+	for name, p := range map[string]string{
+		"subject name":   head + `"subject":[{"name":".podium/signed-at/1768478400","name":"` + layerSubject + `","digest":` + d + `}],"predicate":{}}`,
+		"subject member": head + `"subject":[` + signedTime + `,{"name":"` + layerSubject + `","digest":` + d + `}],"subject":[{"name":"a/b@1.0.0","digest":` + d + `}],"predicate":{}}`,
+		"digest member":  head + `"subject":[` + signedTime + `,{"name":"` + layerSubject + `","digest":{"sha256":"` + digestA + `","sha256":"` + strings.Repeat("0", 64) + `"}}],"predicate":{}}`,
+		"escaped name":   head + `"subject":[` + signedTime + `,{"name":"` + layerSubject + `","n\u0061me":"a/b@1.0.0","digest":` + d + `}],"predicate":{}}`,
+		"in predicate":   head + `"subject":[` + signedTime + `,{"name":"` + layerSubject + `","digest":` + d + `}],"predicate":{"a":[{"b":1,"b":2}]}}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := sign.VerifyKeySignedAttestation(h.DSSEBundle([]byte(p), sh.WithSigningKey(key)), k)
+			wantReason(t, err, sign.ReasonPayload)
+			_, err = sign.VerifyAttestationBundle(context.Background(), h.DSSEBundle([]byte(p), sh.WithTimestamp(sh.TSAPrimary)), githubInstance(t, h))
+			wantReason(t, err, sign.ReasonPayload)
+		})
+	}
+	same := head + `"subject":[` + signedTime + `,{"name":"` + layerSubject + `","digest":` + d + `}],"predicate":{"a":[{"b":1},{"b":2}],"c":{"b":3}}}`
+	if _, err := sign.VerifyKeySignedAttestation(h.DSSEBundle([]byte(same), sh.WithSigningKey(key)), k); err != nil {
+		t.Fatalf("one name in separate objects: %v", err)
 	}
 }
