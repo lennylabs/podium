@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/layer/source"
 	"github.com/lennylabs/podium/pkg/registry/filesystem"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -22,11 +23,6 @@ const (
 	detailsSubjects = 20
 	detailsFields   = 5
 )
-
-// coveringRequirement is the position of the covering requirement, whose
-// signers attest the layer subject and every artifact. A policy holds one
-// requirement in this release.
-const coveringRequirement = 0
 
 // layerStepResult is a layer step that passed: the attested time and commit
 // of the layer bundle, and the evaluated bundles the artifact step reads.
@@ -46,6 +42,13 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 	if f, err := a.checkRoots(ctx); f != nil || err != nil {
 		return nil, f, err
 	}
+	covering := layer.CoveringRequirement(a.layer.TrustRequirements)
+	if covering < 0 {
+		// Unreachable: the policy check (CheckPolicy) refuses a policy with
+		// no covering requirement before the snapshot is read. A cycle that
+		// skipped it fails rather than verify against no requirement.
+		return nil, nil, fmt.Errorf("ingest: the trust policy of layer %s has no covering requirement", a.layer.ID)
+	}
 	bundles, f, err := a.readBundles(files)
 	if f != nil || err != nil {
 		return nil, f, err
@@ -54,7 +57,7 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 		return nil, f, nil
 	}
 	for _, b := range bundles {
-		if err := a.evaluate(ctx, b); err != nil {
+		if err := a.evaluate(ctx, b, covering); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -69,7 +72,7 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 		return nil, nil, fmt.Errorf("ingest: layer digest: %w", err)
 	}
 	digest := attest.LayerDigest(input)
-	candidates, f := a.selectCandidates(bundles, name, digest, input, all)
+	candidates, f := a.selectCandidates(bundles, covering, name, digest, input, all)
 	if f != nil {
 		return nil, f, nil
 	}
@@ -77,10 +80,10 @@ func (a *AttestationCycle) layerStep(ctx context.Context, files fs.FS, all []fil
 	if f != nil || err != nil {
 		return nil, f, err
 	}
-	if f := completeness(bundles, input.Subjects); f != nil {
+	if f := completeness(bundles, covering, input.Subjects); f != nil {
 		return nil, f, nil
 	}
-	v := layerBundle.accepted[coveringRequirement]
+	v := layerBundle.covering
 	res := &layerStepResult{time: v.AttestedTime, bundles: bundles}
 	// A value longer than any commit name is no commit, and recording it
 	// would make every later lineage query of the layer invalid.
@@ -160,12 +163,13 @@ func subjectNameFailure(all []filesystem.ArtifactRecord) *AttestationError {
 }
 
 // selectCandidates applies layer step 3: among the bundles the covering
-// requirement accepts, those listing the layer subject name; among them, the
-// candidates, which list it with the snapshot's layer digest.
-func (a *AttestationCycle) selectCandidates(bundles []*snapshotBundle, name, digest string, input attest.Layer, all []filesystem.ArtifactRecord) ([]*snapshotBundle, *AttestationError) {
+// requirement, at position covering, accepts, those listing the layer
+// subject name; among them, the candidates, which list it with the
+// snapshot's layer digest.
+func (a *AttestationCycle) selectCandidates(bundles []*snapshotBundle, covering int, name, digest string, input attest.Layer, all []filesystem.ArtifactRecord) ([]*snapshotBundle, *AttestationError) {
 	var accepted, named, candidates []*snapshotBundle
 	for _, b := range bundles {
-		v := b.accepted[coveringRequirement]
+		v := b.covering
 		if v == nil {
 			continue
 		}
@@ -184,7 +188,7 @@ func (a *AttestationCycle) selectCandidates(bundles []*snapshotBundle, name, dig
 	case len(accepted) == 0:
 		return nil, attestFailure(CodeAttestationMissing, "no_accepted_bundle",
 			"no bundle of the attestation directory is accepted by a signer of the layer's covering requirement",
-			"bundles", refusedBundles(bundles, a.layer.TrustRequirements[coveringRequirement].Signers, a))
+			"bundles", refusedBundles(bundles, covering, a))
 	case len(named) == 0:
 		return nil, attestFailure(CodeAttestationMissing, "no_layer_subject",
 			"the accepted bundles list no layer subject named "+attest.ReportString(name), "layer_subject", attest.ReportString(name))
@@ -215,7 +219,7 @@ func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*s
 	mark := a.layer.Mark
 	var pastMark []*snapshotBundle
 	for _, c := range candidates {
-		if mark == nil || !c.accepted[coveringRequirement].AttestedTime.Before(*mark) {
+		if mark == nil || !c.covering.AttestedTime.Before(*mark) {
 			pastMark = append(pastMark, c)
 		}
 	}
@@ -229,10 +233,10 @@ func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*s
 		}
 	}
 	latest := candidates[0]
-	if mark != nil && latest.accepted[coveringRequirement].AttestedTime.Before(*mark) {
+	if mark != nil && latest.covering.AttestedTime.Before(*mark) {
 		return nil, attestFailure(CodeAttestationStale, "mark",
 			"the newest layer subject is older than the layer's attestation mark",
-			"attested_at", latest.accepted[coveringRequirement].AttestedTime.UTC().Format(time.RFC3339Nano),
+			"attested_at", latest.covering.AttestedTime.UTC().Format(time.RFC3339Nano),
 			"attestation_mark", mark.UTC().Format(time.RFC3339Nano), "digest", latest.digest), nil
 	}
 	commit := attestedCommit(latest)
@@ -246,8 +250,8 @@ func (a *AttestationCycle) passingCandidate(ctx context.Context, candidates []*s
 // requirement, latest first, and by ascending attestation digest on a tie.
 func sortByAttestedTime(bundles []*snapshotBundle) {
 	sort.SliceStable(bundles, func(i, j int) bool {
-		ti := bundles[i].accepted[coveringRequirement].AttestedTime
-		tj := bundles[j].accepted[coveringRequirement].AttestedTime
+		ti := bundles[i].covering.AttestedTime
+		tj := bundles[j].covering.AttestedTime
 		if !ti.Equal(tj) {
 			return ti.After(tj)
 		}
@@ -258,7 +262,7 @@ func sortByAttestedTime(bundles []*snapshotBundle) {
 // attestedCommit is the source commit the leaf certificate of a candidate
 // records, empty when it records none.
 func attestedCommit(b *snapshotBundle) string {
-	c := b.accepted[coveringRequirement].Certificate.SourceRepositoryDigest
+	c := b.covering.Certificate.SourceRepositoryDigest
 	if !c.Present {
 		return ""
 	}
@@ -313,11 +317,13 @@ func (a *AttestationCycle) lineageAnswers(ctx context.Context, candidates []*sna
 
 // completeness applies layer step 6: every artifact of the snapshot's
 // artifact list has a subject with its name and package digest in a bundle
-// the covering requirement accepts, whatever that bundle's attested time.
-func completeness(bundles []*snapshotBundle, subjects []attest.Subject) *AttestationError {
+// the covering requirement, at position covering, accepts, whatever that
+// bundle's attested time. An additional requirement is decided per artifact
+// by the artifact step, because a second signer can lag or decline.
+func completeness(bundles []*snapshotBundle, covering int, subjects []attest.Subject) *AttestationError {
 	var missing []string
 	for _, s := range subjects {
-		if !coveredBy(bundles, coveringRequirement, s.Name, s.Digest) {
+		if !coveredBy(bundles, covering, s.Name, s.Digest) {
 			missing = append(missing, s.Name)
 		}
 	}

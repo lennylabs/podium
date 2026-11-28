@@ -904,7 +904,7 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 		res.Removed, res.Superseded = []string{}, true
 		return res, nil
 	}
-	res.Removed = removedArtifacts(rowsByID, req.LayerID, inSnapshot)
+	res.Removed = removedArtifacts(rowsByID, req.LayerID, inSnapshot, verdict.withholdsRemoval)
 	if len(res.Removed) > 0 || req.IngestClaim != "" {
 		err := st.SoftDeleteArtifacts(ctx, req.TenantID, req.LayerID, res.Removed, now, req.IngestClaim)
 		switch {
@@ -938,20 +938,26 @@ func Ingest(ctx context.Context, st store.Store, req Request) (*Result, error) {
 // longer contains. rowsByID is the listing the cycle read before its writes;
 // an artifact the cycle stored is in the snapshot, so the listing's age
 // changes nothing. A retired row is served by no read path, so the layer does
-// not serve its artifact, and the retired-row rule keeps the row stored.
+// not serve its artifact, and the retired-row rule keeps the row stored. An
+// artifact with a live row that held reports is kept, which is how a failed
+// layer step keeps the versions of a type trust_require_types lists.
 //
-// Spec: §7.3.1 (Removed artifacts), §4.1, §4.6
-func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string, inSnapshot map[string]bool) []string {
+// Spec: §7.3.1 (Removed artifacts), §4.1, §4.6, §4.7.11 (Layer step)
+func removedArtifacts(rowsByID map[string][]store.ManifestRecord, layerID string, inSnapshot map[string]bool, held func(store.ManifestRecord) bool) []string {
 	out := []string{}
 	for id, rows := range rowsByID {
 		if inSnapshot[id] {
 			continue
 		}
+		live, keep := false, false
 		for _, row := range rows {
 			if row.Layer == layerID && row.DeletedAt == nil && !retired(row) {
-				out = append(out, id)
-				break
+				live = true
+				keep = keep || held(row)
 			}
+		}
+		if live && !keep {
+			out = append(out, id)
 		}
 	}
 	sort.Strings(out)

@@ -414,6 +414,10 @@ type attestationVerdict struct {
 	outcomes map[string]AttestationOutcome
 	// bundles are the bundles layer step 2 evaluated, which the cycle links.
 	bundles []*snapshotBundle
+	// requireTypes is the layer's trust_require_types, which keeps the
+	// stored versions of a listed type from removal after a failed layer
+	// step (withholdsRemoval).
+	requireTypes []string
 }
 
 // AttestationOutcome is the §4.7.11 attestation outcome of one artifact

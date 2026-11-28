@@ -509,9 +509,11 @@ func (r *reevaluation) writes(ctx context.Context, links, selected []store.Attes
 }
 
 // downgradeOutcomes sets the outcome failed on each version that lost a
-// verified link, with the first requirement that accepts the bundle of none
-// of its remaining verified links. A version whose requirements each still
-// accept a remaining link keeps its outcome. A remaining link that the
+// verified link, with the first requirement that is not optional and that
+// accepts the bundle of none of its remaining verified links. A version
+// whose requirements that are not optional each still accept a remaining
+// link keeps its outcome, so a lost link of an optional requirement changes
+// no outcome. A remaining link that the
 // re-evaluation did not decide is credited to the requirements whose signers
 // its certificate matches.
 func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.AttestationLink, checks map[checkKey]linkCheck,
@@ -533,8 +535,8 @@ func (r *reevaluation) downgradeOutcomes(ctx context.Context, links []store.Atte
 				covered[req] = true
 			}
 		}
-		for req := range r.layer.TrustRequirements {
-			if covered[req] {
+		for req, tr := range r.layer.TrustRequirements {
+			if tr.Optional || covered[req] {
 				continue
 			}
 			n := req

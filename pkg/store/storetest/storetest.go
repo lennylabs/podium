@@ -822,7 +822,7 @@ func layerTrustPolicy(t *testing.T, s store.Store) {
 		CoversLayer: true,
 	}, {
 		PredicateType: "https://acme.com/scan/v1", Optional: true,
-		Signers:       []store.TrustSigner{{Issuer: "https://accounts.google.com", Identity: "scanner@acme.com"}},
+		Signers: []store.TrustSigner{{Issuer: "https://accounts.google.com", Identity: "scanner@acme.com"}},
 	}}
 	cfg := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x",
 		TrustMode: "warn", TrustRequirements: reqs, TrustRequireTypes: []string{"hook", "mcp-server"}, TrustLayerRoot: "skills/finance"}

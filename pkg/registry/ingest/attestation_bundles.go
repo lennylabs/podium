@@ -25,11 +25,14 @@ type snapshotBundle struct {
 	verified map[string]*sign.VerifiedAttestation
 	refusal  map[string]sign.AttestationReason
 	// accepted holds, per requirement, the verification under which a signer
-	// of that requirement accepted the bundle, nil when none did.
+	// of that requirement accepted the bundle, nil when none did. covering
+	// is the entry of the covering requirement, which the layer step reads.
 	accepted []*sign.VerifiedAttestation
+	covering *sign.VerifiedAttestation
 	// reason is the refusal reason that comes last among the signers that
-	// refused the bundle.
-	reason sign.AttestationReason
+	// refused the bundle, and reasons the same per requirement.
+	reason  sign.AttestationReason
+	reasons []sign.AttestationReason
 }
 
 // acceptedByAny reports whether a requirement accepts the bundle.
@@ -125,16 +128,17 @@ func (a *AttestationCycle) limits() (maxBundles int, maxBytes int64) {
 
 // evaluate applies layer step 2 to b: it verifies the bundle under the
 // instance of each signer of each requirement, once per instance, and
-// records the requirements that accept it and the reason of each refusal. An
-// error other than a refusal of the bundle, such as a trusted root that
-// cannot be read, is returned.
+// records the requirements that accept it and the reason of each refusal,
+// for the bundle and for each requirement. An error other than a refusal of
+// the bundle, such as a trusted root that cannot be read, is returned.
 //
 // Spec: §4.7.11 (Layer step, Refusal reasons)
-func (a *AttestationCycle) evaluate(ctx context.Context, b *snapshotBundle) error {
+func (a *AttestationCycle) evaluate(ctx context.Context, b *snapshotBundle, covering int) error {
 	reqs := a.layer.TrustRequirements
 	b.verified = map[string]*sign.VerifiedAttestation{}
 	b.refusal = map[string]sign.AttestationReason{}
 	b.accepted = make([]*sign.VerifiedAttestation, len(reqs))
+	b.reasons = make([]sign.AttestationReason, len(reqs))
 	for r, req := range reqs {
 		for _, s := range req.Signers {
 			v, reason, err := a.verifyUnder(ctx, b, s.Instance)
@@ -151,8 +155,10 @@ func (a *AttestationCycle) evaluate(ctx context.Context, b *snapshotBundle) erro
 				continue
 			}
 			b.reason = sign.LaterAttestationReason(b.reason, reason)
+			b.reasons[r] = sign.LaterAttestationReason(b.reasons[r], reason)
 		}
 	}
+	b.covering = b.accepted[covering]
 	return nil
 }
 
