@@ -28,11 +28,15 @@ type checkOptions struct {
 }
 
 // countedBundle is a bundle the check counts: every bundle that parses, or
-// with --requirements every bundle the requirement accepts.
+// with --requirements every bundle the covering requirement accepts.
 type countedBundle struct {
 	name      string
 	statement sign.AttestationStatement
 }
+
+// requirementBundles holds, with --requirements, the accepted bundles of
+// each additional requirement that is not optional, by position.
+type requirementBundles map[int][]countedBundle
 
 // checkReport collects the findings of one check. failed is set by every
 // finding that fails the check.
@@ -168,11 +172,12 @@ func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequir
 			return err
 		}
 	}
-	counted, err := countBundles(ctx, bundles, reqs, insts, opts.limits, r, stderr)
+	counted, additional, err := countBundles(ctx, bundles, reqs, insts, opts.limits, r, stderr)
 	if err != nil {
 		return err
 	}
 	checkConditions(layerSubject, records, counted, r)
+	checkAdditional(records, reqs, additional, r)
 	if r.failed {
 		return errCheckFailed
 	}
@@ -182,17 +187,21 @@ func checkLayer(ctx context.Context, opts checkOptions, reqs []store.TrustRequir
 
 // countBundles reports the limits of the directory and returns the bundles
 // the check counts: without requirements every bundle that parses, and with
-// them every bundle the requirement accepts.
+// them every bundle the covering requirement accepts, beside the accepted
+// bundles of each additional requirement that is not optional. A bundle no
+// requirement accepts is reported with its reason.
 //
 // Spec: §7.3.5
-func countBundles(ctx context.Context, bundles []dirBundle, reqs []store.TrustRequirement, insts *checkInstances, limits attestLimits, r *checkReport, stderr io.Writer) ([]countedBundle, error) {
+func countBundles(ctx context.Context, bundles []dirBundle, reqs []store.TrustRequirement, insts *checkInstances, limits attestLimits, r *checkReport, stderr io.Writer) ([]countedBundle, requirementBundles, error) {
 	if len(bundles) > limits.MaxBundles {
 		r.fail("limits: the attestation directory holds %d bundle files, above %s (%d)", len(bundles), attestMaxBundlesEnv, limits.MaxBundles)
 	}
 	if len(reqs) == 0 {
-		_, _ = fmt.Fprintln(r.out, "note: no signature was verified; --requirements <file> verifies each bundle against a layer's requirement")
+		_, _ = fmt.Fprintln(r.out, "note: no signature was verified; --requirements <file> verifies each bundle against a layer's requirements")
 	}
+	covering := layer.CoveringRequirement(reqs)
 	var counted []countedBundle
+	additional := requirementBundles{}
 	for _, b := range bundles {
 		switch {
 		case b.oversize:
@@ -202,35 +211,91 @@ func countBundles(ctx context.Context, bundles []dirBundle, reqs []store.TrustRe
 			_, _ = fmt.Fprintf(stderr, "warning: %s %s, so it counts as no bundle\n", oneLine(b.name), b.problem(limits))
 			continue
 		}
-		if len(reqs) > 0 {
-			ok, reason, err := acceptBundle(ctx, b.raw, reqs[0], insts)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				_, _ = fmt.Fprintf(r.out, "refused: %s: %s\n", oneLine(b.name), reason)
-				continue
+		cb := countedBundle{name: b.name, statement: b.summary.Statement}
+		if len(reqs) == 0 {
+			counted = append(counted, cb)
+			continue
+		}
+		accepted, reason, err := acceptingRequirements(ctx, b.raw, reqs, insts)
+		if err != nil {
+			return nil, nil, err
+		}
+		if len(accepted) == 0 {
+			_, _ = fmt.Fprintf(r.out, "refused: %s: %s\n", oneLine(b.name), reason)
+		}
+		for _, i := range accepted {
+			switch {
+			case i == covering:
+				counted = append(counted, cb)
+			case !reqs[i].Optional:
+				additional[i] = append(additional[i], cb)
 			}
 		}
-		counted = append(counted, countedBundle{name: b.name, statement: b.summary.Statement})
 	}
-	return counted, nil
+	return counted, additional, nil
+}
+
+// acceptingRequirements returns the positions of the requirements that
+// accept raw, and when none does the reason that comes last among their
+// signers' refusals. It verifies the bundle once per instance.
+//
+// Spec: §4.7.11, §7.3.5
+func acceptingRequirements(ctx context.Context, raw []byte, reqs []store.TrustRequirement, insts *checkInstances) ([]int, sign.AttestationReason, error) {
+	cache := map[string]instanceVerification{}
+	var accepted []int
+	var reason sign.AttestationReason
+	for i, req := range reqs {
+		ok, rr, err := acceptBundle(ctx, raw, req, insts, cache)
+		if err != nil {
+			return nil, "", err
+		}
+		if ok {
+			accepted = append(accepted, i)
+			continue
+		}
+		reason = sign.LaterAttestationReason(reason, rr)
+	}
+	return accepted, reason, nil
+}
+
+// checkAdditional writes a finding for each package that no accepted bundle
+// of an additional requirement that is not optional lists with its package
+// digest, naming the requirement's position.
+//
+// Spec: §7.3.5
+func checkAdditional(records []filesystem.ArtifactRecord, reqs []store.TrustRequirement, additional requirementBundles, r *checkReport) {
+	covering := layer.CoveringRequirement(reqs)
+	for i, req := range reqs {
+		if i == covering || req.Optional {
+			continue
+		}
+		for j := range records {
+			// attestLayerSubjects refused a record with no subject name.
+			name, _ := records[j].SubjectName()
+			if !listedBy(additional[i], attest.Subject{Name: name, Digest: records[j].PackageDigest}) {
+				r.fail("missing: no bundle of requirement %d lists %s with the package digest %s", i, oneLine(name), records[j].PackageDigest)
+			}
+		}
+	}
+}
+
+// instanceVerification is the verification of one bundle under one
+// instance: the verified attestation, or the reason of its refusal.
+type instanceVerification struct {
+	v      *sign.VerifiedAttestation
+	reason sign.AttestationReason
 }
 
 // acceptBundle verifies raw against each signer of req under the signer's
-// instance, as layer step 2 of ingest does. It returns true when a signer
-// accepts the bundle and the predicate type meets req, and otherwise the
-// reason that comes last in the §4.7.11 list among the signers' refusals.
-// An error that is no refusal of the bundle, such as a trusted root past its
-// maximum age, is returned.
+// instance, as layer step 2 of ingest does, with the verification under each
+// instance kept in byInstance, so several requirements verify a bundle once
+// per instance. It returns true when a signer accepts the bundle and the
+// predicate type meets req, and otherwise the reason that comes last in the
+// §4.7.11 list among the signers' refusals. An error that is no refusal of
+// the bundle, such as a trusted root past its maximum age, is returned.
 //
 // Spec: §4.7.11, §7.3.5
-func acceptBundle(ctx context.Context, raw []byte, req store.TrustRequirement, insts *checkInstances) (bool, sign.AttestationReason, error) {
-	type result struct {
-		v      *sign.VerifiedAttestation
-		reason sign.AttestationReason
-	}
-	byInstance := map[string]result{}
+func acceptBundle(ctx context.Context, raw []byte, req store.TrustRequirement, insts *checkInstances, byInstance map[string]instanceVerification) (bool, sign.AttestationReason, error) {
 	var reason sign.AttestationReason
 	for _, s := range req.Signers {
 		name := s.Instance

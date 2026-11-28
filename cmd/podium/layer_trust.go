@@ -15,8 +15,8 @@ import (
 )
 
 // trustFlags are the §7.3.1 trust policy flags `podium layer register` and
-// `podium layer update` share. The signer flags build the one requirement of
-// the policy.
+// `podium layer update` share. The signer flags build a policy of one
+// requirement, and a requirements file sends a policy of several.
 type trustFlags struct {
 	mode      *string
 	layerRoot *string
@@ -27,6 +27,30 @@ type trustFlags struct {
 	bools map[string]*bool
 	// clear sends an empty trust_requirements; update only.
 	clear *bool
+	// reqFile names a requirements file whose trust_requirements the
+	// command sends.
+	reqFile *string
+	// types are the trust_require_types to send, and clearTypes sends an
+	// empty list; update only.
+	types      stringSliceFlag
+	clearTypes *bool
+}
+
+// trustInputError is a trust flag failure that is no usage error, such as a
+// requirements file that cannot be read or that the file rules refuse; the
+// command exits 1 for it.
+type trustInputError struct{ err error }
+
+func (e trustInputError) Error() string { return e.err.Error() }
+
+// trustBodyExit returns the exit status of a trust body failure: 1 for an
+// input the command read, 2 for a usage error.
+func trustBodyExit(err error) int {
+	var in trustInputError
+	if errors.As(err, &in) {
+		return 1
+	}
+	return 2
 }
 
 // trustSignerStringFlags are the binding flags that set one string member on
@@ -48,17 +72,19 @@ var trustSignerBoolFlags = [][3]string{
 }
 
 // addTrustFlags defines the trust policy flags on fs. update adds
-// --clear-trust-requirements.
+// --clear-trust-requirements and --clear-trust-require-types.
 //
 // Spec: §7.3.1 (Layer CLI)
 func addTrustFlags(fs *flag.FlagSet, update bool) *trustFlags {
 	f := &trustFlags{
 		mode:      fs.String("trust", "", "layer trust mode: none, warn, or require"),
 		layerRoot: fs.String("trust-layer-root", "", "root under which a local layer's content was signed"),
+		reqFile:   fs.String("trust-requirements-file", "", "send the trust_requirements of a requirements file, such as `podium layer show <id> --requirements` writes"),
 		members:   map[string]*string{},
 		bools:     map[string]*bool{},
 	}
 	fs.Var(&f.signers, "trust-signer", "trusted signer as <issuer>=<identity> (repeatable)")
+	fs.Var(&f.types, "trust-require-type", "artifact type that a failed attestation drops under warn (repeatable)")
 	for _, d := range trustSignerStringFlags {
 		f.members[d[0]] = fs.String(d[0], "", d[2])
 	}
@@ -66,7 +92,8 @@ func addTrustFlags(fs *flag.FlagSet, update bool) *trustFlags {
 		f.bools[d[0]] = fs.Bool(d[0], false, d[2])
 	}
 	if update {
-		f.clear = fs.Bool("clear-trust-requirements", false, "remove the layer's trust requirement")
+		f.clear = fs.Bool("clear-trust-requirements", false, "remove the layer's trust requirements")
+		f.clearTypes = fs.Bool("clear-trust-require-types", false, "remove the layer's trust_require_types")
 	}
 	return f
 }
@@ -74,6 +101,8 @@ func addTrustFlags(fs *flag.FlagSet, update bool) *trustFlags {
 // body returns the trust policy members of a request body for the flags in
 // set. The binding flags apply to every --trust-signer and are refused
 // without one, because a requirement with no signer accepts nothing.
+// --trust-requirements-file sends the file's requirements and is refused
+// beside a signer or binding flag, which would build another policy.
 //
 // Spec: §7.3.1 (Layer CLI)
 func (f *trustFlags) body(set map[string]bool) (map[string]any, error) {
@@ -84,11 +113,17 @@ func (f *trustFlags) body(set map[string]bool) (map[string]any, error) {
 	if set["trust-layer-root"] {
 		out["trust_layer_root"] = *f.layerRoot
 	}
+	if err := f.typesMember(set, out); err != nil {
+		return nil, err
+	}
 	var binding []string
 	for _, d := range append(append([][3]string{}, trustSignerStringFlags...), trustSignerBoolFlags...) {
 		if set[d[0]] {
 			binding = append(binding, "--"+d[0])
 		}
+	}
+	if set["trust-requirements-file"] {
+		return f.fileMember(out, binding)
 	}
 	if len(f.signers) == 0 {
 		if len(binding) > 0 {
@@ -123,6 +158,79 @@ func (f *trustFlags) body(set map[string]bool) (map[string]any, error) {
 	}
 	out["trust_requirements"] = []any{map[string]any{"signers": signers}}
 	return out, nil
+}
+
+// typesMember sets trust_require_types from --trust-require-type, or the
+// empty list from --clear-trust-require-types, which cannot be combined.
+func (f *trustFlags) typesMember(set map[string]bool, out map[string]any) error {
+	clearTypes := f.clearTypes != nil && *f.clearTypes
+	switch {
+	case set["trust-require-type"] && clearTypes:
+		return errors.New("--clear-trust-require-types cannot be combined with --trust-require-type")
+	case set["trust-require-type"]:
+		out["trust_require_types"] = []string(f.types)
+	case clearTypes:
+		out["trust_require_types"] = []string{}
+	}
+	return nil
+}
+
+// fileMember sets trust_requirements from the requirements file
+// --trust-requirements-file names. The file's layer_roots is not read. A
+// file the command cannot read or that the file rules refuse is a
+// trustInputError.
+//
+// Spec: §7.3.1 (Layer CLI), §4.7.11 (Requirements file)
+func (f *trustFlags) fileMember(out map[string]any, binding []string) (map[string]any, error) {
+	switch {
+	case len(f.signers) > 0 || len(binding) > 0:
+		return nil, errors.New("--trust-requirements-file cannot be combined with --trust-signer or a binding flag, which build another policy")
+	case f.clear != nil && *f.clear:
+		return nil, errors.New("--clear-trust-requirements cannot be combined with --trust-requirements-file")
+	}
+	raw, err := os.ReadFile(*f.reqFile)
+	if err != nil {
+		return nil, trustInputError{fmt.Errorf("read the requirements file: %w", err)}
+	}
+	file, err := layer.ParseRequirementsFile(raw)
+	if err != nil {
+		return nil, trustInputError{fmt.Errorf("%s: %w", *f.reqFile, err)}
+	}
+	out["trust_requirements"] = file.TrustRequirements
+	return out, nil
+}
+
+// checkSingleRequirement reads the layer through GET /v1/layers before an
+// update sends a requirement built from the signer flags, and refuses the
+// update when the layer stores more than one requirement, because the
+// replacement would drop the additional requirements, or when the read
+// fails or does not return the layer. A layer with several requirements is
+// updated with --trust-requirements-file.
+//
+// Spec: §7.3.1 (Layer CLI)
+func (f *trustFlags) checkSingleRequirement(registry, id string) error {
+	if len(f.signers) == 0 {
+		return nil
+	}
+	out, status := doJSON(registry+"/v1/layers", "GET", nil)
+	if status >= 400 {
+		return fmt.Errorf("read layer %s before replacing its requirements: HTTP %d", id, status)
+	}
+	raw, err := findLayerObject(out, id)
+	if err != nil {
+		return fmt.Errorf("read layer %s before replacing its requirements: %w", id, err)
+	}
+	var l struct {
+		TrustRequirements []json.RawMessage `json:"trust_requirements"`
+	}
+	if err := json.Unmarshal(raw, &l); err != nil {
+		return fmt.Errorf("decode the trust_requirements of layer %s: %w", id, err)
+	}
+	if n := len(l.TrustRequirements); n > 1 {
+		return fmt.Errorf("layer %s stores %d trust requirements, and --trust-signer would replace them with one; "+
+			"edit the file `podium layer show %s --requirements` writes and send it with --trust-requirements-file", id, n, id)
+	}
+	return nil
 }
 
 // layerShow prints the layer object with the given ID from the layer read,

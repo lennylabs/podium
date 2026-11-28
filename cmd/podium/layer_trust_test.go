@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -189,5 +191,116 @@ func TestLayerShow_Requirements(t *testing.T) {
 		if err := writeLayerRequirements(&out, []byte(b), "finance"); err == nil {
 			t.Errorf("%s: written", name)
 		}
+	}
+}
+
+// Spec: §7.3.1 (Layer CLI) — --trust-requirements-file sends the file's
+// requirements, so a policy of several requirements round-trips through
+// `podium layer show --requirements`; --trust-require-type sets the listed
+// types and --clear-trust-require-types removes them; an update that would
+// replace several stored requirements with one built from --trust-signer
+// exits 1 and sends nothing, as does a failed read of the layer.
+func TestLayerCmd_RequirementsFileAndRequireTypes(t *testing.T) {
+	base, st := trustCLIServer(t)
+	stored := func() store.LayerConfig {
+		t.Helper()
+		cfg, err := st.GetLayerConfig(context.Background(), "default", "finance")
+		if err != nil {
+			t.Fatalf("GetLayerConfig: %v", err)
+		}
+		return cfg
+	}
+	file := filepath.Join(t.TempDir(), "requirements.json")
+	body := `{"trust_requirements":[` +
+		`{"signers":[{"issuer":"` + cliTrustIssuer + `","identity":"` + cliTrustIdentity + `"}],"covers_layer":true},` +
+		`{"signers":[{"issuer":"https://accounts.google.com","identity":"scanner@acme.com"}],"predicate_type":"https://acme.com/scan/v1","optional":true}],` +
+		`"layer_roots":{"x":"y"}}`
+	if err := os.WriteFile(file, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rc := layerRegister([]string{"--registry", base, "--id", "finance", "--repo", cliTrustRepo, "--ref", "podium/signed",
+		"--trust", "warn", "--trust-requirements-file", file, "--trust-require-type", "hook", "--trust-require-type", "mcp-server"})
+	if rc != 0 {
+		t.Fatalf("register rc = %d", rc)
+	}
+	got := stored()
+	if len(got.TrustRequirements) != 2 || !got.TrustRequirements[0].CoversLayer || !got.TrustRequirements[1].Optional ||
+		got.TrustRequirements[0].Signers[0].SourceRepository != cliTrustRepo || strings.Join(got.TrustRequireTypes, ",") != "hook,mcp-server" {
+		t.Fatalf("registered policy = %+v types %v", got.TrustRequirements, got.TrustRequireTypes)
+	}
+	// The signer flags would replace two requirements with one.
+	if rc := layerUpdate([]string{"--registry", base, "--id", "finance", "--trust-signer", "i=alice@acme.com"}); rc != 1 {
+		t.Errorf("signer update over several requirements: rc = %d, want 1", rc)
+	}
+	if rc := layerUpdate([]string{"--registry", base + "/missing", "--id", "finance", "--trust-signer", "i=alice@acme.com"}); rc != 1 {
+		t.Errorf("signer update with a failed read: rc = %d, want 1", rc)
+	}
+	if rc := layerUpdate([]string{"--registry", base, "--id", "absent", "--trust-signer", "i=alice@acme.com"}); rc != 1 {
+		t.Errorf("signer update of a layer the read does not return: rc = %d, want 1", rc)
+	}
+	if got := stored(); len(got.TrustRequirements) != 2 {
+		t.Fatalf("a refused update changed the policy: %+v", got.TrustRequirements)
+	}
+	if rc := layerUpdate([]string{"--registry", base, "--id", "finance", "--clear-trust-require-types"}); rc != 0 {
+		t.Fatalf("clear types rc = %d", rc)
+	}
+	if got := stored(); got.TrustRequireTypes != nil || len(got.TrustRequirements) != 2 {
+		t.Fatalf("after clearing the types: %+v %v", got.TrustRequirements, got.TrustRequireTypes)
+	}
+	// A one-requirement policy from a file can then be replaced by the flags.
+	one := filepath.Join(t.TempDir(), "one.json")
+	if err := os.WriteFile(one, []byte(`{"trust_requirements":[{"signers":[{"issuer":"i","identity":"alice@acme.com"}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if rc := layerUpdate([]string{"--registry", base, "--id", "finance", "--trust-requirements-file", one}); rc != 0 {
+		t.Fatalf("file update rc = %d", rc)
+	}
+	if rc := layerUpdate([]string{"--registry", base, "--id", "finance", "--trust-signer", "i=bob@acme.com"}); rc != 0 {
+		t.Fatalf("signer update over one requirement rc = %d", rc)
+	}
+	if got := stored(); len(got.TrustRequirements) != 1 || got.TrustRequirements[0].Signers[0].Identity != "bob@acme.com" {
+		t.Fatalf("replaced policy = %+v", got.TrustRequirements)
+	}
+}
+
+// Spec: §7.3.1 (Layer CLI) — --trust-requirements-file beside a signer or a
+// binding flag, and --clear-trust-requirements or --clear-trust-require-types
+// beside the flag it clears, are usage errors; a file the command cannot read
+// or that the file rules refuse exits 1. None sends a request.
+func TestLayerCmd_RequirementsFileErrors(t *testing.T) {
+	base, st := trustCLIServer(t)
+	dir := t.TempDir()
+	good := filepath.Join(dir, "good.json")
+	bad := filepath.Join(dir, "bad.json")
+	if err := os.WriteFile(good, []byte(`{"trust_requirements":[{"signers":[{"issuer":"i","identity":"a@b"}]}]}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bad, []byte(`{"trust_requirements":[],"trust_mode":"require"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	reg := []string{"--registry", base, "--id", "finance", "--repo", cliTrustRepo, "--ref", "main"}
+	for _, tc := range []struct {
+		args []string
+		want int
+	}{
+		{[]string{"--trust-requirements-file", good, "--trust-signer", "i=a@b"}, 2},
+		{[]string{"--trust-requirements-file", good, "--trust-any-ref"}, 2},
+		{[]string{"--trust-requirements-file", filepath.Join(dir, "absent.json")}, 1},
+		{[]string{"--trust-requirements-file", bad}, 1},
+	} {
+		if rc := layerRegister(append(append([]string{}, reg...), tc.args...)); rc != tc.want {
+			t.Errorf("register %v: rc = %d, want %d", tc.args, rc, tc.want)
+		}
+	}
+	for _, args := range [][]string{
+		{"--trust-requirements-file", good, "--clear-trust-requirements"},
+		{"--trust-require-type", "hook", "--clear-trust-require-types"},
+	} {
+		if rc := layerUpdate(append([]string{"--registry", base, "--id", "finance"}, args...)); rc != 2 {
+			t.Errorf("update %v: rc = %d, want 2", args, rc)
+		}
+	}
+	if layers, _ := st.ListLayerConfigs(context.Background(), "default"); len(layers) != 0 {
+		t.Errorf("a refused command stored %d layers", len(layers))
 	}
 }
