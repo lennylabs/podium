@@ -4,9 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/layer"
+	"github.com/lennylabs/podium/pkg/sign"
 	"github.com/lennylabs/podium/pkg/store"
 )
 
@@ -130,13 +133,21 @@ func (r *Registry) servedOutcome(ctx context.Context, tenant string, rec store.M
 // who can see a version that links it: a served version of the request's
 // tenant whose layer is visible to the caller under the caller's read
 // scope. The check reads the layer from the manifest row of each linked
-// version. Every other request, including one for a digest the registry does
-// not store, returns ErrNotFound, so a caller who sees no linked version
-// cannot tell whether the bundle exists.
+// version. When the caller's read scope is narrowed, the bundle is served
+// only when that scope admits the ID of every artifact subject its
+// statement lists, because a statement can list a whole layer. Every other
+// request, including one for a digest the registry does not store, returns
+// ErrNotFound, and the caller's visible versions are resolved before the
+// links are read, so a caller who sees no linked version cannot tell
+// whether the bundle exists.
 //
 // Spec: §7.3.5 (Serving bundles)
 func (r *Registry) LoadAttestation(ctx context.Context, id layer.Identity, digest string) ([]byte, error) {
 	notFound := fmt.Errorf("%w: attestation %s", ErrNotFound, digest)
+	visible, err := r.visibleManifests(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	if !validAttestationDigest(digest) {
 		return nil, notFound
 	}
@@ -145,25 +156,7 @@ func (r *Registry) LoadAttestation(ctx context.Context, id layer.Identity, diges
 	if err != nil {
 		return nil, fmt.Errorf("%w: read the links of attestation %s: %v", ErrUnavailable, digest, err)
 	}
-	if len(links) == 0 {
-		return nil, notFound
-	}
-	visible, err := r.visibleManifests(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	seen := make(map[[2]string]bool, len(visible))
-	for _, m := range visible {
-		seen[[2]string{m.ArtifactID, m.Version}] = true
-	}
-	linked := false
-	for _, l := range links {
-		if seen[[2]string{l.ArtifactID, l.Version}] {
-			linked = true
-			break
-		}
-	}
-	if !linked {
+	if !linksVisible(links, visible) {
 		return nil, notFound
 	}
 	a, err := r.store.GetAttestation(ctx, tenant, digest)
@@ -173,7 +166,47 @@ func (r *Registry) LoadAttestation(ctx context.Context, id layer.Identity, diges
 	case err != nil:
 		return nil, fmt.Errorf("%w: read attestation %s: %v", ErrUnavailable, digest, err)
 	}
+	if scopes := layer.ParseScopes(id.Scopes); scopes.Active() && !scopeAdmitsSubjects(scopes, a.Bundle) {
+		return nil, notFound
+	}
 	return a.Bundle, nil
+}
+
+// linksVisible reports whether a link names a version of visible.
+func linksVisible(links []store.AttestationLink, visible []store.ManifestRecord) bool {
+	seen := make(map[[2]string]bool, len(visible))
+	for _, m := range visible {
+		seen[[2]string{m.ArtifactID, m.Version}] = true
+	}
+	for _, l := range links {
+		if seen[[2]string{l.ArtifactID, l.Version}] {
+			return true
+		}
+	}
+	return false
+}
+
+// scopeAdmitsSubjects reports whether scopes admits the ID of every artifact
+// subject the bundle's statement lists, leaving aside the reserved subjects
+// under .podium/. A bundle that does not parse admits nothing, which fails
+// closed; the registry stored only bundles it verified.
+//
+// Spec: §7.3.5 (Serving bundles), §6.3.1
+func scopeAdmitsSubjects(scopes layer.ScopeSet, raw []byte) bool {
+	sum, err := sign.InspectAttestationBundle(raw)
+	if err != nil {
+		return false
+	}
+	for _, s := range sum.Statement.Subjects {
+		if strings.HasPrefix(s.Name, ".podium/") {
+			continue
+		}
+		id, _ := attest.ParseSubjectName(s.Name)
+		if !scopes.AllowsRead(id) {
+			return false
+		}
+	}
+	return true
 }
 
 // validAttestationDigest reports whether d is sha256: followed by 64
