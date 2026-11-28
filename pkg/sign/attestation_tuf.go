@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,19 @@ const (
 	// no transparency log and no certificate transparency logs.
 	GitHubInstance = "github"
 )
+
+// instanceNameRule is the §13.12 instance name rule.
+var instanceNameRule = regexp.MustCompile(`\A[a-z0-9][a-z0-9._-]{0,63}\z`)
+
+// ValidInstanceName reports whether name meets the §13.12 instance name
+// rule: 1 to 64 characters from a-z, 0-9, '.', '_', and '-', beginning
+// with a letter or a digit. The registry's sigstore.instances and a
+// consumer policy file apply the one rule.
+//
+// Spec: §13.12, §4.7.11
+func ValidInstanceName(name string) bool {
+	return instanceNameRule.MatchString(name)
+}
 
 // The §13.12 defaults of the public-good root refresh.
 const (
