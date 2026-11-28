@@ -16,7 +16,7 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `domain.published`             | A `DOMAIN.md` was added or changed                                 | Registry |
 | `layer.ingested`               | A layer completed an ingest cycle                                  | Registry |
 | `layer.history_rewritten`      | Force-push or history rewrite detected on a `git`-source layer     | Registry |
-| `layer.config_changed`         | An admin-defined layer was added, removed, restored, or patched, or the tenant's layer order was changed | Registry |
+| `layer.config_changed`         | An admin-defined layer was added, removed, restored, or patched, the tenant's layer order was changed, or a start or an ingest cycle changed the visibility of a layer that `--layer-path` bootstraps (§4.7.11) | Registry |
 | `layer.user_registered`        | A personal layer was registered, unregistered, patched, restored, or erased | Registry |
 | `layer.attestation_verified`   | An ingest cycle passed the §4.7.11 layer step: the snapshot reference, the layer attested time, each accepted bundle with its attestation digest, predicate type, instance, issuer, identity, log index, attested time, and whether its timestamp carries an RSA signature with a digest other than SHA-256, the counts of matched, mismatched, and missing artifacts, and each bundle no requirement accepted with its refusal reason | Registry |
 | `layer.attestation_failed`     | An ingest cycle's §4.7.11 layer step failed or its trust policy was invalid: the §6.10 code, the `details.constraint`, the `details`, the mode in force, and the snapshot reference where known | Registry |
