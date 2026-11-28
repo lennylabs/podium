@@ -266,7 +266,10 @@ func (s *Memory) SetLayerVisibilityIf(_ context.Context, tenantID, layerID strin
 	if !same {
 		return ErrVisibilityChanged
 	}
-	s.layers[key] = VisibilityWrite{Visibility: next.Visibility, Source: next.Source, Pending: next.Pending}.apply(cfg)
+	// The SQL stores set the source as given, an empty one included.
+	cfg = VisibilityWrite(next).apply(cfg)
+	cfg.VisibilitySource = next.Source
+	s.layers[key] = cfg
 	return nil
 }
 
