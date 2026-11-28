@@ -66,8 +66,12 @@ type BatchLoadEnvelope struct {
 	DeliverySignature string `json:"delivery_signature,omitempty"`
 	// ArtifactRevision is the §4.7.10 ingest time of the served version,
 	// framed into DeliveryHash. An error entry carries no record and omits it.
-	ArtifactRevision string         `json:"artifact_revision,omitempty"`
-	Error            *ErrorResponse `json:"error,omitempty"`
+	ArtifactRevision string `json:"artifact_revision,omitempty"`
+	// Attestations and AttestationOutcome are the §7.2 attestation members,
+	// which an ok entry carries as the single-load response does (§7.6.2).
+	Attestations       []core.AttestationReference `json:"attestations,omitempty"`
+	AttestationOutcome *core.ServedOutcome         `json:"attestation_outcome,omitempty"`
+	Error              *ErrorResponse              `json:"error,omitempty"`
 }
 
 // BatchResource is one §7.6.2 bundled-resource reference in a batch
@@ -177,6 +181,8 @@ func (s *Server) loadOneForBatch(ctx context.Context, id layer.Identity, artifac
 		ReplacedBy:         res.ReplacedBy,
 		DeprecationWarning: res.DeprecationWarning,
 		ArtifactRevision:   res.ArtifactRevision,
+		Attestations:       res.Attestations,
+		AttestationOutcome: res.AttestationOutcome,
 	}
 	// Spec: §4.7.10 — the batch entry carries the attestation the single-load
 	// response carries for the same admitted result.

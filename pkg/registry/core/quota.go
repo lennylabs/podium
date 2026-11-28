@@ -13,7 +13,8 @@ type QuotaInfo struct {
 	TenantID string
 	Limits   store.Quota
 	// StorageBytes is the sum of frontmatter+body bytes across every
-	// manifest in the tenant. v1 derives this from the manifest list
+	// manifest in the tenant and the bytes of every stored attestation
+	// bundle (§4.7.11). v1 derives this from the manifest list
 	// on every call; for large catalogs the operator should switch to
 	// an incremental counter maintained on PutManifest.
 	StorageBytes int64
@@ -35,6 +36,15 @@ func (r *Registry) Quota(ctx context.Context) (*QuotaInfo, error) {
 	}
 	for _, m := range manifests {
 		out.StorageBytes += int64(len(m.Frontmatter)) + int64(len(m.Body))
+	}
+	// Spec: §4.7.8, §4.7.11 (Attestation storage) — stored bundle bytes
+	// count toward the tenant's storage usage.
+	bundles, err := r.store.ListAttestations(ctx, r.TenantFor(ctx))
+	if err != nil {
+		return nil, fmt.Errorf("quota: list attestations: %w", err)
+	}
+	for _, b := range bundles {
+		out.StorageBytes += int64(len(b.Bundle))
 	}
 	return out, nil
 }

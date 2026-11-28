@@ -1518,7 +1518,13 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 			condHash = h
 		}
 	}
-	body, notModified, err := s.fetchJSONConditional("/v1/load_artifact", args, contentHashETag(condHash))
+	body, etag, notModified, err := s.fetchJSONConditional("/v1/load_artifact", args, s.cache.validator(condHash, id))
+	// Spec: §7.2 — a 304 whose entity tag names another content hash does not
+	// confirm the cached record, so it is a miss answered with a full load.
+	if err == nil && notModified && etag != "" && !tagNamesHash(etag, condHash) {
+		notModified = false
+		body, etag, _, err = s.fetchJSONConditional("/v1/load_artifact", args, "")
+	}
 	if err == nil && notModified {
 		// Revalidated: restart the `latest` TTL window once the cached
 		// record passes verification.
@@ -1531,7 +1537,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		}
 		// The cache entry disappeared between the conditional request and the
 		// read; refetch unconditionally so the host still gets the artifact.
-		body, _, err = s.fetchJSONConditional("/v1/load_artifact", args, "")
+		body, etag, _, err = s.fetchJSONConditional("/v1/load_artifact", args, "")
 	}
 	if err != nil {
 		// spec: §6.9 — distinguish a registry that could not be reached (a
@@ -1550,7 +1556,7 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 		}
 		return errorResultFrom(err)
 	}
-	return s.deliverFreshLoad(body, args, now)
+	return s.deliverFreshLoad(body, etag, args, now)
 }
 
 // deliverFreshLoad decodes a registry /v1/load_artifact response and delivers
@@ -1560,11 +1566,12 @@ func (s *mcpServer) loadArtifact(args map[string]any) any {
 // passed through.
 //
 // Spec: §4.7.10, §6.6 step 2
-func (s *mcpServer) deliverFreshLoad(body []byte, args map[string]any, now time.Time) any {
+func (s *mcpServer) deliverFreshLoad(body []byte, etag string, args map[string]any, now time.Time) any {
 	resp, err := parseLoadArtifact(body)
 	if err != nil {
 		return errorResult(err.Error())
 	}
+	resp.ETag = etag
 	id, version := argsIDAndVersion(args)
 	// §6.5: deliverLoadArtifact records the (id, version) → content_hash
 	// resolution only after the response passes verification, so a refused
@@ -1704,14 +1711,14 @@ func (s *mcpServer) cachedOrRefetch(hash, id string, args map[string]any, opts d
 	if !errors.Is(verr, sign.ErrSignatureInvalid) {
 		return errorResult(verr.Error()), true
 	}
-	body, _, ferr := s.fetchJSONConditional("/v1/load_artifact", args, "")
+	body, etag, _, ferr := s.fetchJSONConditional("/v1/load_artifact", args, "")
 	if ferr != nil {
 		if isRegistryUnreachable(ferr) {
 			return s.unreachableCacheMiss(ferr), true
 		}
 		return errorResultFrom(ferr), true
 	}
-	return s.deliverFreshLoad(body, args, time.Now()), true
+	return s.deliverFreshLoad(body, etag, args, time.Now()), true
 }
 
 // verifyCachedRecord runs the §6.6 step-2 checks on a copy of a cached record,
@@ -1958,6 +1965,7 @@ func (s *mcpServer) cacheVerifiedRecord(resp loadArtifactResponse) error {
 		Deprecated:         resp.Deprecated,
 		ReplacedBy:         resp.ReplacedBy,
 		DeprecationWarning: resp.DeprecationWarning,
+		ETag:               resp.ETag,
 	})
 }
 
@@ -2457,6 +2465,10 @@ func resourcesAsStrings(in map[string][]byte) map[string]string {
 // because the §4.7.10 procedure reads members by exact name. The JSON tags
 // serve the refresh closures alone, which read fresh link URLs.
 type loadArtifactResponse struct {
+	// ETag is the entity tag of the registry response this record came
+	// from, which the cache keeps with the record and sends back as
+	// If-None-Match (§7.2). It is no member of the body.
+	ETag         string `json:"-"`
 	ID           string `json:"id"`
 	Type         string `json:"type"`
 	Version      string `json:"version"`
@@ -2791,11 +2803,11 @@ func contentHashETag(contentHash string) string {
 // the registry answers 304 Not Modified when the artifact is unchanged, which
 // the bridge serves from its content-addressed cache. notModified is true on a
 // 304 (body is nil); otherwise the decoded body and any error are returned as
-// for fetchJSON.
-func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNoneMatch string) (body []byte, notModified bool, err error) {
+// for fetchJSON, with the entity tag of a 2xx response.
+func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNoneMatch string) (body []byte, etag string, notModified bool, err error) {
 	req, err := s.newRegistryRequest("GET", path, args)
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	if ifNoneMatch != "" {
 		req.Header.Set("If-None-Match", ifNoneMatch)
@@ -2806,24 +2818,24 @@ func (s *mcpServer) fetchJSONConditional(path string, args map[string]any, ifNon
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode == http.StatusNotModified {
 		// §12: the registry confirmed the cached content hash is current.
 		_, _ = io.Copy(io.Discard, resp.Body)
 		s.recordSuccess(time.Now())
-		return nil, true, nil
+		return nil, resp.Header.Get("ETag"), true, nil
 	}
 	body, err = io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, false, err
+		return nil, "", false, err
 	}
 	if resp.StatusCode >= 400 {
-		return body, false, parseRegistryError(resp.StatusCode, body)
+		return body, "", false, parseRegistryError(resp.StatusCode, body)
 	}
 	s.recordSuccess(time.Now())
-	return body, false, nil
+	return body, resp.Header.Get("ETag"), false, nil
 }
 
 // fetchJSON makes an authenticated GET against the registry and returns
@@ -3107,6 +3119,11 @@ type deliveryFiles struct {
 	Deprecated         bool
 	ReplacedBy         string
 	DeprecationWarning string
+	// ETag is the entity tag of the response the record came from, empty for
+	// a record cached before the cache kept it.
+	//
+	// Spec: §7.2
+	ETag string
 }
 
 // putDelivery writes d under delivery/<deliverySegment(id)>/ in the bucket
@@ -3140,6 +3157,32 @@ func (c *contentCache) putDelivery(hash, id string, d deliveryFiles) error {
 			return err
 		}
 	}
+	// The entity tag is written through a temporary file and a rename, so a
+	// reader never sees a partial tag.
+	return writeFileAtomic(filepath.Join(dir, "etag"), []byte(d.ETag))
+}
+
+// writeFileAtomic writes data to path through a temporary file in the same
+// directory and a rename.
+func writeFileAtomic(path string, data []byte) error {
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".*")
+	if err != nil {
+		return err
+	}
+	name := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(name)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
+	if err := os.Rename(name, path); err != nil {
+		_ = os.Remove(name)
+		return err
+	}
 	return nil
 }
 
@@ -3150,6 +3193,55 @@ func boolFile(b bool) string {
 		return "true"
 	}
 	return ""
+}
+
+// validator returns the If-None-Match value of a revalidation of id's cached
+// record under hash: the entity tag the registry returned with it, or the
+// content-hash entity tag for a record cached before the cache kept the tag.
+// The registry's tag of a version that carries attestation members covers
+// them, so only the stored tag can be answered 304 for such a version. A
+// kept tag is sent only in a form the registry writes for hash: a planted
+// `*` would be answered 304 whatever the registry now resolves, and a tag
+// with a line break would fail the request.
+//
+// Spec: §7.2
+func (c *contentCache) validator(hash, id string) string {
+	if c.dir != "" && hash != "" {
+		b, err := os.ReadFile(filepath.Join(c.dir, sanitizeHash(hash), "delivery", deliverySegment(id), "etag"))
+		if err == nil && tagNamesHash(string(b), hash) {
+			return string(b)
+		}
+	}
+	return contentHashETag(hash)
+}
+
+// tagNamesHash reports whether tag is the entity tag the registry writes for
+// a version with content hash hash: "<hash>", or "<hash>+" followed by 32
+// lowercase hexadecimal digits.
+//
+// Spec: §7.2
+func tagNamesHash(tag, hash string) bool {
+	plain := contentHashETag(hash)
+	if plain == "" {
+		return false
+	}
+	if tag == plain {
+		return true
+	}
+	prefix := strings.TrimSuffix(plain, `"`) + "+"
+	if !strings.HasPrefix(tag, prefix) || !strings.HasSuffix(tag, `"`) {
+		return false
+	}
+	fp := tag[len(prefix) : len(tag)-1]
+	if len(fp) != 32 {
+		return false
+	}
+	for _, c := range fp {
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 // hasDeprecationWarning reports whether the cached record of id under hash

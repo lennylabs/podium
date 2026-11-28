@@ -21,6 +21,7 @@ Every significant event, each carrying a trace ID (W3C Trace Context):
 | `layer.attestation_verified`   | An ingest cycle passed the §4.7.11 layer step: the snapshot reference, the layer attested time, each accepted bundle with its attestation digest, predicate type, instance, issuer, identity, log index, attested time, and whether its timestamp carries an RSA signature with a digest other than SHA-256, the counts of matched, mismatched, and missing artifacts, and each bundle no requirement accepted with its refusal reason | Registry |
 | `layer.attestation_failed`     | An ingest cycle's §4.7.11 layer step failed or its trust policy was invalid: the §6.10 code, the `details.constraint`, the `details`, the mode in force, and the snapshot reference where known | Registry |
 | `layer.attestation_mark_reset` | A §4.7.11 mark reset was applied: the previous mark, the previous attested commit, the commit the reset named, and the caller | Registry |
+| `layer.attestation_links_downgraded` | A §4.7.11 re-evaluation changed links of the layer to `unverified`: the cause, which is `cycle`, `policy_change`, or `start`, and the attestation digests of the links whose change applied | Registry |
 | `admin.granted`                | An admin grant was added or revoked                                | Registry |
 | `visibility.denied`            | A call was rejected because the requested resource was not visible | Registry |
 | `freeze.break_glass`           | An admin used break-glass during a freeze window                   | Registry |
@@ -123,6 +124,8 @@ Defaults, configurable per deployment:
 | Deprecated artifact versions        | 90 days after the deprecation flag is set               |
 | Layers unregistered by their owners | 30 days (artifacts soft-deleted, recoverable via admin) |
 | Artifacts removed from a layer's source | 30 days (soft-deleted, recoverable by restoring the package and reingesting, §7.3.1) |
+
+A purge of a version deletes its §4.7.11 attestation links, and the purge then deletes each stored bundle that no version links.
 
 Retention rewrites only the file destination (§8.3). The receiving system of a stdout, HTTP, or OTLP destination owns the retention of the records it received.
 

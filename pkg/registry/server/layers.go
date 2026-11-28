@@ -121,6 +121,10 @@ type LayerEndpoint struct {
 	// emitter, and freeze windows. Nil leaves the endpoint in record-intent
 	// mode (the queue-only response) for harnesses that do not wire ingest.
 	reingestRunner ReingestRunner
+	// trustPolicyChanged runs the §4.7.11 re-evaluation of a layer whose
+	// trust policy a register or an update changed. Nil runs none, and the
+	// layer's next ingest cycle re-evaluates it.
+	trustPolicyChanged func(ctx context.Context, cfg store.LayerConfig, caller string)
 	// publicBaseURL is the deployment's externally reachable base URL
 	// (PODIUM_PUBLIC_URL, else http://<bind>). register advertises an absolute
 	// webhook URL built from it so the §14.10 CLI prints a URL a developer can
@@ -1757,6 +1761,7 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// spec §8.1: a config mutation (including a secret rotation) is an
 	// auditable layer.config_changed / layer.user_registered event.
 	e.emitLayerEvent(r, before, cfg, "update", trustEventFields(before, cfg))
+	e.afterTrustWrite(r, before, true, cfg)
 	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
@@ -2108,6 +2113,7 @@ func (e *LayerEndpoint) register(w http.ResponseWriter, r *http.Request) {
 		prior = stored
 	}
 	e.emitLayerEvent(r, store.LayerConfig{}, cfg, "register", trustEventFields(prior, cfg))
+	e.afterTrustWrite(r, prior, exists, cfg)
 
 	resp := LayerRegisterResponse{Layer: wireLayer(cfg), Warnings: e.visibilityWarnings(cfg)}
 	if cfg.SourceType == "git" {

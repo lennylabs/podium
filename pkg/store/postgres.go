@@ -67,7 +67,7 @@ func orgSchemaIdent(orgID string) (string, error) {
 // clauses unchanged from the flat layout, so the schema boundary is an
 // additional physical isolation on top of the existing key scoping rather than
 // a rewrite of every query.
-var orgTableStmts = []string{
+var orgTableStmts = append([]string{
 	`CREATE TABLE IF NOT EXISTS manifests (
 		tenant_id TEXT NOT NULL,
 		artifact_id TEXT NOT NULL,
@@ -89,6 +89,9 @@ var orgTableStmts = []string{
 		deprecated_at TIMESTAMPTZ,
 		deleted_at TIMESTAMPTZ,
 		package_digest TEXT NOT NULL DEFAULT '',
+		attestation_outcome TEXT NOT NULL DEFAULT 'not_evaluated',
+		attestation_failure TEXT NOT NULL DEFAULT '',
+		attestation_evaluated_at TIMESTAMPTZ,
 		PRIMARY KEY (tenant_id, artifact_id, version)
 	)`,
 	`CREATE TABLE IF NOT EXISTS domains (
@@ -180,7 +183,7 @@ var orgTableStmts = []string{
 		search_hits BIGINT NOT NULL DEFAULT 0,
 		PRIMARY KEY (tenant_id, day, layer, artifact_id, client_kind, harness)
 	)`,
-}
+}, attestationTableStmts("BYTEA", "TIMESTAMPTZ")...) // Spec: §4.7.11 (Attestation storage)
 
 // orgIndexStmts create the per-org indexes after the org tables and the
 // additive column migration (idx_manifests_tenant_layer references the layer
@@ -204,7 +207,7 @@ var orgIndexStmts = []string{
 // (§4.7.1 "shared infrastructure metadata") and the vector outbox the §4.7.2
 // drain worker reconciles across orgs. They are schema-qualified so they always
 // land in public regardless of the connection's search_path.
-var sharedTableStmts = []string{
+var sharedTableStmts = append([]string{
 	`CREATE TABLE IF NOT EXISTS public.tenants (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
@@ -235,7 +238,7 @@ var sharedTableStmts = []string{
 		name TEXT PRIMARY KEY,
 		applied_at TIMESTAMPTZ NOT NULL
 	)`,
-}
+}, rootRecordTableStmt("public.attestation_roots", "TIMESTAMPTZ")) // Spec: §4.7.11 (Root record)
 
 // sharedIndexStmts index the cross-org tables in public.
 var sharedIndexStmts = []string{
@@ -751,12 +754,17 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if err != nil {
 		return fmt.Errorf("marshal resources: %w", err)
 	}
+	failure, err := failureColumn(rec.AttestationFailure)
+	if err != nil {
+		return err
+	}
 	res, err := conn.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest,
+			 attestation_outcome, attestation_failure, attestation_evaluated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -765,7 +773,8 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw, rec.PackageDigest)
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw, rec.PackageDigest,
+		rec.AttestationOutcome, failure, nullTimePG(rec.AttestationEvaluatedAt))
 	if err != nil {
 		return err
 	}
@@ -776,7 +785,7 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if n > 0 {
 		return nil // inserted these bytes
 	}
-	if revived, err := postgresRevive(ctx, conn, rec, ingestedAt, resources); err != nil || revived {
+	if revived, err := postgresRevive(ctx, conn, rec, ingestedAt, resources, failure); err != nil || revived {
 		return err
 	}
 	// The row already existed (a prior ingest, or the winner of a
@@ -800,19 +809,21 @@ func (p *Postgres) PutManifest(ctx context.Context, rec ManifestRecord) error {
 // classify.
 //
 // Spec: §7.3.1 (Removed artifacts)
-func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ingestedAt time.Time, resources []byte) (bool, error) {
+func postgresRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ingestedAt time.Time, resources []byte, failure string) (bool, error) {
 	res, err := ex.ExecContext(ctx, `
 		UPDATE manifests SET
 			type = $1, description = $2, tags = $3, sensitivity = $4, layer = $5, deprecated = $6,
 			ingested_at = $7, frontmatter = $8, body = $9, skill_raw = $10, signature = $11,
-			search_visibility = $12, resources = $13, deprecated_at = $14, package_digest = $19, deleted_at = NULL
+			search_visibility = $12, resources = $13, deprecated_at = $14, package_digest = $19,
+			attestation_outcome = $20, attestation_failure = $21, attestation_evaluated_at = $22, deleted_at = NULL
 		WHERE tenant_id = $15 AND artifact_id = $16 AND version = $17
 			AND content_hash = $18 AND layer = $5 AND deleted_at IS NOT NULL`,
 		rec.Type, rec.Description, strings.Join(rec.Tags, "\n"), rec.Sensitivity, rec.Layer,
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
 		nullTimePG(rec.DeprecatedAt),
-		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.PackageDigest)
+		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.PackageDigest,
+		rec.AttestationOutcome, failure, nullTimePG(rec.AttestationEvaluatedAt))
 	return rowsChanged(res, err)
 }
 
@@ -956,6 +967,10 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 	if err != nil {
 		return fmt.Errorf("marshal resources: %w", err)
 	}
+	failure, err := failureColumn(rec.AttestationFailure)
+	if err != nil {
+		return err
+	}
 	conn, release, err := p.org(ctx, rec.TenantID)
 	if err != nil {
 		return err
@@ -971,8 +986,9 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest,
+			 attestation_outcome, attestation_failure, attestation_evaluated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -981,7 +997,8 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 		rec.Deprecated, ingestedAt.UTC(),
 		rec.Frontmatter, rec.Body,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw, rec.PackageDigest)
+		nullTimePG(rec.DeprecatedAt), nullTimePG(rec.DeletedAt), rec.SkillRaw, rec.PackageDigest,
+		rec.AttestationOutcome, failure, nullTimePG(rec.AttestationEvaluatedAt))
 	if err != nil {
 		return err
 	}
@@ -991,7 +1008,7 @@ func (p *Postgres) PutManifestWithVectorPending(ctx context.Context, rec Manifes
 	}
 	revived := false
 	if n == 0 {
-		if revived, err = postgresRevive(ctx, tx, rec, ingestedAt, resources); err != nil {
+		if revived, err = postgresRevive(ctx, tx, rec, ingestedAt, resources, failure); err != nil {
 			return err
 		}
 	}
@@ -1113,7 +1130,8 @@ func (p *Postgres) GetManifest(ctx context.Context, tenantID, artifactID, versio
 	row := conn.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest
+		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest,
+		       attestation_outcome, attestation_failure, attestation_evaluated_at
 		FROM manifests
 		WHERE tenant_id = $1 AND artifact_id = $2 AND version = $3 AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
@@ -1259,7 +1277,8 @@ func (p *Postgres) listManifests(ctx context.Context, tenantID string, includeDe
 	rows, err := conn.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body,
-		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest
+		       signature, search_visibility, resources, deprecated_at, deleted_at, skill_raw, package_digest,
+		       attestation_outcome, attestation_failure, attestation_evaluated_at
 		FROM manifests
 		WHERE tenant_id = $1 `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -1306,7 +1325,14 @@ func (p *Postgres) purgeDeprecatedInSchema(ctx context.Context, ident string, be
 	if _, err := conn.ExecContext(ctx, `SET search_path TO `+ident+`, public`); err != nil {
 		return 0, err
 	}
-	res, err := conn.ExecContext(ctx, `
+	// Spec: §4.7.11 (Attestation storage) — the removal and the sweep of its
+	// links and bundles are one transaction.
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deprecated = TRUE AND deprecated_at IS NOT NULL AND deprecated_at < $1`,
 		before.UTC())
@@ -1314,7 +1340,13 @@ func (p *Postgres) purgeDeprecatedInSchema(ctx context.Context, ident string, be
 		return 0, err
 	}
 	n, err := res.RowsAffected()
-	return int(n), err
+	if err != nil {
+		return 0, err
+	}
+	if err := pgSweepAttestations(ctx, tx); err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
 }
 
 // PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
@@ -1759,6 +1791,9 @@ func (p *Postgres) purgeExpiredLayersInSchema(ctx context.Context, ident string,
 	if err != nil {
 		return 0, err
 	}
+	if err := pgSweepAttestations(ctx, tx); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -1797,16 +1832,22 @@ func scanManifestPG(scanner rowScanner) (ManifestRecord, error) {
 	var rec ManifestRecord
 	var tags string
 	var resources []byte
-	var deprecatedAt, deletedAt sql.NullTime
+	var deprecatedAt, deletedAt, evaluatedAt sql.NullTime
+	var failure string
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&rec.Deprecated, &rec.IngestedAt, &rec.Frontmatter, &rec.Body,
 		&rec.Signature, &rec.SearchVisibility, &resources,
-		&deprecatedAt, &deletedAt, &rec.SkillRaw, &rec.PackageDigest)
+		&deprecatedAt, &deletedAt, &rec.SkillRaw, &rec.PackageDigest,
+		&rec.AttestationOutcome, &failure, &evaluatedAt)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
+	if rec.AttestationFailure, err = parseFailureColumn(failure); err != nil {
+		return ManifestRecord{}, err
+	}
+	rec.AttestationEvaluatedAt = ptrFromNullTime(evaluatedAt)
 	if tags != "" {
 		rec.Tags = strings.Split(tags, "\n")
 	}

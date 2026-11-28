@@ -190,6 +190,13 @@ type ManifestRecord struct {
 	// files give no entry list. The registry serves it as the load_artifact
 	// package_digest member and reads it nowhere else.
 	PackageDigest string
+	// AttestationOutcome, AttestationFailure, and AttestationEvaluatedAt are
+	// the §4.7.11 attestation outcome of the version. Every read returns an
+	// outcome; a write that leaves it empty stores not_evaluated, and a
+	// failure is stored only with the outcome failed.
+	AttestationOutcome     string
+	AttestationFailure     *AttestationFailure
+	AttestationEvaluatedAt *time.Time
 }
 
 // ResourceRef is one §4.4 bundled resource attached to a manifest
@@ -405,6 +412,9 @@ type LayerConfig struct {
 // stamp DeprecatedAt at that transition instead of inheriting IngestedAt.
 // Every backend's PutManifest calls this before persisting. spec: §8.4.
 func stampDeprecation(rec *ManifestRecord) {
+	// Spec: §4.7.11 (Attestation outcome) — every backend stores the
+	// outcome in one form, which a write prepares here beside the stamp.
+	normalizeOutcome(rec)
 	if rec.Deprecated && rec.DeprecatedAt == nil {
 		t := rec.IngestedAt
 		if t.IsZero() {
@@ -579,6 +589,28 @@ type Store interface {
 	// the mark and the commit of cfg.AttestationRecord, and a target record
 	// takes them only under the rule migrationReplaces states.
 	MigrateLayerConfig(ctx context.Context, cfg LayerConfig) (AttestationCopy, error)
+
+	// WriteAttestations stores the bundles, links, and outcomes of w in one
+	// store write (§4.7.11 Attestation storage). With a claim it applies only
+	// while the live layer layerID holds claim, and returns
+	// ErrIngestSuperseded, changing nothing, otherwise, which includes a
+	// layer that no longer stores w.Policy; an empty claim applies the write
+	// unconditionally and ignores layerID and w.Policy. The result names the
+	// conditional link updates that applied.
+	WriteAttestations(ctx context.Context, tenantID, layerID, claim string, w AttestationWrites) (AttestationWriteResult, error)
+	// GetAttestation returns the stored bundle of digest, or ErrNotFound.
+	GetAttestation(ctx context.Context, tenantID, digest string) (StoredAttestation, error)
+	// ListAttestations returns every stored bundle of the tenant, by digest.
+	ListAttestations(ctx context.Context, tenantID string) ([]StoredAttestation, error)
+	// ListAttestationLinks returns the tenant's links that f selects, by
+	// version, with the verified links of a version first.
+	ListAttestationLinks(ctx context.Context, tenantID string, f LinkFilter) ([]AttestationLink, error)
+	// ListRootRecords returns the §4.7.11 root record of every instance.
+	ListRootRecords(ctx context.Context) ([]RootRecord, error)
+	// ReplaceRootRecord writes next as the root record of its instance when
+	// the stored record equals prev, nil for none, and reports whether it
+	// wrote.
+	ReplaceRootRecord(ctx context.Context, prev *RootRecord, next RootRecord) (bool, error)
 
 	// Data-migration markers (§13.4). The §13.4 additive schema guarantee
 	// does not cover the values stored under the schema, so a one-time

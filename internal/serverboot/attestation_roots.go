@@ -329,7 +329,8 @@ func (c *Config) loadAttestationRoots() error {
 	}
 	for _, fi := range a.files {
 		a.instances[fi.name] = sign.AttestationInstance{
-			Name: fi.name, Root: fi.root, TransparencyLog: fi.tlog, CertificateTransparency: fi.ct,
+			Name: fi.name, Root: sign.FileAttestationRoot{Root: fi.root, ReadAt: fi.readAt},
+			TransparencyLog: fi.tlog, CertificateTransparency: fi.ct,
 		}
 		logRootStatus(fi.name, fi.file, sign.StatusOf(fi.root, fi.readAt))
 	}

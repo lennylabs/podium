@@ -269,6 +269,9 @@ type tenantPlan struct {
 	manifests    []store.ManifestRecord
 	layerConfigs []store.LayerConfig
 	adminGrants  []store.AdminGrant
+	// attestations holds the §4.7.11 bundles and the links of the migrated
+	// manifests, which the pump writes after them.
+	attestations store.AttestationWrites
 }
 
 type migrationPlan struct {
@@ -319,11 +322,16 @@ func planMigration(ctx context.Context, sqlitePath string) (*migrationPlan, erro
 		if err != nil {
 			return nil, fmt.Errorf("list admin grants for %s: %w", t.ID, err)
 		}
+		attestations, err := planAttestations(ctx, src, t.ID, manifests)
+		if err != nil {
+			return nil, err
+		}
 		plan.tenants = append(plan.tenants, tenantPlan{
 			tenant:       t,
 			manifests:    manifests,
 			layerConfigs: layers,
 			adminGrants:  grants,
+			attestations: attestations,
 		})
 		plan.manifestCount += len(manifests)
 		plan.layerCount += len(layers)
@@ -408,6 +416,11 @@ func pumpTenant(ctx context.Context, tp tenantPlan, target store.Store) error {
 			return fmt.Errorf("put manifest %s/%s: %w", tp.tenant.ID, m.ArtifactID, err)
 		}
 	}
+	// Spec: §13.4, §4.7.11 (Attestation storage) — each migrated version takes
+	// the source's links, with the bundles they reference.
+	if _, err := target.WriteAttestations(ctx, tp.tenant.ID, "", "", tp.attestations); err != nil {
+		return fmt.Errorf("copy attestations of %s: %w", tp.tenant.ID, err)
+	}
 	// Spec: §13.4, §4.7.11 (Migration copy) — the copy carries the source's
 	// attestation mark and commit under the copy rule, and names what it did
 	// with each layer's record.
@@ -487,4 +500,41 @@ func copyFile(src, dst string) error {
 	// The close error is returned because a failed close on a written file
 	// can mean the copied bytes never reached disk.
 	return out.Close()
+}
+
+// planAttestations reads the source's §4.7.11 links of the migrated
+// manifests and the bundles they reference. Each migrated version replaces
+// its links on the target, including a version the source links to no
+// bundle, so a re-run leaves the target with the source's links.
+//
+// Spec: §13.4, §4.7.11 (Attestation storage)
+func planAttestations(ctx context.Context, src store.Store, tenantID string, manifests []store.ManifestRecord) (store.AttestationWrites, error) {
+	links, err := src.ListAttestationLinks(ctx, tenantID, store.LinkFilter{})
+	if err != nil {
+		return store.AttestationWrites{}, fmt.Errorf("list attestation links for %s: %w", tenantID, err)
+	}
+	bundles, err := src.ListAttestations(ctx, tenantID)
+	if err != nil {
+		return store.AttestationWrites{}, fmt.Errorf("list attestations for %s: %w", tenantID, err)
+	}
+	byVersion := map[[2]string][]store.AttestationLink{}
+	for _, l := range links {
+		k := [2]string{l.ArtifactID, l.Version}
+		byVersion[k] = append(byVersion[k], l)
+	}
+	linked := map[string]bool{}
+	var w store.AttestationWrites
+	for _, m := range manifests {
+		ls := byVersion[[2]string{m.ArtifactID, m.Version}]
+		for _, l := range ls {
+			linked[l.Digest] = true
+		}
+		w.Versions = append(w.Versions, store.VersionAttestations{ArtifactID: m.ArtifactID, Version: m.Version, ReplaceLinks: true, Links: ls})
+	}
+	for _, b := range bundles {
+		if linked[b.Digest] {
+			w.Bundles = append(w.Bundles, b)
+		}
+	}
+	return w, nil
 }

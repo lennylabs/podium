@@ -217,6 +217,22 @@ podium layer reingest finance --reset-attestation-mark --to-commit <sha>
 
 A layer that `--layer-path` bootstraps carries no signers of its own. Under a `PODIUM_LAYER_TRUST_DEFAULT` of `warn` or `require`, set [`PODIUM_LAYER_TRUST_REQUIREMENTS_FILE`](../../reference/configuration#layers) to a requirements file, such as the output of `podium layer show <id> --requirements`, whose `layer_roots` object maps a layer ID to its `trust_layer_root`.
 
+### Attestation links and outcomes
+
+A cycle that verifies a layer stores each accepted bundle once and links it to the versions whose subject it lists, one link per predicate type and signer, where the signer is the Sigstore instance under which the bundle verified and the certificate's issuer and identity. A version holds at most 16 links. An unchanged artifact keeps its link across signing runs, so a consumer fetches no new bundle for it after each merge. A layer under `none` whose snapshot holds `.podium/attestations/` links each bundle whose signature, certificate chain, and time verify under a configured instance as `unverified`, so a consumer can verify the bundles under its own policy.
+
+Each version also carries an attestation outcome: `verified` when the cycle that evaluated it found every requirement met, `failed` with the code, the scope, the constraint, and the requirement when it did not, and `not_evaluated` for a version of a layer under `none` and for a version stored before the registry kept outcomes. `load_artifact`, each `ok` item of a bulk load, and `podium artifact show` report the links and the outcome:
+
+```
+podium artifact show finance/ap/pay-invoice
+```
+
+The default output writes one `attestation_outcome:` line and one `attestation:` line per link on standard error. The [HTTP API](../../reference/http-api#load_artifact) describes the members, and `GET /v1/attestations/{digest}` serves a linked bundle to a caller who can see a version that links it.
+
+A link records the policy under which the registry verified it. When the trust policy of a layer changes through `podium layer update` or a re-registration, at each registry start, which covers a changed `registry.yaml` declaration, `PODIUM_LAYER_TRUST_DEFAULT`, or trusted root, and at the start of each ingest cycle, the registry re-evaluates the links that were verified under another policy: each bundle a requirement still accepts keeps its link, and a link whose bundle no requirement accepts becomes `unverified`, its version's outcome becomes `failed` with `ingest.attestation_missing` and the constraint `link_downgraded`, and the registry records `layer.attestation_links_downgraded`. A change to `none` changes every verified link to `unverified` and every outcome to `not_evaluated`. A policy change through the layer endpoints also starts an ingest cycle of the layer, and a cycle that was already running under the earlier policy stores its content but writes no link and no outcome. A re-evaluation changes an outcome only when it downgrades a link, so a change that adds a requirement, or that moves the only accepting signer to another signer of the requirement, leaves a stored version `verified` until a cycle evaluates it again; a version no longer in the tree keeps its last outcome. A change of policy refuses no stored version: a version with a downgraded link keeps serving, and the next cycle that passes the layer step links the versions still in the tree under the new policy. While a layer's policy is invalid, such as one that names an instance the registry no longer configures, its `verified` versions are served as `failed` with `ingest.attestation_policy_invalid`, and the stored outcome is served again once the policy is repaired.
+
+Stored bundles count toward the tenant's storage quota. A purge of a version deletes its links, and a bundle that no version links is deleted with it.
+
 ### Derived source binding
 
 A workflow in the layer's own repository needs no explicit binding. When a signer of a `git` layer has a URI identity that begins with the layer's repository URL followed by `/.github/workflows/`, and names no source binding and no `any_source`, the registry sets `source_repository` to the repository URL. When the signer also names no ref binding, the registry sets `source_repository_ref` to the part of the identity after its last `@`. The stored policy holds the derived members, and `podium layer show` prints them.

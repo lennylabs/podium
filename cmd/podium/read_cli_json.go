@@ -149,12 +149,106 @@ type readArtifactShow struct {
 	// digest the registry stores for the served version, omitted when the
 	// registry omits it (§7.6.1).
 	PackageDigest string `json:"package_digest,omitempty"`
+	// Attestations and AttestationOutcome are the §7.2 attestation members,
+	// each omitted when the registry omits it (§7.6.1). They are carried as
+	// the registry served them.
+	Attestations       json.RawMessage `json:"attestations,omitempty"`
+	AttestationOutcome json.RawMessage `json:"attestation_outcome,omitempty"`
 }
 
 // packageDigestMember is the §7.2 package_digest member of a load_artifact
 // response.
 type packageDigestMember struct {
 	PackageDigest string `json:"package_digest"`
+}
+
+// attestationMembers are the §7.2 attestation members of a load_artifact
+// response.
+type attestationMembers struct {
+	Attestations       json.RawMessage `json:"attestations"`
+	AttestationOutcome json.RawMessage `json:"attestation_outcome"`
+}
+
+// attestationLine is the part of an attestations element the default output
+// prints.
+type attestationLine struct {
+	Digest        string `json:"digest"`
+	PredicateType string `json:"predicate_type"`
+	Verdict       string `json:"verdict"`
+	Signer        *struct {
+		Instance string `json:"instance"`
+		Issuer   string `json:"issuer"`
+		Identity string `json:"identity"`
+	} `json:"signer"`
+	AttestedAt string `json:"attested_at"`
+}
+
+// outcomeLine is the part of an attestation_outcome member the default
+// output prints.
+type outcomeLine struct {
+	Outcome string `json:"outcome"`
+	Failure *struct {
+		Code        string `json:"code"`
+		Scope       string `json:"scope"`
+		Constraint  string `json:"constraint"`
+		Requirement *int   `json:"requirement"`
+	} `json:"failure"`
+	EvaluatedAt string `json:"evaluated_at"`
+}
+
+// printAttestations prints the attestation members a load_artifact response
+// carries to w, which is standard error in the default output: one line for
+// the outcome and one for each link. The registry asserts both members, and
+// the read CLI runs no check on them. Each string is printed between
+// quotation marks with its control characters escaped, because the issuer
+// and the identity come from a certificate.
+//
+// Spec: §7.6.1, §7.2 (Attestation members)
+func printAttestations(w io.Writer, body []byte) {
+	var m attestationMembers
+	if err := json.Unmarshal(body, &m); err != nil {
+		return
+	}
+	var o outcomeLine
+	if len(m.AttestationOutcome) > 0 && json.Unmarshal(m.AttestationOutcome, &o) == nil && o.Outcome != "" {
+		line := "attestation_outcome: " + quoteReported(o.Outcome)
+		if f := o.Failure; f != nil {
+			line += " code=" + quoteReported(f.Code) + " scope=" + quoteReported(f.Scope)
+			if f.Constraint != "" {
+				line += " constraint=" + quoteReported(f.Constraint)
+			}
+			if f.Requirement != nil {
+				line += fmt.Sprintf(" requirement=%d", *f.Requirement)
+			}
+		}
+		if o.EvaluatedAt != "" {
+			line += " evaluated_at=" + quoteReported(o.EvaluatedAt)
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
+	var links []attestationLine
+	if len(m.Attestations) == 0 || json.Unmarshal(m.Attestations, &links) != nil {
+		return
+	}
+	for _, l := range links {
+		line := "attestation: " + quoteReported(l.Digest) + " " + quoteReported(l.Verdict) + " predicate_type=" + quoteReported(l.PredicateType)
+		if s := l.Signer; s != nil {
+			line += " instance=" + quoteReported(s.Instance) + " issuer=" + quoteReported(s.Issuer) + " identity=" + quoteReported(s.Identity)
+		}
+		if l.AttestedAt != "" {
+			line += " attested_at=" + quoteReported(l.AttestedAt)
+		}
+		_, _ = fmt.Fprintln(w, line)
+	}
+}
+
+// nullAsAbsent returns nil for an absent or null member, so the envelope
+// omits it as the registry did.
+func nullAsAbsent(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 || string(raw) == "null" {
+		return nil
+	}
+	return raw
 }
 
 // printPackageDigest prints the package digest a load_artifact response
@@ -205,6 +299,7 @@ func emitArtifactShowJSON(body []byte) {
 		Frontmatter  string `json:"frontmatter"`
 		deprecationMembers
 		packageDigestMember
+		attestationMembers
 	}
 	if err := json.Unmarshal(body, &wire); err != nil {
 		fmt.Println(string(body))
@@ -220,6 +315,8 @@ func emitArtifactShowJSON(body []byte) {
 		ReplacedBy:         wire.ReplacedBy,
 		DeprecationWarning: wire.DeprecationWarning,
 		PackageDigest:      wire.PackageDigest,
+		Attestations:       nullAsAbsent(wire.Attestations),
+		AttestationOutcome: nullAsAbsent(wire.AttestationOutcome),
 	}
 	printReadJSON(out, body)
 }

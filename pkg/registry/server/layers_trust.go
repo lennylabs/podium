@@ -2,8 +2,10 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/lennylabs/podium/pkg/layer"
@@ -30,6 +32,27 @@ func (e *LayerEndpoint) WithTrustInstances(fn layer.TrustInstances) *LayerEndpoi
 func (e *LayerEndpoint) WithTrustDefault(mode string) *LayerEndpoint {
 	e.trustDefault = mode
 	return e
+}
+
+// WithTrustPolicyChange installs the §4.7.11 re-evaluation that a register or
+// an update runs after it changed a layer's stored trust policy. It receives
+// the layer as written, and the caller that made the change. A failure is
+// the hook's to log: the change stands, because the next ingest cycle of the
+// layer runs the re-evaluation again.
+//
+// Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy)
+func (e *LayerEndpoint) WithTrustPolicyChange(fn func(ctx context.Context, cfg store.LayerConfig, caller string)) *LayerEndpoint {
+	e.trustPolicyChanged = fn
+	return e
+}
+
+// afterTrustWrite runs the re-evaluation hook when a write changed the
+// stored trust policy of a layer that existed before it.
+func (e *LayerEndpoint) afterTrustWrite(r *http.Request, before store.LayerConfig, existed bool, cfg store.LayerConfig) {
+	if e.trustPolicyChanged == nil || !existed || layer.TrustPolicyEqual(before, cfg) {
+		return
+	}
+	e.trustPolicyChanged(r.Context(), cfg, e.caller(r).Sub)
 }
 
 // WithDeclaredLayers installs the predicate that reports whether a layer of

@@ -9,8 +9,11 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
+	"github.com/lennylabs/podium/internal/clock"
 	"github.com/lennylabs/podium/pkg/attest"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -228,4 +231,135 @@ func startupRefusal(layerID string, err error) bool {
 	log.Printf("warning: attestation: the startup ingest of layer %s was refused with %s (constraint %q); its stored versions stay served, and `podium layer show %s` prints the next step",
 		layerID, code, attest.ReportString(constraint), layerID)
 	return true
+}
+
+// trustPolicyChangeHook returns the re-evaluation a register or an update
+// runs after it changed a layer's trust policy, followed by the ingest cycle
+// the change requests. The layer events record the change; the
+// re-evaluation records layer.attestation_links_downgraded through the audit
+// stream with the caller that made it. A failure is logged and changes
+// nothing the request did, because the requested cycle runs the
+// re-evaluation again. reingest is nil where the registry runs no ingest.
+//
+// Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy)
+func trustPolicyChangeHook(st store.Store, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber, reingest func(store.LayerConfig)) func(context.Context, store.LayerConfig, string) {
+	return func(ctx context.Context, lc store.LayerConfig, caller string) {
+		var emit ingest.AuditEmitterFunc
+		if sink != nil {
+			emit = ingestAuditEmitter(ctx, sink, scrubber, caller, lc.TenantID)
+		}
+		if err := att.Reevaluate(ctx, st, lc, clock.Real{}, emit); err != nil {
+			log.Printf("attestation: layer %s: re-evaluate the links after a trust policy change: %v; the next ingest cycle of the layer runs it again", lc.ID, err)
+		}
+		if reingest != nil {
+			reingest(lc)
+		}
+	}
+}
+
+// reingestQueue runs the ingest cycles that trust policy changes request,
+// outside the requests that made them, under the run context. It keeps at
+// most one request of a layer waiting: a request that arrives while the
+// layer's cycle runs replaces any request already waiting, and runs once that
+// cycle ends. wait lets a shutdown wait for the cycles in flight.
+//
+// Spec: §4.7.11 (Re-evaluation)
+type reingestQueue struct {
+	ctx context.Context
+	run func(context.Context, store.LayerConfig) error
+	// mu guards layers, which maps a running layer to the request waiting
+	// behind it, nil for none; a layer with no running cycle is absent.
+	mu     sync.Mutex
+	layers map[string]*store.LayerConfig
+	wg     sync.WaitGroup
+}
+
+// newReingestQueue returns a queue whose cycles run under ctx.
+func newReingestQueue(ctx context.Context, run func(context.Context, store.LayerConfig) error) *reingestQueue {
+	return &reingestQueue{ctx: ctx, run: run, layers: map[string]*store.LayerConfig{}}
+}
+
+// request asks for an ingest cycle of lc.
+func (q *reingestQueue) request(lc store.LayerConfig) {
+	key := lc.TenantID + "/" + lc.ID
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if _, running := q.layers[key]; running {
+		q.layers[key] = &lc
+		return
+	}
+	q.layers[key] = nil
+	q.wg.Add(1)
+	go q.drain(key, lc)
+}
+
+// drain runs the cycle of lc and then each request that arrived meanwhile.
+// A failure is logged unless the run context ended, so a shutdown logs no
+// cycle that it cancelled.
+func (q *reingestQueue) drain(key string, lc store.LayerConfig) {
+	defer q.wg.Done()
+	for {
+		if err := q.run(q.ctx, lc); err != nil && q.ctx.Err() == nil {
+			log.Printf("attestation: layer %s: the ingest cycle a trust policy change requested failed: %v", lc.ID, err)
+		}
+		q.mu.Lock()
+		next := q.layers[key]
+		if next == nil || q.ctx.Err() != nil {
+			delete(q.layers, key)
+			q.mu.Unlock()
+			return
+		}
+		q.layers[key] = nil
+		q.mu.Unlock()
+		lc = *next
+	}
+}
+
+// wait waits for the cycles in flight, up to timeout, and reports whether
+// they all ended.
+func (q *reingestQueue) wait(timeout time.Duration) bool {
+	done := make(chan struct{})
+	go func() {
+		q.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return true
+	case <-time.After(timeout):
+		log.Printf("attestation: the shutdown stopped waiting for a requested ingest cycle after %s", timeout)
+		return false
+	}
+}
+
+// reevaluateAtStart runs the re-evaluation of every stored layer of each
+// tenant once the start has seeded its layers and loaded its trusted roots.
+// A failure, including a tenant list a multi-tenant registry cannot read,
+// fails the start: a layer whose policy changed between two starts would
+// otherwise serve verified versions under a policy that no longer accepts
+// them.
+//
+// Spec: §4.7.11 (Re-evaluation), §13.10
+func reevaluateAtStart(ctx context.Context, st store.Store, multiTenant bool, tenantID string, att *ingest.AttestationConfig, sink audit.Sink, scrubber *audit.PIIScrubber) error {
+	tenants := []string{tenantID}
+	if multiTenant {
+		list, err := st.ListTenants(ctx)
+		if err != nil {
+			return fmt.Errorf("attestation: re-evaluate the stored layers at the start: read the tenants: %w", err)
+		}
+		tenants = tenants[:0]
+		for _, t := range list {
+			tenants = append(tenants, t.ID)
+		}
+	}
+	for _, tenant := range tenants {
+		var emit ingest.AuditEmitterFunc
+		if sink != nil {
+			emit = ingestAuditEmitter(ctx, sink, scrubber, "", tenant)
+		}
+		if err := att.ReevaluateStoredLayers(ctx, st, tenant, clock.Real{}, emit); err != nil {
+			return fmt.Errorf("attestation: re-evaluate the stored layers of tenant %s at the start: %w", tenant, err)
+		}
+	}
+	return nil
 }

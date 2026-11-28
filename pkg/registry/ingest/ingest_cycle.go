@@ -113,7 +113,7 @@ func (v *attestationVerdict) drop(id string) (RejectedArtifact, bool) {
 // report is the Result member of the verdict of a cycle that ran the
 // attestation steps, nil for one that ran none.
 func (v *attestationVerdict) report(a *AttestationCycle) *AttestationReport {
-	if v == nil || a == nil {
+	if v == nil || !a.verifies() {
 		return nil
 	}
 	r := &AttestationReport{Mode: a.mode, Status: store.AttestationStatusOK, Outcomes: v.outcomes,

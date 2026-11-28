@@ -69,6 +69,11 @@ var additiveColumns = []additiveColumn{
 	{"manifests", "deprecated_at TEXT", "deprecated_at TIMESTAMPTZ"},
 	{"manifests", "deleted_at TEXT", "deleted_at TIMESTAMPTZ"},
 	{"manifests", "package_digest TEXT NOT NULL DEFAULT ''", "package_digest TEXT NOT NULL DEFAULT ''"},
+	// Spec: §13.4 — the default sets not_evaluated on every version stored
+	// before the release that keeps attestation outcomes.
+	{"manifests", "attestation_outcome TEXT NOT NULL DEFAULT 'not_evaluated'", "attestation_outcome TEXT NOT NULL DEFAULT 'not_evaluated'"},
+	{"manifests", "attestation_failure TEXT NOT NULL DEFAULT ''", "attestation_failure TEXT NOT NULL DEFAULT ''"},
+	{"manifests", "attestation_evaluated_at TEXT", "attestation_evaluated_at TIMESTAMPTZ"},
 
 	// domains
 	{"domains", "raw BLOB", "raw BYTEA"},

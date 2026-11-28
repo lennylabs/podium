@@ -1374,6 +1374,9 @@ func run(ctx context.Context, stop func()) error {
 	// PODIUM_MIGRATION_OBJECT_READ_TIMEOUT deadline. It is set here, before
 	// the listener serves any request.
 	registry := core.New(st, boundTenant, bootLayers).WithAdmission(signProvider, objStore, cfg.migrationObjectReadTimeout)
+	// Spec: §4.7.11 (Served outcome) — serving decides the policy validity
+	// of a verified version with the rules ingest applies.
+	registry = registry.WithAttestationPolicyCheck(cfg.ingestAttest.PolicyConstraint)
 	// §13.12 / §4.5.5: apply the tenant registry.yaml discovery defaults
 	// and the allow_per_domain_overrides gate to load_domain rendering.
 	registry = registry.WithDiscoveryDefaults(cfg.discoveryDefaults(), cfg.allowPerDomain())
@@ -1743,6 +1746,12 @@ func run(ctx context.Context, stop func()) error {
 	// §4.7.11 (Trusted root refresh): a stored policy that verifies on the
 	// public-good instance starts the refresh at the start.
 	startRefreshForStoredPolicies(ctx, st, trustLogTenants(ctx, st, cfg.multiTenant, tenantID), cfg.ingestAttest)
+	// Spec: §4.7.11 (Re-evaluation) — a policy that a declaration, the trust
+	// default, or a replaced trusted root changed between two starts is
+	// re-evaluated before the registry serves.
+	if err := reevaluateAtStart(ctx, st, cfg.multiTenant, tenantID, cfg.ingestAttest, auditSink, scrubber); err != nil {
+		return err
+	}
 
 	// §13.10 Identity provider removed between starts: a start whose
 	// verifier is installed records verified identity, and an acknowledged
@@ -1990,7 +1999,19 @@ func run(ctx context.Context, stop func()) error {
 	// lint, hash, store, publish events) instead of only recording intent.
 	// It carries the §4.7.2 freeze windows so an active window blocks ingest
 	// unless the manual reingest passes break-glass.
-	layers.WithReingestRunner(buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, useVectorOutbox, collocatedVec))
+	runner := buildReingestRunner(st, srv, cfg, resourcePut, auditSink, scrubber, ingestSigner, mreg, auditMeter, useVectorOutbox, collocatedVec)
+	layers.WithReingestRunner(runner)
+	// Spec: §4.7.11 (Re-evaluation) — a register or an update that changes a
+	// layer's trust policy re-evaluates the layer's links and requests an
+	// ingest cycle of the layer under the new policy.
+	requested := newReingestQueue(ctx, func(ctx context.Context, lc store.LayerConfig) error {
+		_, err := runner(ctx, lc, nil)
+		return err
+	})
+	// The requested cycles end with ctx; the shutdown waits for them within
+	// the drain deadline, before the store closes.
+	defer requested.wait(shutdownDrainTimeout)
+	layers.WithTrustPolicyChange(trustPolicyChangeHook(st, cfg.ingestAttest, auditSink, scrubber, requested.request))
 
 	// §9: fire a §9.1 operational notification when the reingest path above fails
 	// to ingest a layer. Reuses the same NotificationProvider wired into the
@@ -2143,6 +2164,10 @@ func run(ctx context.Context, stop func()) error {
 	return serveUntilShutdown(ctx, stop, httpServer, ln)
 }
 
+// shutdownDrainTimeout bounds the drain of in-flight requests at shutdown,
+// and the wait for the ingest cycles that trust policy changes requested.
+const shutdownDrainTimeout = 15 * time.Second
+
 // serveUntilShutdown runs srv until ctx is cancelled, then stops accepting
 // connections and drains the in-flight requests. The background daemons share
 // ctx and stop with it. stop() restores the default signal handler so a second
@@ -2159,7 +2184,7 @@ func serveUntilShutdown(ctx context.Context, stop func(), srv *http.Server, ln n
 	case <-ctx.Done():
 		stop()
 		log.Printf("podium-server shutting down")
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownDrainTimeout)
 		defer cancel()
 		return srv.Shutdown(shutdownCtx)
 	}

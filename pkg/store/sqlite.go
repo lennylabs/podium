@@ -98,6 +98,9 @@ func (s *SQLite) applySchema() error {
 			deprecated_at TEXT,
 			deleted_at TEXT,
 			package_digest TEXT NOT NULL DEFAULT '',
+			attestation_outcome TEXT NOT NULL DEFAULT 'not_evaluated',
+			attestation_failure TEXT NOT NULL DEFAULT '',
+			attestation_evaluated_at TEXT,
 			PRIMARY KEY (tenant_id, artifact_id, version)
 		)`,
 		`CREATE TABLE IF NOT EXISTS domains (
@@ -227,6 +230,9 @@ func (s *SQLite) applySchema() error {
 		`CREATE INDEX IF NOT EXISTS idx_vector_pending_next_retry
 			ON vector_pending(next_retry_at)`,
 	}
+	// Spec: §4.7.11 (Attestation storage, Root record).
+	tableStmts = append(tableStmts, attestationTableStmts("BLOB", "TEXT")...)
+	tableStmts = append(tableStmts, rootRecordTableStmt("attestation_roots", "TEXT"))
 	for _, sql := range tableStmts {
 		if _, err := s.db.Exec(sql); err != nil {
 			return fmt.Errorf("schema: %w (statement: %s)", err, sql)
@@ -368,12 +374,17 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if err != nil {
 		return fmt.Errorf("marshal resources: %w", err)
 	}
+	failure, err := failureColumn(rec.AttestationFailure)
+	if err != nil {
+		return err
+	}
 	res, err := s.db.ExecContext(ctx, `
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-			 signature, search_visibility, resources, deprecated_at, deleted_at, package_digest)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, package_digest,
+			 attestation_outcome, attestation_failure, attestation_evaluated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -383,7 +394,8 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt), rec.PackageDigest)
+		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt), rec.PackageDigest,
+		rec.AttestationOutcome, failure, nullTimeText(rec.AttestationEvaluatedAt))
 	if err != nil {
 		return err
 	}
@@ -394,7 +406,7 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 	if n > 0 {
 		return nil // inserted these bytes
 	}
-	if revived, err := sqliteRevive(ctx, s.db, rec, ingestedAt, resources); err != nil || revived {
+	if revived, err := sqliteRevive(ctx, s.db, rec, ingestedAt, resources, failure); err != nil || revived {
 		return err
 	}
 	// The row already existed (a prior ingest, or the winner of a
@@ -418,18 +430,20 @@ func (s *SQLite) PutManifest(ctx context.Context, rec ManifestRecord) error {
 // classify.
 //
 // Spec: §7.3.1 (Removed artifacts)
-func sqliteRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ingestedAt time.Time, resources []byte) (bool, error) {
+func sqliteRevive(ctx context.Context, ex execContexter, rec ManifestRecord, ingestedAt time.Time, resources []byte, failure string) (bool, error) {
 	res, err := ex.ExecContext(ctx, `
 		UPDATE manifests SET
 			type = ?, description = ?, tags = ?, sensitivity = ?, layer = ?, deprecated = ?,
 			ingested_at = ?, frontmatter = ?, body = ?, skill_raw = ?, signature = ?,
-			search_visibility = ?, resources = ?, deprecated_at = ?, package_digest = ?, deleted_at = NULL
+			search_visibility = ?, resources = ?, deprecated_at = ?, package_digest = ?,
+			attestation_outcome = ?, attestation_failure = ?, attestation_evaluated_at = ?, deleted_at = NULL
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ?
 			AND content_hash = ? AND layer = ? AND deleted_at IS NOT NULL`,
 		rec.Type, rec.Description, strings.Join(rec.Tags, "\n"), rec.Sensitivity, rec.Layer,
 		boolToInt(rec.Deprecated), ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw, rec.Signature, rec.SearchVisibility, resources,
 		nullTimeText(rec.DeprecatedAt), rec.PackageDigest,
+		rec.AttestationOutcome, failure, nullTimeText(rec.AttestationEvaluatedAt),
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash, rec.Layer)
 	return rowsChanged(res, err)
 }
@@ -560,6 +574,10 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 	if err != nil {
 		return fmt.Errorf("marshal resources: %w", err)
 	}
+	failure, err := failureColumn(rec.AttestationFailure)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -570,8 +588,9 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		INSERT INTO manifests
 			(tenant_id, artifact_id, version, content_hash, type, description,
 			 tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-			 signature, search_visibility, resources, deprecated_at, deleted_at, package_digest)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 signature, search_visibility, resources, deprecated_at, deleted_at, package_digest,
+			 attestation_outcome, attestation_failure, attestation_evaluated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT (tenant_id, artifact_id, version) DO NOTHING`,
 		rec.TenantID, rec.ArtifactID, rec.Version, rec.ContentHash,
 		rec.Type, rec.Description,
@@ -581,7 +600,8 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 		ingestedAt.UTC().Format(time.RFC3339Nano),
 		rec.Frontmatter, rec.Body, rec.SkillRaw,
 		rec.Signature, rec.SearchVisibility, resources,
-		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt), rec.PackageDigest)
+		nullTimeText(rec.DeprecatedAt), nullTimeText(rec.DeletedAt), rec.PackageDigest,
+		rec.AttestationOutcome, failure, nullTimeText(rec.AttestationEvaluatedAt))
 	if err != nil {
 		return err
 	}
@@ -591,7 +611,7 @@ func (s *SQLite) PutManifestWithVectorPending(ctx context.Context, rec ManifestR
 	}
 	revived := false
 	if n == 0 {
-		if revived, err = sqliteRevive(ctx, tx, rec, ingestedAt, resources); err != nil {
+		if revived, err = sqliteRevive(ctx, tx, rec, ingestedAt, resources, failure); err != nil {
 			return err
 		}
 	}
@@ -722,7 +742,8 @@ func (s *SQLite) GetManifest(ctx context.Context, tenantID, artifactID, version 
 	row := s.db.QueryRowContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-		       signature, search_visibility, resources, deprecated_at, deleted_at, package_digest
+		       signature, search_visibility, resources, deprecated_at, deleted_at, package_digest,
+		       attestation_outcome, attestation_failure, attestation_evaluated_at
 		FROM manifests
 		WHERE tenant_id = ? AND artifact_id = ? AND version = ? AND deleted_at IS NULL`,
 		tenantID, artifactID, version)
@@ -848,7 +869,8 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT tenant_id, artifact_id, version, content_hash, type, description,
 		       tags, sensitivity, layer, deprecated, ingested_at, frontmatter, body, skill_raw,
-		       signature, search_visibility, resources, deprecated_at, deleted_at, package_digest
+		       signature, search_visibility, resources, deprecated_at, deleted_at, package_digest,
+		       attestation_outcome, attestation_failure, attestation_evaluated_at
 		FROM manifests
 		WHERE tenant_id = ? `+tombstone+`
 		ORDER BY artifact_id ASC, version ASC`, tenantID)
@@ -871,7 +893,14 @@ func (s *SQLite) listManifests(ctx context.Context, tenantID string, includeDele
 // DeprecatedAt predates `before` (§8.4 90-day window). Timestamps are
 // stored as RFC3339Nano UTC text, which sorts lexicographically.
 func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time) (int, error) {
-	res, err := s.db.ExecContext(ctx, `
+	// Spec: §4.7.11 (Attestation storage) — the removal and the sweep of its
+	// links and bundles are one transaction.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	res, err := tx.ExecContext(ctx, `
 		DELETE FROM manifests
 		WHERE deprecated = 1 AND deprecated_at IS NOT NULL AND deprecated_at < ?`,
 		before.UTC().Format(time.RFC3339Nano))
@@ -879,7 +908,13 @@ func (s *SQLite) PurgeDeprecatedManifests(ctx context.Context, before time.Time)
 		return 0, err
 	}
 	n, err := res.RowsAffected()
-	return int(n), err
+	if err != nil {
+		return 0, err
+	}
+	if err := sweepAttestations(ctx, tx); err != nil {
+		return 0, err
+	}
+	return int(n), tx.Commit()
 }
 
 // PutDomain upserts the DOMAIN.md record for a (tenant, layer, path).
@@ -1258,6 +1293,9 @@ func (s *SQLite) PurgeExpiredLayerDeletions(ctx context.Context, before time.Tim
 	if err != nil {
 		return 0, err
 	}
+	if err := sweepAttestations(ctx, tx); err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
@@ -1320,16 +1358,22 @@ func scanManifest(scanner rowScanner) (ManifestRecord, error) {
 	var tags string
 	var ingestedAt string
 	var resources []byte
-	var deprecatedAt, deletedAt sql.NullString
+	var deprecatedAt, deletedAt, evaluatedAt sql.NullString
+	var failure string
 	err := scanner.Scan(
 		&rec.TenantID, &rec.ArtifactID, &rec.Version, &rec.ContentHash,
 		&rec.Type, &rec.Description, &tags, &rec.Sensitivity, &rec.Layer,
 		&deprecated, &ingestedAt, &rec.Frontmatter, &rec.Body, &rec.SkillRaw,
 		&rec.Signature, &rec.SearchVisibility, &resources,
-		&deprecatedAt, &deletedAt, &rec.PackageDigest)
+		&deprecatedAt, &deletedAt, &rec.PackageDigest,
+		&rec.AttestationOutcome, &failure, &evaluatedAt)
 	if err != nil {
 		return ManifestRecord{}, err
 	}
+	if rec.AttestationFailure, err = parseFailureColumn(failure); err != nil {
+		return ManifestRecord{}, err
+	}
+	rec.AttestationEvaluatedAt = parseNullTimeText(evaluatedAt)
 	rec.Deprecated = deprecated != 0
 	if tags != "" {
 		rec.Tags = strings.Split(tags, "\n")

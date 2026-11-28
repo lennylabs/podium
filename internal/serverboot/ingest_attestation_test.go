@@ -6,10 +6,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/lennylabs/podium/internal/testharness"
+	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/registry/ingest"
 	"github.com/lennylabs/podium/pkg/sign"
@@ -157,5 +160,126 @@ func TestPublicGoodRefresh_StartsOnce(t *testing.T) {
 	defer stop()
 	if built.DefaultMode != "warn" || built.MaxBundles != 3 || built.OnPublicGood == nil {
 		t.Fatalf("config %+v", built)
+	}
+}
+
+// errListLinks fails the link read of the re-evaluation.
+type errListLinks struct{ store.Store }
+
+func (errListLinks) ListAttestationLinks(context.Context, string, store.LinkFilter) ([]store.AttestationLink, error) {
+	return nil, errors.New("store down")
+}
+
+// Spec: §4.7.11 (Re-evaluation), §7.3.1 (Layer trust policy) — the hook a
+// policy change runs re-evaluates the layer's links, records the downgrade
+// on the audit stream with the caller, and logs a failure without failing.
+func TestTrustPolicyChangeHook(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	at := time.Date(2026, 11, 27, 9, 0, 0, 0, time.UTC)
+	if err := st.PutManifest(ctx, store.ManifestRecord{TenantID: "t", ArtifactID: "a/x", Version: "1.0.0", ContentHash: "sha256:x",
+		Type: "agent", Layer: "L", AttestationOutcome: store.OutcomeVerified}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.WriteAttestations(ctx, "t", "", "", store.AttestationWrites{Versions: []store.VersionAttestations{{ArtifactID: "a/x", Version: "1.0.0",
+		Links: []store.AttestationLink{{PredicateType: "p", Instance: "github", Digest: "sha256:d", Verdict: store.VerdictVerified, VerifiedUnder: "k", LinkedAt: at}}}}}); err != nil {
+		t.Fatal(err)
+	}
+	sink := &recordingSink{}
+	lc := store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", TrustMode: "none"}
+	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, sink, nil, nil)(ctx, lc, "alice")
+	events := sink.events
+	if len(events) != 1 || events[0].Type != audit.EventLayerAttestationLinksDowngraded || events[0].Caller != "alice" || events[0].Context["cause"] != "policy_change" {
+		t.Fatalf("events %+v", events)
+	}
+	trustPolicyChangeHook(errListLinks{st}, &ingest.AttestationConfig{}, nil, nil, nil)(ctx, lc, "alice")
+}
+
+// errListTenants fails the tenant list.
+type errListTenants struct{ store.Store }
+
+func (errListTenants) ListTenants(context.Context) ([]store.Tenant, error) {
+	return nil, errors.New("store down")
+}
+
+// Spec: §4.7.11 (Re-evaluation) — the hook requests an ingest cycle of the
+// changed layer through the queue, which keeps at most one request of a
+// layer waiting behind the running one, logs a failure only while the run
+// context lives, and lets a shutdown wait for the cycles in flight.
+func TestReingestQueue(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var ran []string
+	q := newReingestQueue(ctx, func(_ context.Context, lc store.LayerConfig) error {
+		mu.Lock()
+		ran = append(ran, lc.ID+"@"+lc.TrustMode)
+		first := len(ran) == 1
+		mu.Unlock()
+		if first {
+			<-release
+		}
+		return errors.New("source down")
+	})
+	st := store.NewMemory()
+	trustPolicyChangeHook(st, &ingest.AttestationConfig{}, nil, nil, q.request)(ctx, store.LayerConfig{TenantID: "t", ID: "L", TrustMode: "none"}, "alice")
+	for _, mode := range []string{"warn", "require", "none"} {
+		q.request(store.LayerConfig{TenantID: "t", ID: "L", TrustMode: mode})
+	}
+	close(release)
+	if !q.wait(5 * time.Second) {
+		t.Fatal("the queue did not drain")
+	}
+	mu.Lock()
+	got := strings.Join(ran, ",")
+	mu.Unlock()
+	if got != "L@none,L@none" {
+		t.Errorf("cycles %s, want the first and the last request", got)
+	}
+	// A cycle cancelled by the shutdown logs nothing, and wait gives up at
+	// its deadline.
+	block := make(chan struct{})
+	q2 := newReingestQueue(ctx, func(ctx context.Context, _ store.LayerConfig) error {
+		<-block
+		return ctx.Err()
+	})
+	q2.request(store.LayerConfig{TenantID: "t", ID: "M"})
+	if q2.wait(10 * time.Millisecond) {
+		t.Error("wait returned before the cycle ended")
+	}
+	cancel()
+	close(block)
+	if !q2.wait(5 * time.Second) {
+		t.Error("the cancelled queue did not drain")
+	}
+}
+
+// Spec: §4.7.11 (Re-evaluation), §13.10 — the start re-evaluates the stored
+// layers of each tenant, and a start that cannot read the tenants of a
+// multi-tenant registry, or cannot complete the re-evaluation, fails.
+func TestReevaluateAtStart(t *testing.T) {
+	ctx := context.Background()
+	st := store.NewMemory()
+	if err := st.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "L", SourceType: "local", LocalPath: "/x", TrustMode: "none"}); err != nil {
+		t.Fatal(err)
+	}
+	att := &ingest.AttestationConfig{}
+	if err := reevaluateAtStart(ctx, st, false, "t", att, &recordingSink{}, nil); err != nil {
+		t.Errorf("single tenant: %v", err)
+	}
+	if err := reevaluateAtStart(ctx, st, true, "", att, nil, nil); err != nil {
+		t.Errorf("multi-tenant: %v", err)
+	}
+	if err := reevaluateAtStart(ctx, errListTenants{st}, true, "", att, nil, nil); err == nil || !strings.Contains(err.Error(), "read the tenants") {
+		t.Errorf("unreadable tenants: %v", err)
+	}
+	if err := reevaluateAtStart(ctx, errListLinks{st}, false, "t", att, nil, nil); err == nil || !strings.Contains(err.Error(), "tenant t") {
+		t.Errorf("unreadable links: %v", err)
 	}
 }

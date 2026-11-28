@@ -1539,6 +1539,7 @@ func artifactShow(args []string) int {
 	// package digest goes to standard error, so standard output stays the
 	// manifest document.
 	printPackageDigest(os.Stderr, body)
+	printAttestations(os.Stderr, body)
 	printArtifactHuman(body)
 	return 0
 }

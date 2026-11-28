@@ -39,6 +39,8 @@ type Memory struct {
 	// It sits apart from layers so PutLayerConfig, which stores the caller's
 	// config whole, keeps it.
 	ingestClaims map[string]string
+	// att holds the §4.7.11 bundles, links, and root records.
+	att *memoryAttestations
 }
 
 // NewMemory returns a fresh in-memory Store.
@@ -364,6 +366,7 @@ func (s *Memory) PurgeDeprecatedManifests(_ context.Context, before time.Time) (
 			n++
 		}
 	}
+	s.sweepAttestationsLocked()
 	return n, nil
 }
 
@@ -680,6 +683,7 @@ func (s *Memory) PurgeExpiredLayerDeletions(_ context.Context, before time.Time)
 			delete(s.manifests, mk)
 		}
 	}
+	s.sweepAttestationsLocked()
 	return n, nil
 }
 

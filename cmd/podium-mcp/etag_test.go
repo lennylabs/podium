@@ -99,7 +99,7 @@ func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 			w.Header().Set("X-Podium-Content-Hash", freshHash)
 			w.WriteHeader(http.StatusOK)
 		case http.MethodGet:
-			w.Header().Set("ETag", `"`+freshHash+`"`)
+			w.Header().Set("ETag", `"`+freshHash+`+0123456789abcdef0123456789abcdef"`)
 			w.Header().Set("Content-Type", "application/json")
 			_, _ = w.Write([]byte(respBody))
 		}
@@ -132,6 +132,10 @@ func TestLoadArtifact_ConditionalGET200ServesFreshBody(t *testing.T) {
 	}
 	if m["manifest_body"] != "fresh-body" {
 		t.Errorf("manifest_body = %v, want fresh-body: %v", m["manifest_body"], m)
+	}
+	// Spec: §7.2 — the fresh record keeps the entity tag of its response.
+	if got := cache.validator(freshHash, "team/x"); got != `"`+freshHash+`+0123456789abcdef0123456789abcdef"` {
+		t.Errorf("stored tag = %q", got)
 	}
 }
 
@@ -263,5 +267,65 @@ func TestLoadArtifact_304WithRetiredKeySignatureRefetches(t *testing.T) {
 	}
 	if got := stub.uncondGets.Load(); got != 1 {
 		t.Errorf("unconditional GETs = %d, want 1", got)
+	}
+}
+
+// Spec: §7.2 — the bridge keeps the entity tag the registry returned with
+// the cached record and sends that tag back, because the tag of a version
+// that carries attestation members covers them; a record cached before the
+// bridge kept the tag sends the content-hash tag.
+func TestLoadArtifact_SendsTheStoredEntityTag(t *testing.T) {
+	t.Parallel()
+	const fm = "---\ntype: agent\nversion: 1.0.0\n---\n"
+	hash := "sha256:" + version.CanonicalContentHash([]byte(fm), nil, nil)
+	stored := `"` + hash + `+0123456789abcdef0123456789abcdef"`
+	cached := sealDelivery(loadArtifactResponse{
+		ID: "team/x", Type: "agent", Version: "1.0.0", ContentHash: hash,
+		Frontmatter: fm, ManifestBody: "cached-body",
+	})
+	var sawIfNoneMatch atomic.Value
+	sawIfNoneMatch.Store("")
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			w.WriteHeader(http.StatusMethodNotAllowed)
+			return
+		}
+		sawIfNoneMatch.Store(r.Header.Get("If-None-Match"))
+		w.Header().Set("ETag", stored)
+		w.WriteHeader(http.StatusNotModified)
+	}))
+	t.Cleanup(ts.Close)
+	dir := t.TempDir()
+	cache, _ := newContentCache(dir)
+	resolutions := newResolutionCache(dir)
+	t.Cleanup(func() { _ = resolutions.Close() })
+	resolutions.PutVersion("team/x", "1.0.0", hash, time.Now())
+	srv := &mcpServer{
+		cfg:         &config{cacheDir: dir, cacheMode: "always-revalidate", registry: ts.URL, harness: "none", verifyPolicy: sign.PolicyNever},
+		cache:       cache,
+		resolutions: resolutions,
+		adapters:    adapter.DefaultRegistry(),
+		http:        &http.Client{},
+	}
+	if err := srv.cacheVerifiedRecord(cached); err != nil {
+		t.Fatal(err)
+	}
+	if got := cache.validator(hash, "team/x"); got != `"`+hash+`"` {
+		t.Errorf("a record cached without a tag sends %q", got)
+	}
+	cached.ETag = stored
+	if err := srv.cacheVerifiedRecord(cached); err != nil {
+		t.Fatal(err)
+	}
+	out, ok := srv.loadArtifact(map[string]any{"id": "team/x", "version": "1.0.0"}).(map[string]any)
+	if !ok || out["manifest_body"] != "cached-body" {
+		t.Fatalf("load: %v", out)
+	}
+	if got := sawIfNoneMatch.Load().(string); got != stored {
+		t.Errorf("If-None-Match = %q, want the stored tag %q", got, stored)
+	}
+	// The 304 served the cached record again, which keeps its tag.
+	if got := cache.validator(hash, "team/x"); got != stored {
+		t.Errorf("tag after the 304 = %q", got)
 	}
 }
