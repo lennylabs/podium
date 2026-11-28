@@ -20,7 +20,8 @@ const (
 	inTotoPayloadType             = "application/vnd.in-toto+json"
 	inTotoStatementV1             = "https://in-toto.io/Statement/v1"
 	// reservedSignedAtPrefix is the subject prefix that no accepted
-	// certificate-signed bundle lists.
+	// certificate-signed bundle lists, and under which a key-signed bundle
+	// lists its one signed-time subject.
 	reservedSignedAtPrefix = ".podium/signed-at/"
 )
 
@@ -153,10 +154,28 @@ func parseSigstoreBundle(raw []byte) (*bundle.Bundle, *protobundle.Bundle, error
 
 // parseAttestationStatement reads payload as an in-toto Statement v1 under
 // the §4.7.10 JSON rule, by exact member name, and refuses a statement
-// that lists a subject under .podium/signed-at/.
+// that lists a subject under .podium/signed-at/, which no
+// certificate-signed bundle may list.
 //
 // Spec: §4.7.11.
 func parseAttestationStatement(payload []byte) (AttestationStatement, error) {
+	st, err := parseStatementPayload(payload)
+	if err != nil {
+		return AttestationStatement{}, err
+	}
+	if err := refuseSignedTimeSubjects(st); err != nil {
+		return AttestationStatement{}, err
+	}
+	return st, nil
+}
+
+// parseStatementPayload reads payload as an in-toto Statement v1 under the
+// §4.7.10 JSON rule, by exact member name. The reserved names are the
+// caller's: a certificate-signed bundle refuses every subject under
+// .podium/signed-at/, and a key-signed one applies the signed-time rule.
+//
+// Spec: §4.7.11.
+func parseStatementPayload(payload []byte) (AttestationStatement, error) {
 	members, err := version.DecodeJSONObject(payload)
 	if err != nil {
 		return AttestationStatement{}, refuse(ReasonPayload, "the payload fails the JSON rule", err)
@@ -172,11 +191,6 @@ func parseAttestationStatement(payload []byte) (AttestationStatement, error) {
 	}
 	if st.Subjects, err = parseSubjects(members["subject"]); err != nil {
 		return AttestationStatement{}, err
-	}
-	for _, s := range st.Subjects {
-		if strings.HasPrefix(s.Name, reservedSignedAtPrefix) {
-			return AttestationStatement{}, refuse(ReasonReservedSubject, "the statement lists a subject under .podium/signed-at/", nil)
-		}
 	}
 	return st, nil
 }

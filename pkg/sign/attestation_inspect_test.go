@@ -26,8 +26,15 @@ func TestInspectAttestationBundle(t *testing.T) {
 	if s, err := sign.InspectAttestationBundle(ghBundle(t, h, sh.WithLeaf(sh.LeafWithoutIssuer()))); err != nil || s.Issuer != "" || s.Identity != sh.DefaultSAN {
 		t.Fatalf("no issuer: %+v, %v", s, err)
 	}
-	if s, err := sign.InspectAttestationBundle(ghBundle(t, h, sh.WithoutCertificate())); err != nil || s.Issuer != "" || s.Identity != "" {
+	// A bundle with a public key hint is key-signed: it names no signer,
+	// and its statement reads under the signed-time rule, so one that
+	// lists the layer subject with no signed time is refused.
+	artifactOnly := sh.Statement(t, slsaProvenance, sh.Subject{Name: "finance/close-books@1.4.0", SHA256: digestA})
+	if s, err := sign.InspectAttestationBundle(h.DSSEBundle(artifactOnly, sh.WithoutCertificate())); err != nil || s.Issuer != "" || s.Identity != "" || !s.KeySigned {
 		t.Fatalf("no certificate: %+v, %v", s, err)
+	}
+	if _, err := sign.InspectAttestationBundle(ghBundle(t, h, sh.WithoutCertificate())); err == nil {
+		t.Fatal("a key-signed layer subject with no signed time was accepted")
 	}
 	for name, raw := range map[string][]byte{
 		"not JSON":       []byte("x"),

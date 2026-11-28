@@ -122,7 +122,7 @@ func (h *Harness) buildKeyless(contentHash string, cfg envConfig) ([]byte, keyle
 	b.MessageSignature = &messageSignatureJSON{Signature: parts.leaf.sig}
 	b.MessageSignature.MessageDigest.Algorithm = cfg.digestAlg
 	b.MessageSignature.MessageDigest.Digest = digest
-	out, err := marshalBundle(b, false, "")
+	out, err := marshalBundle(b, "", "")
 	return out, parts, err
 }
 
