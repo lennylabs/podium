@@ -2,8 +2,23 @@
 
 package main
 
-// ownedByProcessUser reports a file as the user's own on a platform where
-// the MCP server reads no file owner, so a workspace file of the working
-// directory that does not parse refuses the start, as the fail-closed
-// reading of §4.7.11 states.
-func ownedByProcessUser(string) bool { return true }
+import (
+	"io/fs"
+	"os"
+	"path/filepath"
+)
+
+// ownWorkspaceFile reports a workspace file as the user's own unless it or
+// its .podium directory is a symbolic link. The MCP server reads no file
+// owner on this platform, so a file of the working directory that fails
+// refuses the start, the fail-closed reading of §4.7.11.
+//
+// Spec: §4.7.11 (User sources of the MCP server, Keys)
+func ownWorkspaceFile(path string) bool {
+	for _, p := range []string{filepath.Dir(path), path} {
+		if fi, err := os.Lstat(p); err == nil && fi.Mode()&fs.ModeSymlink != 0 {
+			return false
+		}
+	}
+	return true
+}

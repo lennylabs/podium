@@ -244,47 +244,55 @@ func (b *policyBuilder) repositorySources() error {
 	}
 	for _, name := range []string{"sync.yaml", "sync.local.yaml"} {
 		path := filepath.Join(ws, ".podium", name)
-		cfg, err := synccfg.ReadConfigFile(path)
-		if err != nil {
-			if err := b.unreadableWorkspaceFile(ws, path, err); err != nil {
+		if err := b.addWorkspaceFile(path); err != nil {
+			if err := b.workspaceFileFailed(ws, path, err); err != nil {
 				return err
 			}
-			continue
-		}
-		if cfg == nil {
-			continue
-		}
-		a, err := cfg.Defaults.AttestationDefaults()
-		if err != nil {
-			return policyRefusal("%s: %v", path, err)
-		}
-		for _, k := range a.Set() {
-			if slices.Contains(synccfg.UserOnlyAttestationKeys, k) {
-				b.in.stderr("WARN: %s sets defaults.attestation.%s, which takes effect only from ~/.podium/sync.yaml and the machine file; ignored\n", path, k)
-			}
-		}
-		if err := b.addSource(attest.RepositorySource, path, a.Policy, synccfg.ResolvePath(path, a.PolicyFile), ""); err != nil {
-			return err
 		}
 	}
 	return nil
 }
 
-// unreadableWorkspaceFile handles a workspace sync.yaml that cannot be read
-// or parsed. The start is refused only when the workspace is the working
-// directory and the user of the process owns the file. A file of an
-// ancestor workspace, such as /tmp/.podium/sync.yaml above a directory under
-// /tmp, and a file another user owns, can be placed by another local user;
-// they hold only repository-source rules, which no user rule depends on, so
-// they are ignored with a notice rather than stopping every start below
-// them.
-//
-// Spec: §4.7.11 (User sources of the MCP server, Keys)
-func (b *policyBuilder) unreadableWorkspaceFile(ws, path string, err error) error {
-	if sameDir(ws, b.in.cwd) && ownedByProcessUser(path) {
+// addWorkspaceFile adds one workspace sync.yaml or sync.local.yaml as a
+// repository source. It returns the refusal of a file that does not parse,
+// whose attestation block does not decode, or whose mode or policy file
+// does not load; nothing is added for such a file.
+func (b *policyBuilder) addWorkspaceFile(path string) error {
+	cfg, err := synccfg.ReadConfigFile(path)
+	if err != nil {
 		return policyRefusal("%v", err)
 	}
-	b.in.stderr("WARN: ignoring the workspace file %s, which does not parse and is not this user's file in the working directory: %v\n", path, err)
+	if cfg == nil {
+		return nil
+	}
+	a, err := cfg.Defaults.AttestationDefaults()
+	if err != nil {
+		return policyRefusal("%s: %v", path, err)
+	}
+	for _, k := range a.Set() {
+		if slices.Contains(synccfg.UserOnlyAttestationKeys, k) {
+			b.in.stderr("WARN: %s sets defaults.attestation.%s, which takes effect only from ~/.podium/sync.yaml and the machine file; ignored\n", path, k)
+		}
+	}
+	return b.addSource(attest.RepositorySource, path, a.Policy, synccfg.ResolvePath(path, a.PolicyFile), "")
+}
+
+// workspaceFileFailed handles a workspace sync.yaml that addWorkspaceFile
+// refused. The start is refused only when the workspace is the working
+// directory, neither the file nor its .podium directory is a symbolic link,
+// and the user of the process owns the file. A file of an ancestor
+// workspace, such as /tmp/.podium/sync.yaml above a directory under /tmp, a
+// linked file, and a file another user owns can be placed by another local
+// user; they hold only repository-source rules, which no user rule depends
+// on, so they are ignored with a notice rather than stopping every start
+// below them.
+//
+// Spec: §4.7.11 (User sources of the MCP server, Keys)
+func (b *policyBuilder) workspaceFileFailed(ws, path string, err error) error {
+	if sameDir(ws, b.in.cwd) && ownWorkspaceFile(path) {
+		return err
+	}
+	b.in.stderr("WARN: ignoring the workspace file %s, which is not this user's own file in the working directory: %v\n", path, err)
 	if !slices.Contains(b.out.notices, noticeText(constraintWorkspaceFile)) {
 		b.out.notices = append(b.out.notices, noticeText(constraintWorkspaceFile))
 	}

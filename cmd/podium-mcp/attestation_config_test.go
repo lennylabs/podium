@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -342,15 +343,59 @@ func TestConsumerAttestation_UnparseableWorkspaceFile(t *testing.T) {
 	if n := strings.Count(err.Error(), path); n != 1 {
 		t.Errorf("the refusal names the file %d times: %v", n, err)
 	}
-	// A parsing file of an ancestor with a bad attestation block still
-	// refuses the start.
-	b := newConsumerEnv(t)
-	anc := t.TempDir()
-	writeFiles(t, anc, map[string]string{".podium/sync.yaml": "defaults:\n  attestation:\n    polcy: require\n"})
-	b.cwd = filepath.Join(anc, "sub")
-	writeFiles(t, b.cwd, map[string]string{"x": ""})
-	_, err = b.load()
-	wantPolicyRefusal(t, err, "polcy")
+}
+
+// Spec: §4.7.11 (Keys) — every refusal of a workspace file, an attestation
+// block that does not decode, a bad mode, and a policy file that does not
+// load as well as a file that does not parse, applies only to the user's own
+// file in the working directory: the same file in an ancestor, a linked
+// file, and a file under a linked .podium are ignored with workspace_file.
+func TestConsumerAttestation_EveryWorkspaceRefusalIsLocal(t *testing.T) {
+	t.Parallel()
+	for name, body := range map[string]string{
+		"unparseable":   "defaults: [\n",
+		"bad block key": "defaults:\n  attestation:\n    bogus: 1\n",
+		"bad mode":      "defaults:\n  attestation:\n    policy: bogus\n",
+		"missing file":  "defaults:\n  attestation:\n    policy_file: /nonexistent/p.json\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			ancestor := newConsumerEnv(t)
+			shared := t.TempDir()
+			writeFiles(t, shared, map[string]string{".podium/sync.yaml": body})
+			ancestor.cwd = filepath.Join(shared, "alice", "sub")
+			writeFiles(t, ancestor.cwd, map[string]string{"x": ""})
+			if a := ancestor.mustLoad(t); len(a.notices) != 1 || !strings.Contains(a.notices[0], "workspace_file") {
+				t.Errorf("ancestor: notices = %v", a.notices)
+			}
+
+			own := newConsumerEnv(t)
+			writeFiles(t, own.cwd, map[string]string{".podium/sync.yaml": body})
+			_, err := own.load()
+			wantPolicyRefusal(t, err, "")
+
+			if runtime.GOOS == "windows" {
+				return
+			}
+			linkedFile := newConsumerEnv(t)
+			target := filepath.Join(t.TempDir(), "sync.yaml")
+			writeFiles(t, filepath.Dir(target), map[string]string{"sync.yaml": body})
+			writeFiles(t, linkedFile.cwd, map[string]string{".podium/keep": ""})
+			if err := os.Symlink(target, filepath.Join(linkedFile.cwd, ".podium", "sync.yaml")); err != nil {
+				t.Fatal(err)
+			}
+			if a := linkedFile.mustLoad(t); len(a.notices) != 1 {
+				t.Errorf("linked file: notices = %v", a.notices)
+			}
+			linkedDir := newConsumerEnv(t)
+			if err := os.Symlink(filepath.Dir(filepath.Join(shared, ".podium", "sync.yaml")), filepath.Join(linkedDir.cwd, ".podium")); err != nil {
+				t.Fatal(err)
+			}
+			if a := linkedDir.mustLoad(t); len(a.notices) != 1 {
+				t.Errorf("linked .podium: notices = %v", a.notices)
+			}
+		})
+	}
 }
 
 // Spec: §6.2, §4.7.11 (Repository-source roots) — the bundle deadline is

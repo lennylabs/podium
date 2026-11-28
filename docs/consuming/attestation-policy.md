@@ -132,9 +132,17 @@ not dropped without an error.
 `podium-mcp` reads `~/.podium/sync.yaml`, including `defaults.registry`, from
 the home directory that the account database records for the user of the
 process. It does not read `HOME`, `USERPROFILE`, or an `XDG_*` variable, which
-a project `.mcp.json` can set. The Linux release binaries read `/etc/passwd`
-for the lookup, so a user that only a directory service lists has no account
-home for `podium-mcp`. When the account database has no entry for the
+a project `.mcp.json` can set.
+
+On Linux, the release binaries take the account home from `/etc/passwd`.
+An account that exists only in LDAP, SSSD, or another directory service has
+no account home for `podium-mcp`: each load result carries the `user_home`
+notice, and the server reads none of that user's `~/.podium/sync.yaml`,
+including `defaults.registry`. The server does not fall back to `HOME`,
+because the environment of an MCP server can come from workspace
+configuration. On such a host, put the protective policy in the machine file
+`/etc/podium/sync.yaml`, and name the registry with `PODIUM_REGISTRY` or
+`--registry` in the harness's server entry. When the account database has no entry for the
 user, as in a container that runs under an unlisted user ID, the server reads
 no user file, names the failure on standard error, and adds
 `config.attestation_policy_unavailable (constraint user_home)` to the
@@ -196,13 +204,14 @@ Each bundle fetch has a deadline of 30 seconds, which
 `podium-mcp` refuses to start with `config.attestation_policy_unavailable`
 when a policy file that a source names cannot be read or is invalid, when
 `~/.podium/sync.yaml` does not parse or holds an unknown key, when a
-workspace `sync.yaml` in its working directory that the user owns does not
-parse, when a `sync.yaml` holds a `defaults.attestation` block with an unknown
-key or a value of the wrong type, when the machine file passes
+`sync.yaml` holds a `defaults.attestation` block with an unknown key or a
+value of the wrong type (for a workspace file, only the user's own file in
+the working directory), when the machine file passes
 its check and does not parse, and, under a policy above `none`, when
 `PODIUM_ATTESTATION_TRUSTED_ROOT_FILE` cannot be loaded or a root setting is
-not a valid duration. A workspace file of an ancestor directory, or one that
-another user owns, that does not parse is ignored and reported as
+not a valid duration. A workspace file that fails any of these checks, but
+lies in an ancestor directory, is a symbolic link or under a linked
+`.podium`, or is owned by another user, is ignored and reported as
 `config.attestation_policy_unavailable (constraint workspace_file)` in each
 load result, because another local user can place such a file, as in
 `/tmp/.podium/`. [Error codes](../reference/error-codes#materialize) lists
