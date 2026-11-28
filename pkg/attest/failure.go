@@ -47,6 +47,7 @@ const (
 	ConstraintDuplicateID     = "duplicate_id"
 	ConstraintFile            = "file"
 	ConstraintEntry           = "entry"
+	ConstraintMCPServerName   = "mcp_server_name"
 	ConstraintLayerRootUnlist = "layer_root_unlisted"
 )
 

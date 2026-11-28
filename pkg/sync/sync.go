@@ -776,6 +776,10 @@ func applyOverlay(base []materialRecord, overlayPath string, att *Attestation) (
 			warnings = append(warnings, fmt.Sprintf("overlay package %s skipped: %v", attest.ReportString(rec.ID), err))
 			continue
 		}
+		if err := checkMCPServerName(rec.Artifact); err != nil {
+			warnings = append(warnings, fmt.Sprintf("overlay package %s skipped: %v", attest.ReportString(rec.ID), err))
+			continue
+		}
 		if ok, warning := att.overlayApplies(rec.ID); !ok {
 			if warning != "" {
 				warnings = append(warnings, warning)

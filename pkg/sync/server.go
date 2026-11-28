@@ -181,11 +181,27 @@ func (f serverFetcher) fetchServerRecord(ctx context.Context, id, layerID string
 		return materialRecord{ID: id, LayerID: layerID, refusal: err}, nil
 	}
 	rec := recordFromServed(served.Record, id, layerID, resources)
+	if err := checkMCPServerName(rec.Artifact); err != nil {
+		return materialRecord{ID: id, LayerID: layerID, refusal: err}, nil
+	}
 	checker := f.attest
 	rec.check = func(ctx context.Context) (attest.Result, error) {
 		return checker.Verify(ctx, attest.Delivery{Request: attest.Request{ID: id}, Served: served})
 	}
 	return rec, nil
+}
+
+// checkMCPServerName refuses a served or overlay mcp-server record whose
+// declared name the §4.1 MCP server name rule refuses, under every mode,
+// because an adapter writes the name as a key of shared configuration files.
+//
+// Spec: §4.1 (MCP server names)
+func checkMCPServerName(a *manifest.Artifact) error {
+	if manifest.MCPServerNameRefused(a) {
+		return attest.NewFailure(attest.CodeRequestMismatch, attest.ConstraintMCPServerName,
+			"the record is an mcp-server whose name breaks the MCP server name rule")
+	}
+	return nil
 }
 
 // bindServed applies the §4.7.11 well-formed rule to the resource paths of

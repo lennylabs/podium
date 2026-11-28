@@ -101,7 +101,15 @@ func (r *ArtifactRecord) Refusal() (constraint, reason string, ok bool) {
 	if r.Unparseable != "" {
 		return layer.ManifestUnparseableConstraint, r.Unparseable, true
 	}
-	return layer.RemovedFeature(r.AuthoredBytes, r.Type())
+	if constraint, reason, ok := layer.RemovedFeature(r.AuthoredBytes, r.Type()); ok {
+		return constraint, reason, true
+	}
+	// Spec: §4.1 (MCP server names) — after the removed-type rule and
+	// before lint, in both deployment modes.
+	if manifest.MCPServerNameRefused(r.Artifact) {
+		return layer.MCPServerNameConstraint, layer.MCPServerNameReason, true
+	}
+	return "", "", false
 }
 
 // CanonicalID is the path under the layer root, separated by "/".

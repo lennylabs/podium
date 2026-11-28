@@ -85,6 +85,15 @@ func RemovedFeature(authored []byte, t manifest.ArtifactType) (constraint, reaso
 	return "", "", false
 }
 
+// MCPServerNameConstraint is the details.constraint value of the §4.1 MCP
+// server name rule.
+const MCPServerNameConstraint = "mcp_server_name"
+
+// MCPServerNameReason is the reason of an mcp-server artifact whose declared
+// name the §4.1 rule refuses. It names no layer and holds no part of the
+// name.
+const MCPServerNameReason = "an mcp-server name is 1 to 64 ASCII letters, digits, '_', or '-'"
+
 // RemovedFeatureDrop returns the drop a filesystem-source composition
 // reports for an artifact a pre-lint rule refuses: the §4.1
 // unparseable-manifest rule or a rule RemovedFeature applies. Its details

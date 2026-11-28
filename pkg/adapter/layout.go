@@ -2,6 +2,7 @@ package adapter
 
 import (
 	"encoding/json"
+	"fmt"
 	"path"
 	"sort"
 	"strings"
@@ -116,12 +117,41 @@ func codexAgentTOML(src Source, name string) []byte {
 // (a multiline hook_action block scalar otherwise produces invalid TOML). The
 // backslash is escaped first so the inserted escapes are not doubled.
 func tomlBasic(s string) string {
-	s = strings.ReplaceAll(s, `\`, `\\`)
-	s = strings.ReplaceAll(s, `"`, `\"`)
-	s = strings.ReplaceAll(s, "\n", `\n`)
-	s = strings.ReplaceAll(s, "\r", `\r`)
-	s = strings.ReplaceAll(s, "\t", `\t`)
-	return `"` + s + `"`
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range s {
+		switch {
+		case r == '\\':
+			b.WriteString(`\\`)
+		case r == '"':
+			b.WriteString(`\"`)
+		case r == '\n':
+			b.WriteString(`\n`)
+		case r == '\r':
+			b.WriteString(`\r`)
+		case r == '\t':
+			b.WriteString(`\t`)
+		case r < 0x20 || r == 0x7f:
+			// TOML admits no other control character in a basic string.
+			fmt.Fprintf(&b, `\u%04X`, r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	b.WriteByte('"')
+	return b.String()
+}
+
+// tomlKey returns k as one TOML key: bare when it holds only ASCII letters,
+// digits, '_', and '-', and a quoted basic string otherwise, so a key taken
+// from a manifest cannot close its table header or add a dotted part.
+//
+// Spec: §4.1 (MCP server names)
+func tomlKey(k string) string {
+	if k != "" && strings.Trim(k, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == "" {
+		return k
+	}
+	return tomlBasic(k)
 }
 
 // yamlDoubleQuote returns s as a YAML double-quoted scalar, escaping the
@@ -131,6 +161,8 @@ func tomlBasic(s string) string {
 func yamlDoubleQuote(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `"`, `\"`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
 	return `"` + s + `"`
 }
 
@@ -207,7 +239,7 @@ func codexMCPTOML(src Source) []byte {
 	cfg := mcpServerConfig(parsed(src).ServerIdentifier)
 	name := mcpName(src)
 	var b strings.Builder
-	b.WriteString("[mcp_servers." + name + "]\n")
+	b.WriteString("[mcp_servers." + tomlKey(name) + "]\n")
 	if url, ok := cfg["url"].(string); ok {
 		b.WriteString("url = " + tomlBasic(url) + "\n")
 	} else {

@@ -6,6 +6,8 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/BurntSushi/toml"
+
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -109,14 +111,44 @@ func namedEntries(files []adapter.File) []string {
 		switch {
 		case f.Op == adapter.OpMergeJSON:
 			for _, loc := range materialize.IndexedEntries(f.Content) {
-				out = append(out, f.Path+entrySep+strings.Join(loc, "."))
+				out = append(out, f.Path+entrySep+strings.Join(loc, keySep))
 			}
 		case f.Op == adapter.OpInject && strings.HasSuffix(f.Path, ".toml"):
-			for _, line := range strings.Split(string(f.Content), "\n") {
-				line = strings.TrimSpace(line)
-				if strings.HasPrefix(line, "[") && !strings.HasPrefix(line, "[[") && strings.HasSuffix(line, "]") {
-					out = append(out, f.Path+entrySep+strings.TrimSpace(line[1:len(line)-1]))
-				}
+			for _, key := range tomlTableKeys(f.Content) {
+				out = append(out, f.Path+entrySep+key)
+			}
+		}
+	}
+	return out
+}
+
+// keySep joins the parts of a parsed entry key. A parsed key part can hold a
+// dot, as the quoted TOML key "a.b" does, so the parts are joined with a
+// separator no recorded key holds.
+const keySep = "\x1f"
+
+// tomlTableKeys returns the tables a TOML fragment defines below a top-level
+// table, as the parsed keys of each level joined by keySep, so the quoted
+// key "db" and the bare key db name one table, as TOML reads them. An array
+// of tables appends rather than replaces and is not returned. A fragment
+// that does not parse defines no table a consumer of the file can read, and
+// claims its whole text, which no other fragment holds.
+//
+// Spec: §7.5 (Output paths of distinct IDs)
+func tomlTableKeys(frag []byte) []string {
+	var doc map[string]any
+	if _, err := toml.Decode(string(frag), &doc); err != nil {
+		return []string{"unparsed" + keySep + string(frag)}
+	}
+	var out []string
+	for _, top := range slices.Sorted(maps.Keys(doc)) {
+		sub, ok := doc[top].(map[string]any)
+		if !ok {
+			continue
+		}
+		for _, name := range slices.Sorted(maps.Keys(sub)) {
+			if _, ok := sub[name].(map[string]any); ok {
+				out = append(out, top+keySep+name)
 			}
 		}
 	}
@@ -129,6 +161,7 @@ func namedEntries(files []adapter.File) []string {
 // through attest.ReportString.
 func conflictFailure(id string, c outputContest) *attest.Failure {
 	if path, entry, ok := strings.Cut(c.path, entrySep); ok {
+		entry = strings.ReplaceAll(entry, keySep, ".")
 		return attest.NewFailure(attest.CodeOutputConflict, attest.ConstraintEntry,
 			fmt.Sprintf("%s and %s both add the entry %s to %s", id, c.other, attest.ReportString(entry), attest.ReportString(path)))
 	}
