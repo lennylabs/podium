@@ -233,6 +233,19 @@ A link records the policy under which the registry verified it. When the trust p
 
 Stored bundles count toward the tenant's storage quota. A purge of a version deletes its links, and a bundle that no version links is deleted with it.
 
+### Visibility of a `--layer-path` layer
+
+A layer that `podium serve --layer-path` or `PODIUM_LAYER_PATH` loads takes its visibility from the `.layer-config` file of its directory, or from `PODIUM_DEFAULT_LAYER_VISIBILITY` when the file is absent or its `visibility:` block is empty. Under the trust mode `none`, each start applies the file and an ingest cycle applies nothing. Under `warn` and `require`, the registry treats the two directions of a change differently, so a party who can write the directory cannot widen the layer's visibility without a signature:
+
+- A file that admits fewer callers applies at once: at the next start, and in every cycle, before the cycle stores an artifact. The registry applies the meet of the stored visibility and the file, which admits only callers both admit. A file that replaces one group with another therefore admits no caller until a signed state applies it.
+- A file that admits more callers waits for a cycle that passes the layer step, which applies the signed file after it has stored its artifacts and applied its removals. Until then the layer object carries the file's visibility in `visibility_pending`, and `podium layer show` prints it beside the visibility in force.
+- A file that does not parse, or that holds an empty or control-character `groups` or `users` entry, refuses a start with `config.invalid`. A later cycle reads such a file as a visibility that admits no caller.
+- A layer whose row a start creates, such as on a first start or after the directory is renamed, is visible to no caller that the deployment default does not admit. A deployment that restricts layers through `.layer-config` alone keeps `PODIUM_DEFAULT_LAYER_VISIBILITY` at `private`.
+- `visibility_source` records whether the visibility was last set from a declaration or from the deployment default. A change of the default applies at the next start, in either direction, to a layer whose source is `default`.
+- `podium layer update` with a visibility flag sets the visibility and the source `declared`, and the next start or cycle narrows the update back to the file. To widen a layer whose cycles do not pass the layer step yet, such as one under `warn` before its signing is set up, edit `.layer-config` to the wider visibility and then run the update with the same value.
+
+Each change records `layer.config_changed` with the cause `start` or `cycle` and the earlier and new values. A registry in public mode, or one with no identity provider, shows every layer to every caller, so these rules change nothing a caller observes there.
+
 ### Derived source binding
 
 A workflow in the layer's own repository needs no explicit binding. When a signer of a `git` layer has a URI identity that begins with the layer's repository URL followed by `/.github/workflows/`, and names no source binding and no `any_source`, the registry sets `source_repository` to the repository URL. When the signer also names no ref binding, the registry sets `source_repository_ref` to the part of the identity after its last `@`. The stored policy holds the derived members, and `podium layer show` prints them.

@@ -63,6 +63,18 @@ From 0.8.0, the registry stores the attestation bundles it accepts, links them t
 - A rollback to 0.7.0 leaves the new tables and columns in place and does not read them. A version stored by 0.7.0 after the rollback reads as `not_evaluated` after a return to 0.8.0, until a cycle evaluates it.
 - `podium admin migrate-to-standard` copies the outcome of each migrated version, its links, and the bundles they reference. It copies no root record, because each target process writes the record of the trusted roots it uses.
 
+### Visibility of a `--layer-path` layer under `warn` and `require`
+
+From 0.8.0, a layer that `--layer-path` or `PODIUM_LAYER_PATH` loads and whose trust mode resolves to `warn` or `require` no longer takes every change of its `.layer-config` at the next start (spec §4.7.11). [Visibility of a `--layer-path` layer](../content/layers#visibility-of-a---layer-path-layer) describes the rules.
+
+- A `.layer-config` that admits fewer callers applies at the next start and in every ingest cycle. One that admits more callers applies only once a cycle passes the layer step over a signed state that holds it, and until then the layer object reports it in `visibility_pending`. An operator who widens such a layer before its signing is set up edits the file and runs `podium layer update` with the same visibility.
+- A `.layer-config` that a later cycle cannot parse, or that holds an empty `groups` or `users` entry, makes the layer visible to no caller. 0.7.0 read the file at a start alone.
+- A layer whose row a start creates is visible only to callers the deployment default admits. A deployment that relies on `.layer-config` alone to restrict layers sets `PODIUM_DEFAULT_LAYER_VISIBILITY=private` before the upgrade.
+- A layer under the mode `none` is unaffected: each start applies its file, as in 0.7.0.
+- The SQLite and Postgres stores add the `visibility_source` and `visibility_pending` columns of `layer_configs` at the first start. No step is needed. A row stored by 0.7.0 is read as `declared`, so its stored visibility bounds the next file.
+- A read that cannot read the layer rows now uses the rows of the tenant's last successful read, and a tenant with no successful read sees no layer. 0.7.0 used the layers of the start for every tenant.
+- A rollback to 0.7.0 leaves the new columns in place and does not read them, and its next start applies each file as written.
+
 ### Bounded Git fetch
 
 From 0.8.0, each ingest of a `git` layer clones the tracked ref alone, with no tags, at the depth that `PODIUM_GIT_FETCH_DEPTH` or the `registry.yaml` key `git_fetch_depth` sets, 16 commits by default, and fetches again at four times the depth while the force-push check cannot decide from the history it holds. 0.7.0 cloned the complete history once a layer had a last ingested commit.

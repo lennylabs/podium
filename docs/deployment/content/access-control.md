@@ -105,7 +105,7 @@ podium layer update --id team-finance --user security-lead@acme.com
 
 ### On a local deployment
 
-On the [local](../modes/local) deployment mode, a layer directory declares its visibility in an optional `.layer-config` file. `podium sync` ignores the file. The declaration takes effect once a server serves the same directory.
+On the [local](../modes/local) deployment mode, a layer directory declares its visibility in an optional `.layer-config` file. `podium sync` ignores the file. The declaration takes effect once a server serves the same directory. Under a trust mode of `warn` or `require`, a file that admits more callers takes effect only once its signed state is ingested; [Visibility of a `--layer-path` layer](layers#visibility-of-a---layer-path-layer) describes the rules.
 
 ---
 
