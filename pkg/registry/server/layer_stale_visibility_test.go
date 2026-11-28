@@ -134,3 +134,118 @@ func TestLayerWrites_KeepAVisibilityACycleNarrowed(t *testing.T) {
 		t.Fatalf("a layer under none: warnings %q", resp.Warnings)
 	}
 }
+
+// alwaysChanged reports every conditional write as contended, as a row
+// another writer keeps changing does.
+type alwaysChanged struct{ store.Store }
+
+func (alwaysChanged) PutLayerConfigIf(context.Context, store.LayerConfig, store.VisibilityState) error {
+	return store.ErrVisibilityChanged
+}
+
+// Spec: §7.3.1, §4.7.11 (Visibility of a path-bootstrapped layer: Writes
+// that keep the visibility) — an update that carries one visibility member
+// writes the visibility only while the row holds the members its handler
+// read. A cycle narrowed organization to a group after that read, so the
+// update reads the row again and adds its users to the group: organization
+// is not restored. The §7.6 event carries the narrowed visibility it
+// replaced. An update that meets a changed row on every attempt is answered
+// 503 registry.unavailable and writes no visibility.
+func TestLayerUpdate_PartialVisibilityKeepsAConcurrentNarrowing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := store.NewMemory()
+	if err := mem.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "boot", SourceType: "local", LocalPath: "/x", Order: 10,
+		Organization: true, VisibilitySource: store.VisibilitySourceDeclared, TrustMode: "require"}); err != nil {
+		t.Fatal(err)
+	}
+	st := &narrowingStore{Store: mem}
+	st.narrow = func() {
+		cur, _ := mem.GetLayerConfig(ctx, "t", "boot")
+		next := cur.VisibilityState()
+		next.Visibility = store.LayerVisibility{Groups: []string{"acme-finance"}}
+		if err := mem.SetLayerVisibilityIf(ctx, "t", "boot", cur.VisibilityState(), next); err != nil {
+			t.Error(err)
+		}
+	}
+	rec := &eventRecorder{}
+	ts := httptest.NewServer(server.NewLayerEndpoint(st, "t", server.NewModeTracker()).WithTrustDefault("none").WithEventPublisher(rec.publish).Handler())
+	t.Cleanup(ts.Close)
+	put := func(url, body string) (int, server.LayerRegisterResponse) {
+		t.Helper()
+		req, _ := http.NewRequest(http.MethodPut, url, bytes.NewReader([]byte(body)))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		var out server.LayerRegisterResponse
+		_ = json.NewDecoder(resp.Body).Decode(&out)
+		return resp.StatusCode, out
+	}
+	status, resp := put(ts.URL+"/v1/layers/update?id=boot", `{"users":["bob@acme.com"]}`)
+	lc, _ := mem.GetLayerConfig(ctx, "t", "boot")
+	if status != http.StatusOK || lc.Organization || !slices.Equal(lc.Groups, []string{"acme-finance"}) || !slices.Equal(lc.Users, []string{"bob@acme.com"}) {
+		t.Fatalf("status %d, row org=%v groups=%v users=%v", status, lc.Organization, lc.Groups, lc.Users)
+	}
+	if resp.Layer.Organization || !slices.Equal(resp.Layer.Groups, []string{"acme-finance"}) {
+		t.Fatalf("response layer %+v", resp.Layer.LayerConfig)
+	}
+	scope := rec.scopeFor(t, "update")
+	if scope.Prior == nil || scope.Prior.Organization || !slices.Equal(scope.Prior.Groups, []string{"acme-finance"}) {
+		t.Fatalf("event prior %+v, want the narrowed visibility", scope.Prior)
+	}
+
+	contended := httptest.NewServer(server.NewLayerEndpoint(alwaysChanged{mem}, "t", server.NewModeTracker()).Handler())
+	t.Cleanup(contended.Close)
+	if status, _ := put(contended.URL+"/v1/layers/update?id=boot", `{"organization":true}`); status != http.StatusServiceUnavailable {
+		t.Fatalf("contended update = %d, want 503", status)
+	}
+	if lc, _ := mem.GetLayerConfig(ctx, "t", "boot"); lc.Organization {
+		t.Fatal("a contended update wrote the visibility")
+	}
+}
+
+// Spec: §7.3.1 — a contended update that carries a visibility member and
+// another member, here a local path and organization, is answered 503 and
+// persists nothing, not even the local path, and records no event; the same
+// body against a row that holds what the handler read writes both and
+// records its event.
+func TestLayerUpdate_ContendedUpdatePersistsNothing(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	mem := store.NewMemory()
+	if err := mem.CreateTenant(ctx, store.Tenant{ID: "t"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := mem.PutLayerConfig(ctx, store.LayerConfig{TenantID: "t", ID: "boot", SourceType: "local", LocalPath: "/x", Order: 10,
+		Public: true, VisibilitySource: store.VisibilitySourceDeclared}); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		st     store.Store
+		status int
+		path   string
+		events int
+	}{
+		{alwaysChanged{mem}, http.StatusServiceUnavailable, "/x", 0},
+		{mem, http.StatusOK, "/elsewhere", 1},
+	} {
+		rec := &eventRecorder{}
+		ts := httptest.NewServer(server.NewLayerEndpoint(tc.st, "t", server.NewModeTracker()).WithEventPublisher(rec.publish).Handler())
+		req, _ := http.NewRequest(http.MethodPut, ts.URL+"/v1/layers/update?id=boot", bytes.NewReader([]byte(`{"local_path":"/elsewhere","organization":true}`)))
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		ts.Close()
+		lc, _ := mem.GetLayerConfig(ctx, "t", "boot")
+		if resp.StatusCode != tc.status || lc.LocalPath != tc.path || len(rec.typesFor()) != tc.events {
+			t.Fatalf("status %d local_path %s events %d; want %d %s %d", resp.StatusCode, lc.LocalPath, len(rec.typesFor()), tc.status, tc.path, tc.events)
+		}
+	}
+}

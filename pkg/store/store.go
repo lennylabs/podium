@@ -545,6 +545,13 @@ type Store interface {
 	// ErrVisibilityChanged, changing nothing, otherwise, and ErrNotFound for
 	// a row the store does not hold. Lists compare in their stored form.
 	SetLayerVisibilityIf(ctx context.Context, tenantID, layerID string, expect, next VisibilityState) error
+	// PutLayerConfigIf writes cfg as PutLayerConfig does, in one store
+	// write, only while the held row's visibility members equal expect. It
+	// returns ErrVisibilityChanged, writing nothing, when they differ, and
+	// ErrNotFound for a row the store does not hold. An update that carries
+	// a visibility member uses it, so a refused write leaves the whole row
+	// as it was (§7.3.1).
+	PutLayerConfigIf(ctx context.Context, cfg LayerConfig, expect VisibilityState) error
 	GetLayerConfig(ctx context.Context, tenantID, id string) (LayerConfig, error)
 	ListLayerConfigs(ctx context.Context, tenantID string) ([]LayerConfig, error)
 	// DeleteLayerConfig soft-deletes a layer per §8.4: the layer config

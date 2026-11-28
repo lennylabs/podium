@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/lennylabs/podium/pkg/layer"
@@ -38,23 +39,63 @@ func (p visibilityPatch) carried() bool {
 	return p.public != nil || p.organization != nil || p.groups != nil || p.users != nil
 }
 
-// writeUpdatedLayer stores an updated layer and returns the row as stored.
-// An update that carries no visibility member keeps the stored visibility
-// members, and the response then reports the members the store kept, read
-// back; a failed read back reports the layer as the update built it.
+// updateVisibilityRetries bounds the rereads of an update whose conditional
+// visibility write meets members another writer changed.
+const updateVisibilityRetries = 5
+
+// errVisibilityContended reports an update whose visibility write met a
+// changed row on every attempt.
+var errVisibilityContended = errors.New("the layer's visibility changed during each attempt to update it; retry the update")
+
+// writeUpdatedLayer stores an updated layer and returns the row as stored and
+// the row it replaced, both with the visibility members the store held.
 //
-// Spec: §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility), §7.3.1
-func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, cfg store.LayerConfig, visibility bool) (store.LayerConfig, error) {
-	if visibility {
-		return cfg, e.store.PutLayerConfig(ctx, cfg)
+// An update that carries a visibility member writes the whole row in one
+// write conditional on the visibility members its handler read, before; when
+// another writer, such as an ingest cycle, changed them in between, nothing
+// is written, and it reads the row again, applies the members the body
+// carries to the fresh values, and retries, so a narrowing of a member the
+// body omits is kept. A refused or failed write therefore persists nothing,
+// and the caller records events only after a write that succeeded. An update
+// that carries none writes with the keeping write and reads the row back so
+// the response reports the members the store kept.
+//
+// Spec: §7.3.1, §4.7.11 (Visibility of a path-bootstrapped layer: Writes that keep the visibility)
+func (e *LayerEndpoint) writeUpdatedLayer(ctx context.Context, before, cfg store.LayerConfig, vis visibilityPatch) (store.LayerConfig, store.LayerConfig, error) {
+	if !vis.carried() {
+		if err := e.store.PutLayerConfigKeepingVisibility(ctx, cfg); err != nil {
+			return cfg, before, err
+		}
+		stored, err := e.store.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
+		if err != nil {
+			return cfg, before, nil
+		}
+		return stored, withVisibilityOf(before, stored), nil
 	}
-	if err := e.store.PutLayerConfigKeepingVisibility(ctx, cfg); err != nil {
-		return cfg, err
+	read := before
+	for range updateVisibilityRetries {
+		next := withVisibilityOf(cfg, declareUpdatedVisibility(read, vis.applyTo(read)))
+		switch err := e.store.PutLayerConfigIf(ctx, next, read.VisibilityState()); {
+		case err == nil:
+			return next, withVisibilityOf(before, read), nil
+		case !errors.Is(err, store.ErrVisibilityChanged):
+			return cfg, before, err
+		}
+		fresh, err := e.store.GetLayerConfig(ctx, cfg.TenantID, cfg.ID)
+		if err != nil {
+			return cfg, before, err
+		}
+		read = fresh
 	}
-	if stored, err := e.store.GetLayerConfig(ctx, cfg.TenantID, cfg.ID); err == nil {
-		return stored, nil
-	}
-	return cfg, nil
+	return cfg, before, errVisibilityContended
+}
+
+// withVisibilityOf returns cfg with the visibility members of from.
+func withVisibilityOf(cfg, from store.LayerConfig) store.LayerConfig {
+	s := from.VisibilityState()
+	cfg.SetVisibility(s.Visibility)
+	cfg.VisibilitySource, cfg.VisibilityPending = s.Source, s.Pending
+	return cfg
 }
 
 // signedVisibilityWarning is the warning of an update that changed the

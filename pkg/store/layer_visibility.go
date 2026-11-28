@@ -343,3 +343,93 @@ func (p *Postgres) SetLayerVisibilityIf(ctx context.Context, tenantID, layerID s
 	}
 	return ErrVisibilityChanged
 }
+
+// PutLayerConfigIf writes cfg while the held row's visibility members equal
+// expect, under the store lock.
+func (s *Memory) PutLayerConfigIf(_ context.Context, cfg LayerConfig, expect VisibilityState) error {
+	cfg, err := storedLayerForm(cfg)
+	if err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	held, ok := s.layers[layerKey(cfg.TenantID, cfg.ID)]
+	if !ok {
+		return ErrNotFound
+	}
+	same, err := sameStoredVisibility(held, expect)
+	if err != nil {
+		return err
+	}
+	if !same {
+		return ErrVisibilityChanged
+	}
+	s.putLayerLocked(cfg)
+	return nil
+}
+
+// heldVisibilityMatches compares the visibility columns a row holds, read
+// in a transaction that holds the row, with expect in its stored form.
+func heldVisibilityMatches(row *sql.Row, layerID string, expect VisibilityState) error {
+	var public, org bool
+	var groups, users, source, pending string
+	switch err := row.Scan(&public, &org, &groups, &users, &source, &pending); {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrNotFound
+	case err != nil:
+		return err
+	}
+	eg, eu, ep, err := visibilityStateColumns(layerID, expect)
+	if err != nil {
+		return err
+	}
+	if public != expect.Visibility.Public || org != expect.Visibility.Organization || groups != eg || users != eu || source != expect.Source || pending != ep {
+		return ErrVisibilityChanged
+	}
+	return nil
+}
+
+// PutLayerConfigIf writes cfg in one transaction that takes the write lock
+// before it reads the held visibility columns.
+func (s *SQLite) PutLayerConfigIf(ctx context.Context, cfg LayerConfig, expect VisibilityState) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE layer_configs SET ingest_claim = ingest_claim WHERE tenant_id = ? AND id = ?`, cfg.TenantID, cfg.ID); err != nil {
+		return err
+	}
+	if err := heldVisibilityMatches(tx.QueryRowContext(ctx, `
+		SELECT public != 0, organization != 0, groups, users, visibility_source, visibility_pending
+		FROM layer_configs WHERE tenant_id = ? AND id = ?`, cfg.TenantID, cfg.ID), cfg.ID, expect); err != nil {
+		return err
+	}
+	if err := sqlitePutLayer(ctx, tx, cfg); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// PutLayerConfigIf writes cfg in one transaction with the row locked.
+func (p *Postgres) PutLayerConfigIf(ctx context.Context, cfg LayerConfig, expect VisibilityState) error {
+	conn, release, err := p.org(ctx, cfg.TenantID)
+	if err != nil {
+		return err
+	}
+	defer release()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := heldVisibilityMatches(tx.QueryRowContext(ctx, `
+		SELECT public, organization, groups, users, visibility_source, visibility_pending
+		FROM layer_configs WHERE tenant_id = $1 AND id = $2 FOR UPDATE`, cfg.TenantID, cfg.ID), cfg.ID, expect); err != nil {
+		return err
+	}
+	if err := pgPutLayer(ctx, tx, cfg); err != nil {
+		return err
+	}
+	return tx.Commit()
+}

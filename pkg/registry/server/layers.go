@@ -1764,16 +1764,21 @@ func (e *LayerEndpoint) update(w http.ResponseWriter, r *http.Request) {
 	// keep the visibility) — an update that carries no visibility member
 	// keeps the stored visibility members, so a cycle's narrowing that
 	// landed after the read above stays in force.
-	stored, err := e.writeUpdatedLayer(r.Context(), cfg, vis.carried())
-	if err != nil {
+	stored, prior, err := e.writeUpdatedLayer(r.Context(), before, cfg, vis)
+	switch {
+	case errors.Is(err, errVisibilityContended):
+		writeError(w, http.StatusServiceUnavailable, "registry.unavailable", err.Error())
+		return
+	case err != nil:
 		writeError(w, http.StatusInternalServerError, "registry.unavailable", err.Error())
 		return
 	}
 	// spec §8.1: a config mutation (including a secret rotation) is an
-	// auditable layer.config_changed / layer.user_registered event.
-	e.emitLayerEvent(r, before, cfg, "update", trustEventFields(before, cfg))
+	// auditable layer.config_changed / layer.user_registered event. It
+	// records the visibility written against the visibility it replaced.
+	e.emitLayerEvent(r, prior, stored, "update", trustEventFields(before, cfg))
 	e.afterTrustWrite(r, before, true, cfg)
-	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(before, cfg)...)}
+	resp := LayerRegisterResponse{Layer: wireLayer(stored), Warnings: append(e.visibilityWarnings(stored), e.signedVisibilityWarning(prior, stored)...)}
 	// Return the freshly rotated secret once so the operator can register
 	// it on the source repo; it is never echoed on a plain update.
 	if rotated {
