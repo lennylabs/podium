@@ -55,6 +55,9 @@ type OverrideOptions struct {
 	// override keeps or removes an unparseable artifact's previous output as
 	// a sync does (§13.11.3).
 	OnUnparseable OnUnparseable
+	// Attestation is copied into the re-materialization's Run call, so an
+	// override checks the records it writes as a sync does (§7.5).
+	Attestation AttestationFunc
 }
 
 // OverrideResult is what Override returns: the new lock state, whether
@@ -177,6 +180,7 @@ func Override(opts OverrideOptions) (*OverrideResult, error) {
 			HTTPClient:      opts.HTTPClient,
 			Delivery:        opts.Delivery,
 			OnUnparseable:   opts.OnUnparseable,
+			Attestation:     opts.Attestation,
 			Profile:         string(lock.Profile),
 			Scope: ScopeFilter{
 				Include: lock.Scope.Include,

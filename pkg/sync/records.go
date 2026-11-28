@@ -1,6 +1,8 @@
 package sync
 
 import (
+	"fmt"
+
 	"github.com/lennylabs/podium/pkg/adapter"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
@@ -86,28 +88,71 @@ func (f ScopeFilter) Select(records []Record) []Record {
 // The second return lists the artifacts a filesystem-source composition
 // dropped under the §4.6 collision rule, the §4.6 no-inheritance rule, or the
 // §4.1 removed-type rule (§13.11.3); a server source returns none.
+//
+// A record that the §4.7.11 well-formed rule or request binding refuses
+// fails the call, as it fails a §7.8 render. FetchRecords runs no
+// attestation check, which a caller applies to the records it selects.
 func FetchRecords(opts Options) ([]Record, []layer.Drop, error) {
-	if opts.RegistryPath == "" {
-		return nil, nil, ErrNoRegistry
-	}
-	internal, dropped, err := resolveRecords(opts)
+	view, err := fetchView(opts)
 	if err != nil {
 		return nil, nil, err
 	}
-	out := make([]Record, len(internal))
-	for i, rec := range internal {
-		out[i] = Record{
-			ID:            rec.ID,
-			LayerID:       rec.LayerID,
-			Artifact:      rec.Artifact,
-			ArtifactBytes: rec.ArtifactBytes,
-			SkillBytes:    rec.SkillBytes,
-			Resources:     rec.Resources,
-			ContentHash:   rec.ContentHash,
+	out := make([]Record, len(view.records))
+	for i, rec := range view.records {
+		out[i] = rec.export()
+	}
+	return out, view.dropped, nil
+}
+
+// fetchView resolves the effective view of opts and fails on the first
+// record that the well-formed rule or the request binding refused at load.
+//
+// Spec: §7.8 (Author attestation)
+func fetchView(opts Options) (resolvedView, error) {
+	if opts.RegistryPath == "" {
+		return resolvedView{}, ErrNoRegistry
+	}
+	view, err := resolveRecords(opts)
+	if err != nil {
+		return view, err
+	}
+	for _, rec := range view.records {
+		if rec.refusal != nil {
+			return view, &RecordRefusedError{ID: rec.ID, Err: rec.refusal}
 		}
 	}
-	return out, dropped, nil
+	return view, nil
 }
+
+// export returns the exported projection of the record.
+func (rec materialRecord) export() Record {
+	return Record{
+		ID:            rec.ID,
+		LayerID:       rec.LayerID,
+		Artifact:      rec.Artifact,
+		ArtifactBytes: rec.ArtifactBytes,
+		SkillBytes:    rec.SkillBytes,
+		Resources:     rec.Resources,
+		ContentHash:   rec.ContentHash,
+	}
+}
+
+// RecordRefusedError reports a record that the §4.7.11 well-formed rule, the
+// request binding, or the attestation check under require refused, which
+// fails a §7.8 render before it writes. Its message names the record's ID
+// with the code and the constraint.
+type RecordRefusedError struct {
+	ID  string
+	Err error
+}
+
+// Error renders the refusal.
+func (e *RecordRefusedError) Error() string {
+	return fmt.Sprintf("%s refused: %v", e.ID, e.Err)
+}
+
+// Unwrap returns the refusal.
+func (e *RecordRefusedError) Unwrap() error { return e.Err }
 
 // Reconcile removes from target every materialized path the prior lock recorded
 // that the current render did not write, reusing the §7.5 stale-file cleanup: a

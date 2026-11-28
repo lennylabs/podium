@@ -426,15 +426,17 @@ func syncCmd(args []string) int {
 		// The setting has no effect on a server source, which reports no
 		// drop (§13.11.3).
 		OnUnparseable: onUnparseablePolicy,
+		Attestation:   newSyncAttestation(ws),
 	}
 	if *watch {
 		return runWatchLoop(syncOpts, overlayPath, budget, *asJSON)
 	}
 	res, err := sync.Run(syncOpts)
 	if err != nil {
-		// Spec: §7.5 — a delivery check that cannot be resolved is a
-		// configuration error and exits 2; every other load failure exits 1.
-		if reportDeliveryConfigError(err, "") {
+		// Spec: §7.5 — a delivery check or a consumer trust policy that
+		// cannot be resolved is a configuration error and exits 2; every
+		// other load failure exits 1.
+		if reportDeliveryConfigError(err, "") || reportAttestationConfigError(err, "") {
 			return 2
 		}
 		fmt.Fprintf(os.Stderr, "sync failed: %v\n", err)
@@ -449,6 +451,9 @@ func syncCmd(args []string) int {
 	// Spec: §13.11.3, §7.5.8 — a drop and a listing report are written on
 	// standard error, so the --json envelope on standard output stays valid. A
 	// drop fails the sync, and so does a listing report under `check: error`.
+	// Spec: §7.5, §7.5.3 — a record a §4.7.11 check refused is a drop, and a
+	// warning and a signer change are written on standard error too.
+	reportAttestationNotes(os.Stderr, res.Warnings, res.SignerChanges)
 	dropped := reportDropped(os.Stderr, res.Dropped, *dryRun)
 	overBudget := reportListing(os.Stderr, listing)
 	if dropped || overBudget {
@@ -493,7 +498,7 @@ func runWatchLoop(opts sync.Options, overlay string, budget sync.EffectiveListin
 			// Spec: §7.5 — the watcher stops before it subscribes when the
 			// delivery check cannot be resolved, so the channel closes and the
 			// loop exits 2.
-			if reportDeliveryConfigError(ev.Err, "") {
+			if reportDeliveryConfigError(ev.Err, "") || reportAttestationConfigError(ev.Err, "") {
 				configErr = true
 				continue
 			}
@@ -511,6 +516,7 @@ func runWatchLoop(opts sync.Options, overlay string, budget sync.EffectiveListin
 		// or failed its listing under `check: error` counts toward the exit
 		// status on interrupt. A cycle whose event the watcher discarded on
 		// cancellation is reported by the next podium sync.
+		reportAttestationNotes(os.Stderr, ev.Result.Warnings, ev.Result.SignerChanges)
 		if reportDropped(os.Stderr, ev.Result.Dropped, opts.DryRun) {
 			failures++
 		}
@@ -612,19 +618,28 @@ func runMultiTargetSync(configPath, registryOverride, onUnparseableFlag string, 
 	// Spec: §7.5.2 — the delivery-check policy is discovered from the config
 	// file's workspace, the same workspace PlanMultiTarget receives.
 	delivery := newSyncDeliveryCheck(workspace)
+	// Spec: §7.5 (Author attestation) — so is the consumer trust policy,
+	// which --check loads as a sync start does.
+	attestation := newSyncAttestation(workspace)
+	if check {
+		if _, err := attestation(); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 2
+		}
+	}
 	failures := 0
 	for i, p := range plans {
 		fmt.Printf("== target %s ==\n", p.ID)
 		var rerr error
 		switch p.Kind {
 		case sync.KindMarketplace:
-			rerr = runMarketplaceTarget(ctx, p, delivery, dryRun, check, asJSON)
+			rerr = runMarketplaceTarget(ctx, p, delivery, attestation, dryRun, check, asJSON)
 		default:
-			rerr = runWorkspaceTarget(ctx, p, delivery, budgets[i], cacheMode, onUnparseable, dryRun, check, asJSON)
+			rerr = runWorkspaceTarget(ctx, p, targetChecks{delivery, attestation}, budgets[i], cacheMode, onUnparseable, dryRun, check, asJSON)
 		}
 		// Spec: §7.5 — a resolution refusal is the same for every later
 		// target, so the run stops at the refused target and exits 2.
-		if reportDeliveryConfigError(rerr, "target "+p.ID+": ") {
+		if reportDeliveryConfigError(rerr, "target "+p.ID+": ") || reportAttestationConfigError(rerr, "target "+p.ID+": ") {
 			return 2
 		}
 		if rerr != nil {
@@ -655,7 +670,7 @@ var errDropped = errors.New("dropped at least one artifact")
 // budget is the target's resolved §7.5.8 listing budget. A listing report that
 // fails under `check: error` fails the target after its publish phase, as a
 // drop does (§13.11.3).
-func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, budget sync.EffectiveListingBudget, cacheMode string, onUnparseable sync.OnUnparseable, dryRun, check, asJSON bool) error {
+func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, checks targetChecks, budget sync.EffectiveListingBudget, cacheMode string, onUnparseable sync.OnUnparseable, dryRun, check, asJSON bool) error {
 	abs, err := filepath.Abs(p.Target)
 	if err != nil {
 		return err
@@ -680,8 +695,9 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sy
 		Profile:       p.Profile,
 		Scope:         p.Scope,
 		CacheMode:     cacheMode,
-		Delivery:      delivery,
+		Delivery:      checks.delivery,
 		OnUnparseable: onUnparseable,
+		Attestation:   checks.attestation,
 	})
 	if err != nil {
 		return err
@@ -690,6 +706,7 @@ func runWorkspaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sy
 	// --check return, because a --check run of a kind: workspace target
 	// composes the layers and estimates its listing too.
 	listing := sync.Listing(res, budget)
+	reportAttestationNotes(os.Stderr, res.Warnings, res.SignerChanges)
 	dropped := reportDropped(os.Stderr, res.Dropped, dryRun || check)
 	overBudget := reportListing(os.Stderr, listing)
 	if check {
@@ -759,7 +776,7 @@ func droppedErr(dropped bool) error {
 // server source renders the anonymous public view. Under check the runner
 // validates the resolved output and returns before the prepare clone or the
 // render, so no tree is written.
-func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, dryRun, check, asJSON bool) error {
+func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery sync.DeliveryCheckFunc, attestation sync.AttestationFunc, dryRun, check, asJSON bool) error {
 	out := sync.ResolvedOutput{
 		ID:            p.ID,
 		Registry:      p.Registry,
@@ -787,17 +804,21 @@ func runMarketplaceTarget(ctx context.Context, p sync.MultiTargetPlan, delivery 
 		token = readPublishToken(out.Registry)
 	}
 	res, err := sync.RunMarketplace(ctx, sync.RunOptions{
-		Output:   out,
-		Token:    token,
-		Workdir:  workdir,
-		DryRun:   dryRun,
-		Check:    check,
-		Stdout:   marketplaceStdout(asJSON),
-		Stderr:   os.Stderr,
-		Delivery: delivery,
+		Output:      out,
+		Token:       token,
+		Workdir:     workdir,
+		DryRun:      dryRun,
+		Check:       check,
+		Stdout:      marketplaceStdout(asJSON),
+		Stderr:      os.Stderr,
+		Delivery:    delivery,
+		Attestation: attestation,
 	})
 	if err != nil {
 		return err
+	}
+	if res.Render != nil {
+		reportAttestationNotes(os.Stderr, res.Render.Warnings, nil)
 	}
 	if asJSON {
 		printMarketplaceJSON(res)
@@ -882,6 +903,12 @@ func runSyncCheck() int {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
 	}
+	// Spec: §7.5 (Author attestation) — --check loads the consumer trust
+	// policy and refuses as a sync start does.
+	if _, err := newSyncAttestation(ws)(); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 2
+	}
 	warns := sync.Check(merged, adapter.DefaultRegistry())
 	if len(warns) == 0 {
 		fmt.Println("sync.yaml: ok (no warnings)")
@@ -957,11 +984,12 @@ func syncOverrideCmd(args []string) int {
 		AdapterID:     harnessID,
 		Delivery:      newSyncDeliveryCheck(workingDir()),
 		OnUnparseable: onUnparseable,
+		Attestation:   newSyncAttestation(workingDir()),
 	})
 	if err != nil {
 		// Spec: §7.5 — the resolution refusal arrives wrapped as
 		// override: materialize:, after the toggle change is written.
-		if reportDeliveryConfigError(err, "") {
+		if reportDeliveryConfigError(err, "") || reportAttestationConfigError(err, "") {
 			return 2
 		}
 		fmt.Fprintf(os.Stderr, "override failed: %v\n", err)

@@ -704,7 +704,7 @@ func assertLockArtifactsEqual(t *testing.T, fsTarget, srvTarget string) {
 	}
 	for i, want := range fsLock.Artifacts {
 		got := srvLock.Artifacts[i]
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Errorf("lock artifact %d differs between the modes:\n filesystem=%+v\n server=    %+v", i, want, got)
 		}
 	}

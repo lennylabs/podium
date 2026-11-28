@@ -6,10 +6,12 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/attest"
 )
 
 // This file holds the reusable marketplace-output component types a
@@ -176,6 +178,9 @@ type ResolvedOutput struct {
 // command that declares neither run: nor sh:, or both, is rejected before the
 // prepare clone or the render runs (§7.5.2 "--check validates the config only").
 func ValidateOutput(out ResolvedOutput) error {
+	if err := ValidatePluginNames(out.ID, out.Plugins); err != nil {
+		return err
+	}
 	for _, h := range out.Harnesses {
 		if _, err := adapter.EmitterForHarness(h); err != nil {
 			return fmt.Errorf("%w: marketplace %q harness %q is not a publish target (opencode and none have no git-repo distribution): %w",
@@ -197,4 +202,47 @@ func ValidateOutput(out ResolvedOutput) error {
 		}
 	}
 	return nil
+}
+
+// ValidatePluginNames applies the §7.8 plugin name rule to the plugins of the
+// marketplace target id. Each name is a path segment of the published tree,
+// so a name that is empty, holds a slash, a backslash, or a control
+// character, is . or .., begins with a dot, or is not a §4.2 portable name is
+// refused with config.invalid, and so is a name that two plugins share. A
+// portable name holds no code point that HFS+ ignores and no trailing dot or
+// space, so two names are compared without regard to letter case alone.
+//
+// Spec: §7.8 (Plugin names)
+func ValidatePluginNames(id string, plugins []PluginFilter) error {
+	for i, p := range plugins {
+		if why := pluginNameViolation(p.Name); why != "" {
+			return fmt.Errorf("%w: marketplace %q plugin name %q %s", ErrConfigInvalid, id, p.Name, why)
+		}
+		for _, q := range plugins[:i] {
+			if strings.EqualFold(p.Name, q.Name) {
+				return fmt.Errorf("%w: marketplace %q plugin names %q and %q name one directory", ErrConfigInvalid, id, q.Name, p.Name)
+			}
+		}
+	}
+	return nil
+}
+
+// pluginNameViolation returns why name breaks the §7.8 plugin name rule, or
+// "" when it meets it.
+func pluginNameViolation(name string) string {
+	switch {
+	case name == "":
+		return "is empty"
+	case strings.ContainsAny(name, `/\`):
+		return "holds a slash or a backslash"
+	case strings.ContainsFunc(name, unicode.IsControl):
+		return "holds a control character"
+	case name == "." || name == "..":
+		return "is a dot segment"
+	case strings.HasPrefix(name, "."):
+		return "begins with a dot"
+	case !attest.IsPortableName(name):
+		return "is not a portable name"
+	}
+	return ""
 }

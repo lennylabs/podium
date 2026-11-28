@@ -41,7 +41,7 @@ func TestLockFile_RoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadLock: %v", err)
 	}
-	if out.Version != in.Version || out.Profile != in.Profile || out.Harness != in.Harness {
+	if out.Version != LockVersion || out.Profile != in.Profile || out.Harness != in.Harness {
 		t.Errorf("scalar mismatch: got %+v", out)
 	}
 	if len(out.Artifacts) != 1 || out.Artifacts[0].ID != "finance/ap/pay-invoice" {
@@ -196,21 +196,23 @@ func TestLockFile_WriteLeavesTheCallersValueUntouched(t *testing.T) {
 	}
 }
 
-// Spec: §7.5.3 — the lock schema carries `version: 1`. A caller that leaves the
-// field unset gets the schema version in the written file. WriteLock stamps it
-// on the copy it marshals, so the file is the only place the default is
-// observable.
+// Spec: §7.5.3 — the lock schema carries `version: 2`. A caller that leaves the
+// field unset, and one that passes a version 1 lock it read, get the schema
+// version in the written file. WriteLock stamps it on the copy it marshals, so
+// the file is the only place the default is observable.
 func TestLockFile_WriteFillsInTheSchemaVersion(t *testing.T) {
 	t.Parallel()
-	target := t.TempDir()
-	if err := WriteLock(target, &LockFile{Target: target}); err != nil {
-		t.Fatalf("WriteLock: %v", err)
-	}
-	out, err := ReadLock(target)
-	if err != nil {
-		t.Fatalf("ReadLock: %v", err)
-	}
-	if out.Version != 1 {
-		t.Errorf("written version = %d, want 1", out.Version)
+	for _, in := range []int{0, 1} {
+		target := t.TempDir()
+		if err := WriteLock(target, &LockFile{Version: in, Target: target}); err != nil {
+			t.Fatalf("WriteLock: %v", err)
+		}
+		out, err := ReadLock(target)
+		if err != nil {
+			t.Fatalf("ReadLock: %v", err)
+		}
+		if out.Version != LockVersion {
+			t.Errorf("written version from %d = %d, want %d", in, out.Version, LockVersion)
+		}
 	}
 }

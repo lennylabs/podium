@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
 	"sort"
 	"strings"
@@ -229,13 +228,5 @@ func LayerContent(l Layer) (attest.Layer, error) {
 //
 // Spec: §4.2, §4.7.6
 func LayerRecords(l Layer) ([]ArtifactRecord, fs.FS, error) {
-	root, err := layerRoot(l)
-	if err != nil {
-		return nil, nil, err
-	}
-	records, err := walkLayer(l)
-	if err != nil {
-		return nil, nil, err
-	}
-	return records, os.DirFS(root), nil
+	return walkLayer(l)
 }

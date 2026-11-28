@@ -10,6 +10,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"maps"
 	"net/http"
 	"os"
@@ -20,6 +21,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/pkg/adapter"
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/layer"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/materialize"
@@ -121,6 +123,13 @@ type Options struct {
 	// drops (§13.11.3): keep it (the zero value) or remove it. A server
 	// source reports no drop, so the setting has no effect there.
 	OnUnparseable OnUnparseable
+	// Attestation resolves the §4.7.11 consumer trust policy of the sync
+	// (§7.5 Author attestation). It is called once, at the start of the
+	// effective-view resolution of either source, before the first registry
+	// request or filesystem read. A nil Attestation is a sync with no
+	// policy: the well-formed rule and the request binding still run, and
+	// every ID resolves to none.
+	Attestation AttestationFunc
 }
 
 // materialRecord is a source-neutral artifact ready for the HarnessAdapter.
@@ -155,6 +164,20 @@ type materialRecord struct {
 	// recorded hash and falls back to contentHashFor.
 	// spec: §14.11, §7.5.3.
 	ContentHash string
+	// refusal is the §4.7.11 well-formed rule or request binding refusal of
+	// the record at load. A refused record carries nothing else that a run
+	// reads, and a run that selects it skips it (§7.5).
+	refusal error
+	// check runs the §4.7.11 attestation check of the record, nil for a
+	// workspace overlay record, which is exempt (§6.4).
+	check recordCheck
+	// PackageDigest and Attestations are the lock version 2 members
+	// (§7.5.3). The check sets them when it accepts a bundle: the package
+	// digest a subject of that bundle lists, which is the walk's digest of
+	// a filesystem-source package and the candidate of a served record, so
+	// neither is ever a served value.
+	PackageDigest string
+	Attestations  []LockAttestation
 }
 
 // Result describes what a Run actually did. Used by callers (CLI, tests)
@@ -194,6 +217,14 @@ type Result struct {
 	// writes nothing and leaves Changed false.
 	// Spec: §7.5.2
 	Changed bool
+	// Warnings are the §4.7.11 warning texts of the run: a failure of the
+	// attestation check under warn, an overlay artifact that is not
+	// applied, and an overlay package the well-formed rule skips. Callers
+	// write each on standard error (§7.5).
+	Warnings []string
+	// SignerChanges lists each checked artifact whose signers differ from
+	// those its prior lock entries record (§7.5.3).
+	SignerChanges []SignerChange
 }
 
 // ArtifactResult is one artifact's contribution to the materialized output.
@@ -217,6 +248,10 @@ type ArtifactResult struct {
 	// counts such a skill as an entry (§7.5.8). It is not part of the
 	// --json artifacts array.
 	UserInvoked bool
+	// PackageDigest and Attestations are the lock version 2 members each
+	// lock entry of the artifact records (§7.5.3).
+	PackageDigest string
+	Attestations  []LockAttestation
 }
 
 // listingEntry returns the §7.5.8 listing type and description of rec. A
@@ -285,7 +320,7 @@ func Run(opts Options) (*Result, error) {
 	// §7.5.2 dispatch: a URL routes to the Podium server, every other value
 	// to the local filesystem registry. The full effective view is resolved
 	// first; scope and toggles narrow it below.
-	all, dropped, err := resolveRecords(opts)
+	view, err := resolveRecords(opts)
 	if err != nil {
 		var unreachable *serverUnreachableError
 		if errors.As(err, &unreachable) {
@@ -328,9 +363,13 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	// §7.5.1 scope + §7.5.5 toggles select the records to materialize.
-	records := selectRecords(opts.Scope, all, toggles)
-
-	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope, Dropped: dropped}
+	res := &Result{Adapter: a.ID(), Target: opts.Target, Profile: opts.Profile, Scope: opts.Scope,
+		Dropped: view.dropped, Warnings: view.warnings}
+	// Spec: §7.5 — the well-formed rule, the request binding, and the
+	// attestation check decide each selected record before anything is
+	// written. A refused record is skipped and its previous output kept.
+	records, refused := checkSelected(context.Background(), selectRecords(opts.Scope, view.records, toggles), priorLock, view.att, res)
+	all := withoutIDs(view.records, refused)
 
 	allFiles := []adapter.File{}
 	for _, rec := range records {
@@ -384,6 +423,8 @@ func Run(opts Options) (*Result, error) {
 			ListingType:        listingType,
 			ListingDescription: listingDesc,
 			UserInvoked:        rec.Artifact.UserInvoked(),
+			PackageDigest:      rec.PackageDigest,
+			Attestations:       rec.Attestations,
 		})
 		allFiles = append(allFiles, out...)
 	}
@@ -397,7 +438,7 @@ func Run(opts Options) (*Result, error) {
 	// known, because an artifact that now writes a kept path ends the keep, and
 	// before the dry-run return, so a dry run reports the drops a real run
 	// would keep.
-	kept := keepPreviousOutput(dropped, priorLock, keepRun{
+	kept := keepPreviousOutput(res.Dropped, priorLock, keepRun{
 		adapterID: a.ID(),
 		policy:    opts.OnUnparseable,
 		scope:     opts.Scope,
@@ -405,6 +446,7 @@ func Run(opts Options) (*Result, error) {
 		resolved:  all,
 		files:     allFiles,
 		target:    opts.Target,
+		refused:   refused,
 	})
 
 	if opts.DryRun {
@@ -471,6 +513,8 @@ func Run(opts Options) (*Result, error) {
 				MaterializedPath: p,
 				FileHash:         wholeFileHash(fileMerge[p], fileHashes[p]),
 				Merge:            fileMerge[p],
+				PackageDigest:    art.PackageDigest,
+				Attestations:     art.Attestations,
 			})
 		}
 	}
@@ -579,37 +623,69 @@ func offlineFirstNoop(opts Options, adapterID string) *Result {
 // removed-type rule (§13.11.3). A
 // server source contributes none, because ingest already rejected the artifact
 // (§7.3.1).
-func resolveRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
-	var records []materialRecord
-	var dropped []layer.Drop
+func resolveRecords(opts Options) (resolvedView, error) {
+	var view resolvedView
 	var err error
 	if isServerSource(opts.RegistryPath) {
 		// Spec: §4.7.10, §7.5 — this is the one resolution point of the
-		// delivery check. It runs before the first registry request, so a
-		// resolution refusal sends nothing, and it runs whenever a server
-		// source is loaded, including an effective view that lists no artifact.
+		// delivery check and of the consumer trust policy. It runs before
+		// the first registry request, so a resolution refusal sends
+		// nothing, and it runs whenever a server source is loaded,
+		// including an effective view that lists no artifact.
 		check, cerr := deliveryCheck(opts.Delivery)
 		if cerr != nil {
-			return nil, nil, cerr
+			return view, cerr
 		}
-		records, err = fetchServerRecords(context.Background(), opts, check)
+		if view.att, err = resolveAttestation(opts.Attestation); err != nil {
+			return view, err
+		}
+		view.records, err = fetchServerRecords(context.Background(), opts, check, view.att)
 	} else {
-		records, dropped, err = filesystemRecords(opts)
+		// Spec: §7.5, §13.11.3 — a filesystem source resolves the policy
+		// before its first read of the layer directories.
+		if view.att, err = resolveAttestation(opts.Attestation); err != nil {
+			return view, err
+		}
+		view.records, view.dropped, err = filesystemRecords(opts, view.att)
 	}
 	if err != nil {
-		return nil, nil, err
+		return view, err
 	}
 	// §6.4 workspace overlay: records under OverlayPath sit at the highest
 	// precedence for both registry sources. The consumer (podium sync) merges
 	// the overlay client-side because the developer's overlay directory is
 	// local; a server source has no access to it.
 	if opts.OverlayPath != "" {
-		records, err = applyOverlay(records, opts.OverlayPath)
+		view.records, view.warnings, err = applyOverlay(view.records, opts.OverlayPath, view.att)
 		if err != nil {
-			return nil, nil, err
+			return view, err
 		}
 	}
-	return records, dropped, nil
+	return view, nil
+}
+
+// resolvedView is the effective view a load resolved: the records, the
+// artifacts a filesystem-source composition dropped, the warnings of the
+// workspace overlay, and the consumer trust policy the load resolved.
+type resolvedView struct {
+	records  []materialRecord
+	dropped  []layer.Drop
+	warnings []string
+	att      *Attestation
+}
+
+// withoutIDs returns the records whose ID ids does not hold.
+func withoutIDs(records []materialRecord, ids map[string]bool) []materialRecord {
+	if len(ids) == 0 {
+		return records
+	}
+	out := make([]materialRecord, 0, len(records))
+	for _, rec := range records {
+		if !ids[rec.ID] {
+			out = append(out, rec)
+		}
+	}
+	return out
 }
 
 // applyOverlay resolves the §6.4 workspace overlay and merges its records on
@@ -617,14 +693,20 @@ func resolveRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 // replaces the same-ID base record (or appends when no base record matches),
 // per the §6.4 overlay exception, and the overlay applies no ingest rule.
 // ErrNoOverlay (the directory is absent) leaves base unchanged.
-func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, error) {
+//
+// Each overlay package meets the §4.7.11 well-formed rule, and an overlay
+// artifact applies only to the IDs att admits it for (§7.5 Author
+// attestation). A package that is skipped leaves the base record of its ID
+// in place and is returned as a warning.
+func applyOverlay(base []materialRecord, overlayPath string, att *Attestation) ([]materialRecord, []string, error) {
 	overlayRecords, oerr := overlay.Filesystem{Path: overlayPath}.Resolve(context.Background())
 	if oerr != nil && !errors.Is(oerr, overlay.ErrNoOverlay) {
-		return nil, fmt.Errorf("overlay: %w", oerr)
+		return nil, nil, fmt.Errorf("overlay: %w", oerr)
 	}
 	if len(overlayRecords) == 0 {
-		return base, nil
+		return base, nil, nil
 	}
+	var warnings []string
 	idx := map[string]int{}
 	for i, rec := range base {
 		idx[rec.ID] = i
@@ -632,6 +714,16 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 	out := make([]materialRecord, len(base))
 	copy(out, base)
 	for _, rec := range overlayRecords {
+		if err := wellFormedPackage(rec.ID, rec.Resources); err != nil {
+			warnings = append(warnings, fmt.Sprintf("overlay package %s skipped: %v", attest.ReportString(rec.ID), err))
+			continue
+		}
+		if ok, warning := att.overlayApplies(rec.ID); !ok {
+			if warning != "" {
+				warnings = append(warnings, warning)
+			}
+			continue
+		}
 		mr := materialRecord{
 			ID:            rec.ID,
 			LayerID:       rec.Layer.ID,
@@ -648,7 +740,7 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 		idx[rec.ID] = len(out)
 		out = append(out, mr)
 	}
-	return out, nil
+	return out, warnings, nil
 }
 
 // filesystemRecords reads the filesystem registry and converts the result to
@@ -656,11 +748,12 @@ func applyOverlay(base []materialRecord, overlayPath string) ([]materialRecord, 
 // (resolveRecords) so both registry sources honor it identically. The
 // second return lists the artifacts dropped under the §4.6 collision rule,
 // the §4.6 no-inheritance rule, or the §4.1 removed-type rule (§13.11.3).
-func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
+func filesystemRecords(opts Options, att *Attestation) ([]materialRecord, []layer.Drop, error) {
 	reg, err := filesystem.Open(opts.RegistryPath)
 	if err != nil {
 		return nil, nil, err
 	}
+	layers := map[string]*fsLayer{}
 	// spec: §13.11.3 — the filesystem source runs the same §4.6 collision
 	// rule as the server, so materialization produces equivalent output for
 	// the same artifact directory (the §13.11.6 migration equivalence). A
@@ -673,14 +766,20 @@ func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 	records, err := reg.Walk(filesystem.WalkOptions{
 		CollisionPolicy: filesystem.CollisionPolicyDrop,
 		OnDrop:          func(d layer.Drop) { dropped = append(dropped, d) },
+		// Spec: §13.11.3 — the layer digest lists the packages the walk
+		// read, so the digested bytes are the bytes the run writes.
+		OnLayer: func(l filesystem.Layer, all []filesystem.ArtifactRecord, fsys fs.FS) {
+			layers[l.ID] = &fsLayer{layer: l, records: all, fsys: fsys}
+		},
 	})
 	if err != nil {
 		return nil, nil, err
 	}
 
+	checker := att.Checker(nil)
 	out := make([]materialRecord, 0, len(records))
 	for _, rec := range records {
-		out = append(out, materialRecord{
+		mr := materialRecord{
 			ID:            rec.ID,
 			LayerID:       rec.Layer.ID,
 			Artifact:      rec.Artifact,
@@ -688,7 +787,13 @@ func filesystemRecords(opts Options) ([]materialRecord, []layer.Drop, error) {
 			AuthoredBytes: rec.AuthoredBytes,
 			SkillBytes:    rec.SkillBytes,
 			Resources:     rec.Resources,
-		})
+		}
+		// Spec: §13.11.3 — the well-formed rule applies to every package
+		// under every mode; the check runs on the packages a run selects.
+		if mr.refusal = wellFormedPackage(rec.ID, rec.Resources); mr.refusal == nil {
+			mr.check = localCheck(checker, att, layers[rec.Layer.ID], rec)
+		}
+		out = append(out, mr)
 	}
 	return out, dropped, nil
 }

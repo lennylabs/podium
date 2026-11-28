@@ -39,6 +39,10 @@ const (
 	ConstraintNoRule          = "no_rule"
 	ConstraintNoRequirements  = "no_requirements"
 	ConstraintUserRule        = "user_rule"
+	ConstraintLayerDigest     = "layer_digest"
+	ConstraintUnreadable      = "unreadable"
+	ConstraintPinnedSigner    = "pinned_signer"
+	ConstraintOverlay         = "overlay"
 )
 
 // Failure is a refusal or a warning of the consumer procedure (§4.7.11): a
@@ -101,4 +105,12 @@ func FailureOf(err error) (*Failure, bool) {
 		return f, true
 	}
 	return nil, false
+}
+
+// NewFailure builds a Failure for a consumer condition that the consumer
+// decides itself, such as the signer comparison of podium sync (§7.5.3) or
+// an overlay artifact that is not applied (§7.5). detail is Podium's own
+// text.
+func NewFailure(code, constraint, detail string) *Failure {
+	return fail(code, constraint, detail, nil)
 }

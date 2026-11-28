@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/lennylabs/podium/internal/buildinfo"
+	"github.com/lennylabs/podium/pkg/attest"
 	"github.com/lennylabs/podium/pkg/audit"
 	"github.com/lennylabs/podium/pkg/manifest"
 	"github.com/lennylabs/podium/pkg/objectstore"
@@ -67,8 +68,16 @@ func ClientHeaderValue(adapterID string) string {
 // server's server-source delivery (§2.2): the served frontmatter becomes
 // ARTIFACT.md, a skill's body is appended for SKILL.md, and bundled
 // resources are decoded inline or fetched from their §7.2 presigned URLs.
-// Every record passes check before it is returned.
-func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryCheck) ([]materialRecord, error) {
+// Every record passes check before it is returned. An entry whose ID breaks
+// the §4.7.11 well-formed rule is not requested, and a record that breaks
+// the well-formed rule or the request binding is returned refused, so a run
+// that selects it skips it; every other failure of a load fails the call.
+// Each other record carries the attestation check that a run applies when
+// it selects the record.
+//
+// Spec: §4.7.10, §4.7.11 (Well-formed requests and records, Request
+// binding), §7.5
+func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryCheck, att *Attestation) ([]materialRecord, error) {
 	client := opts.HTTPClient
 	if client == nil {
 		client = &http.Client{Timeout: defaultServerTimeout}
@@ -82,8 +91,16 @@ func fetchServerRecords(ctx context.Context, opts Options, check *sign.DeliveryC
 	}
 
 	f := serverFetcher{client: client, base: base, token: opts.Token, clientHeader: clientHeader, check: check}
+	f.attest = att.Checker(attest.HTTPBundleSource{BaseURL: base, Client: client, MaxBytes: att.Limits.MaxBytes,
+		Prepare: func(r *http.Request) { setControlHeaders(r, opts.Token, clientHeader) }})
 	out := make([]materialRecord, 0, len(list.Artifacts))
 	for _, entry := range list.Artifacts {
+		// Spec: §4.7.11 — an ID that breaks the well-formed rule is refused
+		// before it is requested.
+		if err := attest.CheckRequestedID(entry.ID); err != nil {
+			out = append(out, materialRecord{ID: entry.ID, LayerID: entry.Layer, refusal: err})
+			continue
+		}
 		rec, err := f.fetchServerRecord(ctx, entry.ID, entry.Layer)
 		if err != nil {
 			return nil, fmt.Errorf("load_artifact %s: %w", entry.ID, err)
@@ -102,6 +119,9 @@ type serverFetcher struct {
 	token        string
 	clientHeader string
 	check        *sign.DeliveryCheck
+	// attest runs the §4.7.11 attestation check of a loaded record, with
+	// bundles from the registry's bundle endpoint.
+	attest *attest.Checker
 }
 
 // fetchServerRecord loads one artifact over HTTP, verifies it by the §4.7.10
@@ -134,7 +154,28 @@ func (f serverFetcher) fetchServerRecord(ctx context.Context, id, layerID string
 	if err := f.check.Verify(ctx, served.Record, served.Hash, served.Signature); err != nil {
 		return materialRecord{}, err
 	}
-	return recordFromServed(served.Record, id, layerID, resources), nil
+	// Spec: §4.7.11 — after §4.7.10 step 7 the record answers the request
+	// for id, or it is refused and nothing of it is read.
+	if err := bindServed(id, served.Record); err != nil {
+		return materialRecord{ID: id, LayerID: layerID, refusal: err}, nil
+	}
+	rec := recordFromServed(served.Record, id, layerID, resources)
+	checker := f.attest
+	rec.check = func(ctx context.Context) (attest.Result, error) {
+		return checker.Verify(ctx, attest.Delivery{Request: attest.Request{ID: id}, Served: served})
+	}
+	return rec, nil
+}
+
+// bindServed applies the §4.7.11 well-formed rule to the resource paths of
+// a served record and the request binding of a latest request for id.
+//
+// Spec: §4.7.11 (Well-formed requests and records, Request binding)
+func bindServed(id string, rec version.DeliveryRecord) error {
+	if err := attest.CheckRecordPaths(rec); err != nil {
+		return err
+	}
+	return attest.BindRequest(attest.Request{ID: id}, rec)
 }
 
 // servedLayer reads the layer member by exact name. An absent member or a
@@ -271,12 +312,7 @@ func httpGetBody(ctx context.Context, client *http.Client, rawURL, token, client
 	if err != nil {
 		return nil, err
 	}
-	if token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	if clientHeader != "" {
-		req.Header.Set(audit.ClientHeader, clientHeader)
-	}
+	setControlHeaders(req, token, clientHeader)
 	resp, err := client.Do(req)
 	if err != nil {
 		// A transport-level failure (the registry could not be reached) is the
@@ -297,6 +333,17 @@ func httpGetBody(ctx context.Context, client *http.Client, rawURL, token, client
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return body, nil
+}
+
+// setControlHeaders attaches the caller credential and the §7.2.2
+// X-Podium-Client value of a control-plane request, each when non-empty.
+func setControlHeaders(req *http.Request, token, clientHeader string) {
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+	if clientHeader != "" {
+		req.Header.Set(audit.ClientHeader, clientHeader)
+	}
 }
 
 // fetchBytes downloads a large-resource URL with a bounded read. The §13.11
@@ -331,4 +378,36 @@ func fetchBytes(ctx context.Context, client *http.Client, rawURL, token string) 
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	return io.ReadAll(io.LimitReader(resp.Body, 256<<20))
+}
+
+// DecodeServed applies the §4.7.10 decoding to a load_artifact response body
+// and completes the record with a document that manifest_body_url links,
+// fetched with client and token and checked against the link's content
+// hash. It runs no delivery check, no request binding, and no attestation
+// check, which `podium verify` reports apart (§4.7.9). A nil client uses one
+// bounded by the server-source timeout.
+//
+// Spec: §4.7.9, §4.7.10
+func DecodeServed(ctx context.Context, client *http.Client, token string, body []byte) (version.Served, error) {
+	served, err := version.ParseLoadResponse(body)
+	if err != nil {
+		return version.Served{}, fmt.Errorf("materialize.content_hash_mismatch: %w", err)
+	}
+	if client == nil {
+		client = &http.Client{Timeout: defaultServerTimeout}
+	}
+	f := serverFetcher{client: client, token: token}
+	if err := f.restoreManifestDocument(ctx, &served); err != nil {
+		return version.Served{}, err
+	}
+	return served, nil
+}
+
+// BindServed applies the §4.7.11 well-formed rule to the resource paths of a
+// served record and the request binding of a latest request for id, as a
+// server-source sync does for each record it loads.
+//
+// Spec: §4.7.11 (Well-formed requests and records, Request binding)
+func BindServed(id string, rec version.DeliveryRecord) error {
+	return bindServed(id, rec)
 }
