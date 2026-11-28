@@ -18,6 +18,9 @@ import (
 //
 // Spec: §4.7.11 (User home)
 func accountHome() (string, error) {
+	// The failure branches need a user ID that the account database does
+	// not list, which a test process cannot become; the e2e tests reach the
+	// failure through the test seam instead.
 	u, err := user.LookupId(strconv.Itoa(os.Getuid()))
 	if err != nil {
 		return "", err

@@ -108,3 +108,16 @@ func TestCheckKnownKeys(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §7.5.2 — the decoder and the key check follow YAML aliases, as the
+// rest of the file's decoding does.
+func TestAttestationDefaults_Aliases(t *testing.T) {
+	t.Parallel()
+	got, err := decodeDefaults(t, "x: &mode require\nroot: &r skills\ndefaults:\n  attestation:\n    policy: *mode\n    layer_roots: {team: *r}\n")
+	if err != nil || got.Policy != "require" || got.LayerRoots["team"] != "skills" {
+		t.Fatalf("decode = %+v, %v", got, err)
+	}
+	if err := CheckKnownKeys([]byte("listing_budgets: &a {}\ndefaults: *a\n")); err != nil {
+		t.Errorf("an aliased defaults block: %v", err)
+	}
+}

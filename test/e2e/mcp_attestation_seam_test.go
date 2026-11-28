@@ -169,3 +169,14 @@ func TestMCPAttestation_ReleaseBuildRefusesTestFlags(t *testing.T) {
 		}
 	}
 }
+
+// Spec: §4.7.11 (Test seam) — a test flag with no value is a usage error of
+// the podiumtest build.
+func TestMCPAttestation_TestFlagNeedsAValue(t *testing.T) {
+	t.Parallel()
+	res := runSeamMCP(t, []string{"PODIUM_REGISTRY=http://127.0.0.1:1"}, "finance/pay", "--test-account-home")
+	cliWantExit(t, res, 2, "podium-mcp --test-account-home with no value")
+	if !strings.Contains(res.Stderr, "flag needs an argument: -test-account-home") {
+		t.Errorf("stderr = %s", res.Stderr)
+	}
+}

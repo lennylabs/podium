@@ -424,3 +424,59 @@ func TestConsumerAttestation_FetchTimeoutAndRefreshFloor(t *testing.T) {
 		wantPolicyRefusal(t, err, "PODIUM_")
 	}
 }
+
+// Spec: §4.7.11 (User sources of the MCP server) — the remaining policy
+// branches: a machine file whose attestation block does not decode refuses
+// the start, a user root file that fails the public-good rule refuses it,
+// and a repository rule on public-good with no account home refreshes in
+// memory.
+func TestConsumerAttestation_MoreSourceBranches(t *testing.T) {
+	t.Parallel()
+	m := newConsumerEnv(t)
+	writeFiles(t, m.machineDir, map[string]string{"sync.yaml": "defaults:\n  attestation:\n    polcy: require\n"})
+	_, err := m.load()
+	wantPolicyRefusal(t, err, "polcy")
+
+	u := newConsumerEnv(t)
+	writeFiles(t, u.home, map[string]string{".podium/p.json": publicGoodPolicy, ".podium/gh.json": string(sh.New(t).TrustedRootJSON(sh.GitHubStyleRoot()...))})
+	u.writeUserSync(t, "defaults:\n  attestation:\n    policy_file: p.json\n    trusted_root_file: gh.json\n")
+	_, err = u.load()
+	wantPolicyRefusal(t, err, "gh.json")
+
+	n := newConsumerEnv(t)
+	n.home, n.homeErr = "", os.ErrNotExist
+	repo := filepath.Join(t.TempDir(), "repo.json")
+	writeFiles(t, filepath.Dir(repo), map[string]string{"repo.json": publicGoodPolicy})
+	n.env[envAttestationPolicyFile] = repo
+	if a := n.mustLoad(t); len(a.refreshers) != 1 {
+		t.Errorf("refreshers = %d, want the in-memory user root", len(a.refreshers))
+	}
+}
+
+// Spec: §4.7.11 (Attestation check, step 3), §6.1.1, §6.2 — a cached
+// deprecated record carries its lifecycle members to the check, a result
+// that is no map passes through the notices unchanged, the flags of the
+// policy set its settings, and an empty scope reads no sync.yaml.
+func TestAttestationHelpers(t *testing.T) {
+	t.Parallel()
+	got := servedForCheck(loadArtifactResponse{Deprecated: true, ReplacedBy: "finance/new"})
+	if string(got.Members["deprecated"]) != "true" || string(got.Members["replaced_by"]) != `"finance/new"` {
+		t.Errorf("members = %v", got.Members)
+	}
+	s := newTestServer(t, &config{attestation: &consumerAttestation{notices: []string{"n"}}})
+	if out, ok := s.withLoadNotices(resourcesListResult{}, "x").(resourcesListResult); !ok || out.Resources != nil {
+		t.Errorf("a non-map result changed: %v", out)
+	}
+	c := &config{}
+	applyConfigKV(c, "attestation-policy", "require")
+	applyConfigKV(c, "attestation-policy-file", "p.json")
+	if c.attestationPolicy != "require" || c.attestationPolicyFile != "p.json" {
+		t.Errorf("config = %+v", c)
+	}
+	if got := registryFromSyncYAML("", ""); got != "" {
+		t.Errorf("registryFromSyncYAML with no scope = %q", got)
+	}
+	if !ownWorkspaceFile(filepath.Join(t.TempDir(), "absent", "sync.yaml")) {
+		t.Error("a workspace file that cannot be examined was read as foreign")
+	}
+}

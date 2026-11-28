@@ -56,6 +56,8 @@ func (d Defaults) AttestationDefaults() (AttestationDefaults, error) {
 		return out, nil
 	}
 	var block yamlNode
+	// yamlNode keeps any node and returns no error, so this guard is
+	// unreachable.
 	if err := d.Attestation.Decode(&block); err != nil {
 		return out, fmt.Errorf("defaults.attestation: %w", err)
 	}

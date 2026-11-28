@@ -225,3 +225,47 @@ func TestReadMachineConfig_ChecksTheOpenDescriptor(t *testing.T) {
 	_, err = ReadMachineConfig(opts)
 	wantUnsafe(t, err, "can write the file")
 }
+
+// Spec: §4.7.11 (Machine file) — with no directory named, the reader uses
+// /etc/podium, where an absent file raises nothing.
+func TestReadMachineConfig_PlatformDirectory(t *testing.T) {
+	t.Parallel()
+	if _, err := os.Lstat("/etc/podium/sync.yaml"); err == nil {
+		t.Skip("this host has a machine file")
+	}
+	if mf, err := ReadMachineConfig(MachineFileOptions{}); mf != nil || err != nil {
+		t.Fatalf("ReadMachineConfig = %v, %v", mf, err)
+	}
+}
+
+// Spec: §4.7.11 (Machine file, Check on Unix) — a file the process cannot
+// open, and a file below a directory it cannot search, fail the check
+// rather than read as absent.
+func TestReadMachineConfig_UnreadableFails(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root reads every file")
+	}
+	dir, opts := machineDir(t)
+	p := writeMachine(t, dir, 0o644)
+	if err := os.Chmod(p, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(p, 0o644) })
+	_, err := ReadMachineConfig(opts)
+	wantUnsafe(t, err, "open")
+
+	dir2, opts2 := machineDir(t)
+	sub := filepath.Join(dir2, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeMachine(t, sub, 0o644)
+	if err := os.Chmod(sub, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(sub, 0o755) })
+	opts2.Dir = sub
+	_, err = ReadMachineConfig(opts2)
+	wantUnsafe(t, err, "permission denied")
+}

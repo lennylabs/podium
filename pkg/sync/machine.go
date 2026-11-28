@@ -70,6 +70,8 @@ func ReadMachineConfig(opts MachineFileOptions) (*MachineFile, error) {
 		return nil, err
 	}
 	defer func() { _ = f.Close() }()
+	// A read of the opened regular file fails only on an I/O error, which
+	// no test arranges.
 	data, err := io.ReadAll(io.LimitReader(f, maxMachineConfigBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("%w: read %s: %v", ErrMachineFileUnsafe, path, err)

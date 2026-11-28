@@ -143,3 +143,41 @@ func TestTUFRoot_CacheWriteFailureRefreshesInMemory(t *testing.T) {
 		t.Errorf("the unwritable TUF cache holds %d entries", len(entries))
 	}
 }
+
+// Spec: §4.7.11 (Trusted root refresh) — a copy whose cached TUF root is
+// the next version of the embedded one, signed by its keys, verifies; one
+// that rotated two versions past the embedded root counts as no copy until a
+// binary that embeds a later root reads it.
+func TestTUFRoot_CopyAcrossARootRotation(t *testing.T) {
+	t.Parallel()
+	for rotations, want := range map[int]sign.RootOrigin{1: sign.RootFromDisk, 2: sign.RootEmbedded} {
+		f := newTUFFixture(t)
+		for range rotations {
+			f.repo.RotateRoot()
+		}
+		if err := f.source(t, f.config(time.Time{})).Refresh(context.Background()); err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+		if got := f.source(t, f.config(time.Time{})).Status().Origin; got != want {
+			t.Errorf("%d rotations: origin %s, want %s", rotations, got, want)
+		}
+	}
+}
+
+// Spec: §4.7.11 (Trusted root refresh) — cached metadata that does not
+// parse counts as no copy.
+func TestTUFRoot_CopyBesideMetadataThatDoesNotParse(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"root.json", "timestamp.json", "snapshot.json", "targets.json"} {
+		f := newTUFFixture(t)
+		if err := f.source(t, f.config(time.Time{})).Refresh(context.Background()); err != nil {
+			t.Fatalf("Refresh: %v", err)
+		}
+		if err := os.WriteFile(filepath.Join(f.dir, tuf.URLToPath(f.repo.URL()), name), []byte("{"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if got := f.source(t, f.config(time.Time{})).Status().Origin; got != sign.RootEmbedded {
+			t.Errorf("%s: origin %s, want embedded", name, got)
+		}
+	}
+}

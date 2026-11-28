@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/theupdateframework/go-tuf/v2/metadata"
+
 	"github.com/lennylabs/podium/internal/testharness/tufharness"
 )
 
@@ -61,6 +63,18 @@ func TestCachedTUFRoot(t *testing.T) {
 	}
 	if err := metaMatches(nil, 1, nil); err == nil {
 		t.Error("a missing meta entry matched")
+	}
+	if err := metaMatches(&metadata.MetaFiles{Version: 2}, 1, nil); err == nil {
+		t.Error("another version matched")
+	}
+	if err := metaMatches(&metadata.MetaFiles{Version: 1, Length: 3}, 1, []byte("ab")); err == nil {
+		t.Error("another length matched")
+	}
+	if err := metaMatches(&metadata.MetaFiles{Version: 1}, 1, []byte("ab")); err != nil {
+		t.Errorf("a version-only entry: %v", err)
+	}
+	if _, err := cachedTUFRoot(embedded, read([]byte("{"))); err == nil {
+		t.Error("a cached root that does not parse was used")
 	}
 }
 

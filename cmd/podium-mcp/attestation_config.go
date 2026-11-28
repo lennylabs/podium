@@ -149,6 +149,8 @@ func loadConsumerAttestation(in attestationInputs) (*consumerAttestation, error)
 	if err := b.userSources(); err != nil {
 		return nil, err
 	}
+	// Every source has a class and a parsed mode, so NewPolicy refuses none
+	// of them; the guard keeps a later source kind from passing silently.
 	b.out.policy, err = attest.NewPolicy(b.sources...)
 	if err != nil {
 		return nil, err
@@ -426,6 +428,9 @@ func (b *policyBuilder) userPublicGood(owner string, r userRootOf) (sign.Attesta
 	if r.rootFile != "" {
 		return publicGoodFromFile(r.rootFile, b.in.now)
 	}
+	// userRefresher fails only on a configuration error of the built-in
+	// defaults or the embedded root, which TestEmbeddedPublicGoodRoot keeps
+	// valid.
 	src, err := b.userRefresher()
 	if err != nil {
 		return sign.AttestationInstance{}, err
@@ -479,6 +484,8 @@ func (b *policyBuilder) repositoryPublicGood() (sign.AttestationInstance, error)
 		} else {
 			cfg.Dir, cfg.ReadOnly = filepath.Join(b.in.home, rootCopyDir), true
 		}
+		// readRepoRootSettings already refused every setting that
+		// NewTUFAttestationRoot refuses, so this guard is unreachable.
 		src, err := sign.NewTUFAttestationRoot(cfg)
 		if err != nil {
 			return inst, policyRefusal("the public-good root settings: %v", err)

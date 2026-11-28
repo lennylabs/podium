@@ -100,6 +100,33 @@ func (r *Repo) SetMode(m Mode) { r.mode.Store(int32(m)) }
 // Requests counts the requests the server received.
 func (r *Repo) Requests() int64 { return r.hits.Load() }
 
+// RotateRoot publishes the next version of the root, with the same keys
+// and signed by them, as <version>.root.json, so a client that refreshes
+// walks one step of the root chain. It returns the new version.
+func (r *Repo) RotateRoot() int64 {
+	r.tb.Helper()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	latest := r.rootJSON
+	for v := int64(2); ; v++ {
+		b, ok := r.files[fmt.Sprintf("/%d.root.json", v)]
+		if !ok {
+			break
+		}
+		latest = b
+	}
+	root, err := metadata.Root().FromBytes(latest)
+	must(r.tb, err)
+	root.Signed.Version++
+	root.ClearSignatures()
+	_, err = root.Sign(r.signer)
+	must(r.tb, err)
+	raw, err := root.ToBytes(false)
+	must(r.tb, err)
+	r.files[fmt.Sprintf("/%d.root.json", root.Signed.Version)] = raw
+	return root.Signed.Version
+}
+
 // Publish replaces the trusted_root.json target with trustedRoot under new
 // targets, snapshot, and timestamp versions that expire in a year.
 func (r *Repo) Publish(trustedRoot []byte) {

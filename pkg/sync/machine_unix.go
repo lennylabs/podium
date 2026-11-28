@@ -38,10 +38,15 @@ func openMachineFile(dir string, opts MachineFileOptions) (*os.File, string, err
 		return nil, path, nil
 	}
 	abs, err := filepath.Abs(path)
+	// filepath.Abs fails only when the working directory cannot be read,
+	// which no test arranges; the check then fails closed.
 	if err != nil {
 		return nil, path, unsafeFile(path, "resolve: %v", err)
 	}
 	resolved, err := resolveChecked(abs, opts, 0)
+	// The file existed at the os.Stat above; it is absent here, or at the
+	// open below, only when it is removed in between, which no test can
+	// time.
 	if absentFile(err) {
 		return nil, path, nil
 	}
@@ -76,6 +81,8 @@ func resolveChecked(p string, opts MachineFileOptions, hops int) (string, error)
 		return "", unsafeFile(p, "too many symbolic links")
 	}
 	cur := string(filepath.Separator)
+	// The root directory fails the check only on a host whose / another
+	// user can write, which no test host is.
 	if err := checkPathDir(cur, opts); err != nil {
 		return "", err
 	}
@@ -84,6 +91,8 @@ func resolveChecked(p string, opts MachineFileOptions, hops int) (string, error)
 		next := filepath.Join(cur, c)
 		fi, err := os.Lstat(next)
 		if err != nil {
+			// A component absent here was present at the os.Stat of the
+			// caller, so it was removed in between.
 			if absentFile(err) {
 				return "", err
 			}
@@ -92,10 +101,14 @@ func resolveChecked(p string, opts MachineFileOptions, hops int) (string, error)
 		last := i == len(comps)-1
 		switch {
 		case fi.Mode()&fs.ModeSymlink != 0:
-			// The directory that holds the link was checked as cur.
+			// The directory that holds the link was checked as cur. A link
+			// owned by another user fails here; a test that is not root
+			// cannot create one.
 			if err := checkOwner(next, fi, opts); err != nil {
 				return "", err
 			}
+			// Readlink fails only when the link is replaced after the
+			// Lstat above.
 			target, err := os.Readlink(next)
 			if err != nil {
 				return "", unsafeFile(next, "read link: %v", err)
@@ -115,11 +128,14 @@ func resolveChecked(p string, opts MachineFileOptions, hops int) (string, error)
 		}
 		cur = next
 	}
+	// Unreachable: p names a file below its directory, so the last
+	// component returns from the loop.
 	return cur, nil
 }
 
 // checkPathDir checks one directory on the way to the file.
 func checkPathDir(dir string, opts MachineFileOptions) error {
+	// dir was read by the walk just before; an error here is a race.
 	fi, err := os.Lstat(dir)
 	if err != nil {
 		return unsafeFile(dir, "%v", err)
@@ -136,6 +152,8 @@ func checkPathDir(dir string, opts MachineFileOptions) error {
 
 // checkOwner checks that root or a trusted user owns a path.
 func checkOwner(path string, fi fs.FileInfo, opts MachineFileOptions) error {
+	// Every Unix file system yields a *syscall.Stat_t, so a missing owner
+	// is unreachable and fails closed.
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	if !ok {
 		return unsafeFile(path, "has no owner")
@@ -149,6 +167,8 @@ func checkOwner(path string, fi fs.FileInfo, opts MachineFileOptions) error {
 // checkOpenFile checks the descriptor of the machine file: a regular file
 // that root or a trusted user owns and that no other user can write.
 func checkOpenFile(fi fs.FileInfo, opts MachineFileOptions) error {
+	// A missing owner is unreachable on Unix, and a file another user owns
+	// cannot be created by a test that is not root; both fail closed.
 	st, ok := fi.Sys().(*syscall.Stat_t)
 	switch {
 	case !fi.Mode().IsRegular():
