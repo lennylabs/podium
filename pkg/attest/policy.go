@@ -443,7 +443,7 @@ func checkPattern(p string) error {
 			// would match nothing, which reads as a rule that protects an
 			// ID and never applies.
 			if why := segmentViolation(seg, true); why != "" {
-				return fmt.Errorf("pattern %q: the segment %q %s, so no requested ID matches it", p, seg, strings.TrimPrefix(why, "holds "))
+				return fmt.Errorf("pattern %q: the segment %q cannot occur in a well-formed requested ID, because such an ID %s, so the pattern matches no ID", p, seg, why)
 			}
 		}
 	}
